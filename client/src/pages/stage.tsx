@@ -3,6 +3,7 @@ import { useParams, useLocation } from "wouter";
 import { ArrowLeft, Settings } from "lucide-react";
 import ChatInterface from "@/components/chat-interface";
 import PromptEditor from "@/components/prompt-editor";
+import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
 import type { Stage } from "@shared/schema";
 
@@ -69,7 +70,10 @@ export default function StagePage() {
         <div className="flex-1 flex flex-col">
           <ChatInterface stage={stage} />
         </div>
-        <PromptEditor stage={stage} />
+        <div className="flex">
+          <InsightsPanel stage={stage} />
+          <PromptEditor stage={stage} />
+        </div>
       </div>
     </div>
   );

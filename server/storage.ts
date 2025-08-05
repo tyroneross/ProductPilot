@@ -64,16 +64,6 @@ export class MemStorage implements IStorage {
         description: defaultStage.description,
         systemPrompt: defaultStage.systemPrompt,
       });
-      
-      // Set first stage as unlocked
-      if (defaultStage.stageNumber === 1) {
-        const stages = Array.from(this.stages.values()).filter(s => s.projectId === id);
-        const firstStage = stages.find(s => s.stageNumber === 1);
-        if (firstStage) {
-          firstStage.isUnlocked = true;
-          this.stages.set(firstStage.id, firstStage);
-        }
-      }
     }
 
     return project;
@@ -120,13 +110,19 @@ export class MemStorage implements IStorage {
   async createStage(insertStage: InsertStage): Promise<Stage> {
     const id = randomUUID();
     const now = new Date();
+    
+    // Find default stage configuration
+    const defaultStage = DEFAULT_STAGES.find(ds => ds.stageNumber === insertStage.stageNumber);
+    
     const stage: Stage = {
       ...insertStage,
       id,
       progress: 0,
-      isUnlocked: insertStage.stageNumber === 1,
+      isUnlocked: true, // All stages unlocked by default now
       outputs: null,
       aiModel: insertStage.aiModel || null,
+      keyInsights: defaultStage?.keyInsights || [],
+      completedInsights: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -143,18 +139,17 @@ export class MemStorage implements IStorage {
       ...updates,
       updatedAt: new Date(),
     };
-    this.stages.set(id, updatedStage);
-
-    // Check if stage is completed and unlock next stage
-    if (updatedStage.progress >= 75) {
-      const projectStages = await this.getStagesByProject(stage.projectId);
-      const nextStage = projectStages.find(s => s.stageNumber === stage.stageNumber + 1);
-      if (nextStage && !nextStage.isUnlocked) {
-        const nextStageUpdate = { ...nextStage, isUnlocked: true };
-        this.stages.set(nextStage.id, nextStageUpdate);
+    
+    // Auto-calculate progress based on completed insights
+    if (updates.completedInsights && stage.keyInsights) {
+      const totalInsights = Array.isArray(stage.keyInsights) ? stage.keyInsights.length : 0;
+      const completedCount = Array.isArray(updates.completedInsights) ? updates.completedInsights.length : 0;
+      if (totalInsights > 0) {
+        updatedStage.progress = Math.round((completedCount / totalInsights) * 100);
       }
     }
-
+    
+    this.stages.set(id, updatedStage);
     return updatedStage;
   }
 

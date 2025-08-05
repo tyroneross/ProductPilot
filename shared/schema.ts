@@ -19,10 +19,12 @@ export const stages = pgTable("stages", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   progress: integer("progress").notNull().default(0), // 0-100
-  isUnlocked: boolean("is_unlocked").notNull().default(false),
+  isUnlocked: boolean("is_unlocked").notNull().default(true), // All stages unlocked by default
   systemPrompt: text("system_prompt").notNull(),
   aiModel: text("ai_model"), // override project model if needed
   outputs: jsonb("outputs"), // structured outputs from the stage
+  keyInsights: jsonb("key_insights"), // required insights for completion
+  completedInsights: jsonb("completed_insights"), // insights marked as complete
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -61,6 +63,8 @@ export const updateStageSchema = createInsertSchema(stages).pick({
   systemPrompt: true,
   aiModel: true,
   outputs: true,
+  keyInsights: true,
+  completedInsights: true,
 }).partial();
 
 export type InsertProject = z.infer<typeof insertProjectSchema>;
@@ -87,6 +91,13 @@ export const DEFAULT_STAGES = [
 
 Ask clarifying questions and ensure all critical aspects are covered before moving to PRD stage.`,
     isUnlocked: true,
+    keyInsights: [
+      "Target user personas identified",
+      "Core use cases defined",
+      "MVP scope clearly outlined",
+      "Success metrics established",
+      "Technical constraints documented"
+    ],
   },
   {
     stageNumber: 2,
@@ -101,7 +112,14 @@ Ask clarifying questions and ensure all critical aspects are covered before movi
 5. Success metrics and KPIs
 
 Structure the output as a professional PRD document.`,
-    isUnlocked: false,
+    isUnlocked: true,
+    keyInsights: [
+      "Executive summary written",
+      "User stories with acceptance criteria",
+      "Feature prioritization matrix",
+      "Technical requirements specified",
+      "KPIs and success metrics defined"
+    ],
   },
   {
     stageNumber: 3,
@@ -116,7 +134,14 @@ Structure the output as a professional PRD document.`,
 5. Security architecture
 
 Provide detailed technical specifications and architectural decisions.`,
-    isUnlocked: false,
+    isUnlocked: true,
+    keyInsights: [
+      "System components defined",
+      "Data flow architecture designed",
+      "Technology stack selected",
+      "Scalability strategy planned",
+      "Security architecture specified"
+    ],
   },
   {
     stageNumber: 4,
@@ -131,7 +156,14 @@ Provide detailed technical specifications and architectural decisions.`,
 5. Deployment instructions
 
 Optimize for the selected AI model and agentic IDE workflow.`,
-    isUnlocked: false,
+    isUnlocked: true,
+    keyInsights: [
+      "System instructions optimized",
+      "Implementation prompts created",
+      "Component-specific prompts",
+      "Testing validation prompts",
+      "Deployment instructions ready"
+    ],
   },
   {
     stageNumber: 5,
@@ -146,6 +178,13 @@ Optimize for the selected AI model and agentic IDE workflow.`,
 5. Monitoring and maintenance plan
 
 Provide actionable steps with clear success criteria.`,
-    isUnlocked: false,
+    isUnlocked: true,
+    keyInsights: [
+      "Development phases defined",
+      "Task breakdown completed",
+      "QA checklist created",
+      "Deployment strategy ready",
+      "Maintenance plan established"
+    ],
   },
 ];
