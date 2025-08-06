@@ -48,10 +48,12 @@ Preferred communication style: Simple, everyday language.
 - **Responsive Design**: Mobile-first approach with 4-column mobile, 12-column desktop grid
 
 ### Development Workflow
-- **Stage-Based Process**: 5 sequential stages with unlocking mechanism based on progress
-- **Progress Tracking**: 0-100% completion scoring with visual indicators
+- **Stage-Based Process**: 5 stages with free navigation between all stages
+- **Discussion Goals**: Left sidebar with question-based goals for quick iteration
+- **Progress Tracking**: 0-100% completion scoring based on completed discussion goals
 - **Context Flow**: Visual representation of stage progression and current status
-- **Chat Integration**: Stage-specific AI assistants with customizable system prompts
+- **Chat Integration**: Stage-specific AI assistants with hidden custom prompts (accessible via settings)
+- **Speed-Optimized**: Single questions per goal unless user wants to elaborate or edit
 
 ## External Dependencies
 

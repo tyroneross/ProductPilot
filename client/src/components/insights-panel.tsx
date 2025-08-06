@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Stage } from "@shared/schema";
@@ -51,26 +51,26 @@ export default function InsightsPanel({ stage }: InsightsPanelProps) {
     : 0;
 
   return (
-    <Card className="w-80 bg-surface-primary">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-body font-medium text-contrast-high flex items-center justify-between">
-          Key Insights
+    <div className="h-full bg-surface-primary p-4">
+      <div className="pb-3">
+        <h3 className="text-body font-medium text-contrast-high flex items-center justify-between">
+          Discussion Goals
           <span className="text-small font-normal text-accent">
             {completionPercentage}%
           </span>
-        </CardTitle>
-        <div className="w-full bg-surface-secondary rounded-full h-2">
+        </h3>
+        <div className="w-full bg-surface-secondary rounded-full h-2 mt-2">
           <div 
             className="bg-accent h-2 rounded-full transition-all duration-300" 
             style={{ width: `${completionPercentage}%` }}
           />
         </div>
-      </CardHeader>
+      </div>
       
-      <CardContent className="space-y-3">
+      <div className="space-y-3">
         {keyInsights.length === 0 ? (
           <p className="text-small text-contrast-medium">
-            No key insights defined for this stage.
+            No discussion goals defined for this stage.
           </p>
         ) : (
           keyInsights.map((insight, index) => {
@@ -78,7 +78,7 @@ export default function InsightsPanel({ stage }: InsightsPanelProps) {
             return (
               <div
                 key={index}
-                className="flex items-start space-x-3 p-2 rounded hover:bg-surface-secondary transition-colors cursor-pointer"
+                className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 hover:bg-surface-secondary transition-colors cursor-pointer"
                 onClick={() => toggleInsight(insight)}
                 data-testid={`insight-${index}`}
               >
@@ -89,28 +89,35 @@ export default function InsightsPanel({ stage }: InsightsPanelProps) {
                     <Circle className="w-4 h-4" />
                   )}
                 </button>
-                <span
-                  className={`text-small leading-relaxed ${
-                    isCompleted 
-                      ? "text-contrast-medium line-through" 
-                      : "text-contrast-high"
-                  }`}
-                >
-                  {insight}
-                </span>
+                <div className="flex-1">
+                  <span
+                    className={`text-small leading-relaxed block ${
+                      isCompleted 
+                        ? "text-contrast-medium line-through" 
+                        : "text-contrast-high"
+                    }`}
+                  >
+                    {insight}
+                  </span>
+                  {!isCompleted && (
+                    <p className="text-xs text-contrast-medium mt-1">
+                      Click to mark as discussed
+                    </p>
+                  )}
+                </div>
               </div>
             );
           })
         )}
         
         {keyInsights.length > 0 && (
-          <div className="pt-2 border-t border-gray-200">
-            <p className="text-xs text-contrast-medium">
-              {completedInsights.length} of {keyInsights.length} insights completed
+          <div className="pt-3 border-t border-gray-200">
+            <p className="text-xs text-contrast-medium text-center">
+              {completedInsights.length} of {keyInsights.length} goals discussed
             </p>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

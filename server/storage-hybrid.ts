@@ -48,11 +48,11 @@ class MemStorage implements IStorage {
         description: "Define core requirements and user needs",
         systemPrompt: "You are a product requirements expert. Help define clear, actionable requirements.",
         keyInsights: [
-          "Core user needs identified",
-          "Technical requirements defined", 
-          "Success metrics established",
-          "Constraints and limitations mapped",
-          "Priority features ranked"
+          "What is the main problem you're solving?",
+          "Who is your target user?", 
+          "What's the core value proposition?",
+          "What are your key success metrics?",
+          "What's your MVP scope?"
         ]
       },
       {
@@ -61,11 +61,11 @@ class MemStorage implements IStorage {
         description: "Create comprehensive Product Requirements Document",
         systemPrompt: "You are a PRD writing specialist. Help create detailed product specifications.",
         keyInsights: [
-          "Product vision articulated",
-          "Feature specifications detailed",
-          "User stories documented",
-          "Technical approach outlined",
-          "Timeline and milestones set"
+          "What are your key user stories?",
+          "What features are absolutely essential?",
+          "How will users interact with your product?",
+          "What's your technical approach?",
+          "What's your launch timeline?"
         ]
       },
       {
@@ -74,11 +74,11 @@ class MemStorage implements IStorage {
         description: "Design system architecture and technical approach",
         systemPrompt: "You are a software architect. Help design scalable, maintainable systems.",
         keyInsights: [
-          "System architecture designed",
-          "Technology stack selected",
-          "Data flow mapped",
-          "Security considerations addressed",
-          "Scalability plan created"
+          "What's your overall system architecture?",
+          "What technology stack will you use?",
+          "How will data flow through your system?",
+          "What are your security requirements?",
+          "How will you handle scaling?"
         ]
       },
       {
@@ -87,11 +87,11 @@ class MemStorage implements IStorage {
         description: "Generate development prompts and implementation guides",
         systemPrompt: "You are a senior developer. Help create clear coding guidelines and prompts.",
         keyInsights: [
-          "Development approach defined",
-          "Code structure planned",
-          "Key components identified",
-          "Integration points mapped",
-          "Testing strategy outlined"
+          "What's your development approach?",
+          "How will you structure your code?",
+          "What are the key components to build?",
+          "What are your integration points?",
+          "What's your testing strategy?"
         ]
       },
       {
@@ -100,11 +100,11 @@ class MemStorage implements IStorage {
         description: "Create step-by-step implementation roadmap",
         systemPrompt: "You are a development team lead. Help create actionable development plans.",
         keyInsights: [
-          "Implementation phases planned",
-          "Development tasks prioritized",
-          "Resource requirements estimated",
-          "Risk mitigation strategies prepared",
-          "Delivery timeline established"
+          "What are your development phases?",
+          "What tasks should you prioritize?",
+          "What resources do you need?",
+          "What are the main risks?",
+          "What's your delivery timeline?"
         ]
       }
     ];

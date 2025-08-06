@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, Settings } from "lucide-react";
 import ChatInterface from "@/components/chat-interface";
-import PromptEditor from "@/components/prompt-editor";
+
 import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
 import type { Stage } from "@shared/schema";
@@ -59,7 +59,13 @@ export default function StagePage() {
           <div className="flex items-center space-x-2">
             <span className="text-small text-contrast-medium">Progress:</span>
             <span className="text-small font-medium text-accent">{stage.progress}%</span>
-            <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px]">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="min-h-[44px] min-w-[44px]"
+              onClick={() => alert('Settings panel coming soon!')}
+              data-testid="button-stage-settings"
+            >
               <Settings className="w-4 h-4" />
             </Button>
           </div>
@@ -67,12 +73,11 @@ export default function StagePage() {
       </header>
 
       <div className="flex-1 flex">
+        <div className="w-80 border-r border-gray-200">
+          <InsightsPanel stage={stage} />
+        </div>
         <div className="flex-1 flex flex-col">
           <ChatInterface stage={stage} />
-        </div>
-        <div className="flex">
-          <InsightsPanel stage={stage} />
-          <PromptEditor stage={stage} />
         </div>
       </div>
     </div>
