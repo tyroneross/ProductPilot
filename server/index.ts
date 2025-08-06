@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { runMigrations } from "./migrate";
 
 const app = express();
 app.use(express.json());
@@ -37,6 +38,13 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Try to run database migrations on startup
+  try {
+    await runMigrations();
+  } catch (error) {
+    console.log("Skipping database migrations due to connection issues. Using in-memory storage.");
+  }
+  
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

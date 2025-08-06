@@ -1,5 +1,6 @@
-import { type Project, type InsertProject, type Stage, type InsertStage, type Message, type InsertMessage, type UpdateStage, DEFAULT_STAGES } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { eq, desc, asc } from "drizzle-orm";
+import { db } from "./db";
+import { projects, stages, messages, type Project, type InsertProject, type Stage, type InsertStage, type Message, type InsertMessage, type UpdateStage, DEFAULT_STAGES } from "@shared/schema";
 
 export interface IStorage {
   // Projects
@@ -22,43 +23,28 @@ export interface IStorage {
   deleteMessagesByStage(stageId: string): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private projects: Map<string, Project>;
-  private stages: Map<string, Stage>;
-  private messages: Map<string, Message>;
-
-  constructor() {
-    this.projects = new Map();
-    this.stages = new Map();
-    this.messages = new Map();
-  }
+export class PostgresStorage implements IStorage {
+  constructor() {}
 
   async getProject(id: string): Promise<Project | undefined> {
-    return this.projects.get(id);
+    const result = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+    return result[0];
   }
 
   async getAllProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values()).sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    return await db.select().from(projects).orderBy(desc(projects.createdAt));
   }
 
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const id = randomUUID();
-    const now = new Date();
-    const project: Project = {
+    const [project] = await db.insert(projects).values({
       ...insertProject,
-      id,
-      createdAt: now,
-      updatedAt: now,
       aiModel: insertProject.aiModel || "claude-sonnet",
-    };
-    this.projects.set(id, project);
+    }).returning();
 
     // Create default stages for the project
     for (const defaultStage of DEFAULT_STAGES) {
       await this.createStage({
-        projectId: id,
+        projectId: project.id,
         stageNumber: defaultStage.stageNumber,
         title: defaultStage.title,
         description: defaultStage.description,
@@ -70,116 +56,87 @@ export class MemStorage implements IStorage {
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
-    const project = this.projects.get(id);
-    if (!project) return undefined;
-
-    const updatedProject = {
-      ...project,
-      ...updates,
-      updatedAt: new Date(),
-    };
-    this.projects.set(id, updatedProject);
+    const [updatedProject] = await db.update(projects)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(projects.id, id))
+      .returning();
     return updatedProject;
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const project = this.projects.get(id);
-    if (!project) return false;
-
-    // Delete all stages and messages for this project
-    const projectStages = Array.from(this.stages.values()).filter(s => s.projectId === id);
-    for (const stage of projectStages) {
-      await this.deleteMessagesByStage(stage.id);
-      this.stages.delete(stage.id);
-    }
-
-    this.projects.delete(id);
-    return true;
+    const result = await db.delete(projects).where(eq(projects.id, id)).returning();
+    return result.length > 0;
   }
 
   async getStage(id: string): Promise<Stage | undefined> {
-    return this.stages.get(id);
+    const result = await db.select().from(stages).where(eq(stages.id, id)).limit(1);
+    return result[0];
   }
 
   async getStagesByProject(projectId: string): Promise<Stage[]> {
-    return Array.from(this.stages.values())
-      .filter(stage => stage.projectId === projectId)
-      .sort((a, b) => a.stageNumber - b.stageNumber);
+    return await db.select().from(stages)
+      .where(eq(stages.projectId, projectId))
+      .orderBy(asc(stages.stageNumber));
   }
 
   async createStage(insertStage: InsertStage): Promise<Stage> {
-    const id = randomUUID();
-    const now = new Date();
-    
     // Find default stage configuration
     const defaultStage = DEFAULT_STAGES.find(ds => ds.stageNumber === insertStage.stageNumber);
     
-    const stage: Stage = {
+    const [stage] = await db.insert(stages).values({
       ...insertStage,
-      id,
       progress: 0,
       isUnlocked: true, // All stages unlocked by default now
       outputs: null,
-      aiModel: insertStage.aiModel || null,
       keyInsights: defaultStage?.keyInsights || [],
       completedInsights: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.stages.set(id, stage);
+    }).returning();
+    
     return stage;
   }
 
   async updateStage(id: string, updates: UpdateStage): Promise<Stage | undefined> {
-    const stage = this.stages.get(id);
+    const stage = await this.getStage(id);
     if (!stage) return undefined;
 
-    const updatedStage = {
-      ...stage,
-      ...updates,
-      updatedAt: new Date(),
-    };
+    let finalUpdates = { ...updates, updatedAt: new Date() };
     
     // Auto-calculate progress based on completed insights
     if (updates.completedInsights && stage.keyInsights) {
       const totalInsights = Array.isArray(stage.keyInsights) ? stage.keyInsights.length : 0;
       const completedCount = Array.isArray(updates.completedInsights) ? updates.completedInsights.length : 0;
       if (totalInsights > 0) {
-        updatedStage.progress = Math.round((completedCount / totalInsights) * 100);
+        finalUpdates.progress = Math.round((completedCount / totalInsights) * 100);
       }
     }
     
-    this.stages.set(id, updatedStage);
+    const [updatedStage] = await db.update(stages)
+      .set(finalUpdates)
+      .where(eq(stages.id, id))
+      .returning();
+    
     return updatedStage;
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
-    return this.messages.get(id);
+    const result = await db.select().from(messages).where(eq(messages.id, id)).limit(1);
+    return result[0];
   }
 
   async getMessagesByStage(stageId: string): Promise<Message[]> {
-    return Array.from(this.messages.values())
-      .filter(message => message.stageId === stageId)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return await db.select().from(messages)
+      .where(eq(messages.stageId, stageId))
+      .orderBy(asc(messages.createdAt));
   }
 
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
-    const id = randomUUID();
-    const message: Message = {
-      ...insertMessage,
-      id,
-      createdAt: new Date(),
-    };
-    this.messages.set(id, message);
+    const [message] = await db.insert(messages).values(insertMessage).returning();
     return message;
   }
 
   async deleteMessagesByStage(stageId: string): Promise<void> {
-    const stageMessages = Array.from(this.messages.values()).filter(m => m.stageId === stageId);
-    for (const message of stageMessages) {
-      this.messages.delete(message.id);
-    }
+    await db.delete(messages).where(eq(messages.stageId, stageId));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PostgresStorage();

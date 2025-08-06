@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage } from "./services/ai";
 import { insertProjectSchema, insertMessageSchema, updateStageSchema } from "@shared/schema";
 import { z } from "zod";
