@@ -39,10 +39,18 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="flex items-center space-x-3">
-              <button className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center">
+              <button 
+                onClick={() => alert('Settings panel coming soon!')}
+                className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center"
+                data-testid="button-settings"
+              >
                 <Settings className="w-5 h-5" />
               </button>
-              <button className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center">
+              <button 
+                onClick={() => alert('User profile coming soon!')}
+                className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center"
+                data-testid="button-user"
+              >
                 <User className="w-5 h-5" />
               </button>
             </div>

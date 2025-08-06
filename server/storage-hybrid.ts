@@ -110,15 +110,19 @@ class MemStorage implements IStorage {
     ];
 
     for (const defaultStage of DEFAULT_STAGES) {
-      await this.createStage({
+      const stage: Stage = {
+        id: this.generateId(),
         projectId: project.id,
         ...defaultStage,
         progress: 0,
         isUnlocked: true,
         outputs: null,
         completedInsights: [],
-        aiModel: null
-      });
+        aiModel: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      this.stages.set(stage.id, stage);
     }
     
     return project;
