@@ -39,6 +39,88 @@ class MemStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.projects.set(project.id, project);
+    
+    // Create default stages for the project
+    const DEFAULT_STAGES = [
+      {
+        stageNumber: 1,
+        title: "Requirements Definition",
+        description: "Define core requirements and user needs",
+        systemPrompt: "You are a product requirements expert. Help define clear, actionable requirements.",
+        keyInsights: [
+          "Core user needs identified",
+          "Technical requirements defined", 
+          "Success metrics established",
+          "Constraints and limitations mapped",
+          "Priority features ranked"
+        ]
+      },
+      {
+        stageNumber: 2,
+        title: "PRD Writing",
+        description: "Create comprehensive Product Requirements Document",
+        systemPrompt: "You are a PRD writing specialist. Help create detailed product specifications.",
+        keyInsights: [
+          "Product vision articulated",
+          "Feature specifications detailed",
+          "User stories documented",
+          "Technical approach outlined",
+          "Timeline and milestones set"
+        ]
+      },
+      {
+        stageNumber: 3,
+        title: "Architecture Design",
+        description: "Design system architecture and technical approach",
+        systemPrompt: "You are a software architect. Help design scalable, maintainable systems.",
+        keyInsights: [
+          "System architecture designed",
+          "Technology stack selected",
+          "Data flow mapped",
+          "Security considerations addressed",
+          "Scalability plan created"
+        ]
+      },
+      {
+        stageNumber: 4,
+        title: "Coding Prompts",
+        description: "Generate development prompts and implementation guides",
+        systemPrompt: "You are a senior developer. Help create clear coding guidelines and prompts.",
+        keyInsights: [
+          "Development approach defined",
+          "Code structure planned",
+          "Key components identified",
+          "Integration points mapped",
+          "Testing strategy outlined"
+        ]
+      },
+      {
+        stageNumber: 5,
+        title: "Development Guide",
+        description: "Create step-by-step implementation roadmap",
+        systemPrompt: "You are a development team lead. Help create actionable development plans.",
+        keyInsights: [
+          "Implementation phases planned",
+          "Development tasks prioritized",
+          "Resource requirements estimated",
+          "Risk mitigation strategies prepared",
+          "Delivery timeline established"
+        ]
+      }
+    ];
+
+    for (const defaultStage of DEFAULT_STAGES) {
+      await this.createStage({
+        projectId: project.id,
+        ...defaultStage,
+        progress: 0,
+        isUnlocked: true,
+        outputs: null,
+        completedInsights: [],
+        aiModel: null
+      });
+    }
+    
     return project;
   }
 

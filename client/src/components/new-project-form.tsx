@@ -25,7 +25,7 @@ export default function NewProjectForm({ onProjectCreated }: NewProjectFormProps
     resolver: zodResolver(insertProjectSchema),
     defaultValues: {
       name: "",
-      description: "",
+      description: "A new product development project",
       aiModel: "claude-sonnet",
     },
   });
@@ -78,91 +78,41 @@ export default function NewProjectForm({ onProjectCreated }: NewProjectFormProps
         {isExpanded && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                <div className="md:col-span-8 space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-small font-medium text-contrast-high">Project Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="Enter your project name..."
-                            className="min-h-[44px]"
-                            data-testid="input-project-name"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-small font-medium text-contrast-high">Project Description</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Brief description of what you're building..."
-                            className="h-16 resize-none"
-                            data-testid="textarea-project-description"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                </div>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="flex gap-3">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem className="flex-1">
+                      <FormControl>
+                        <Input
+                          placeholder="Enter your project name..."
+                          className="min-h-[44px]"
+                          data-testid="input-project-name"
+                          {...field}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
                 
-                <div className="md:col-span-4 space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="aiModel"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-small font-medium text-contrast-high">
-                          AI Model
-                        </FormLabel>
-                        <p className="text-xs text-contrast-medium">Used for output generation and processing</p>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger className="min-h-[44px]" data-testid="select-ai-model">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="claude-sonnet">Claude Sonnet (Default)</SelectItem>
-                            <SelectItem value="chatgpt-4">ChatGPT-4</SelectItem>
-                            <SelectItem value="groq-llama">Groq Llama 3.1</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <div className="flex space-x-3">
-                    <Button 
-                      type="submit" 
-                      className="btn-primary flex-1 min-h-[44px]"
-                      disabled={createProjectMutation.isPending}
-                      data-testid="button-create-project"
-                    >
-                      {createProjectMutation.isPending ? "Creating..." : "Create Project"}
-                    </Button>
-                    <Button 
-                      type="button"
-                      variant="outline"
-                      className="min-h-[44px]"
-                      onClick={() => setIsExpanded(false)}
-                      data-testid="button-cancel-project"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
+                <Button 
+                  type="submit" 
+                  className="btn-primary min-h-[44px] px-6"
+                  disabled={createProjectMutation.isPending}
+                  data-testid="button-create-project"
+                >
+                  {createProjectMutation.isPending ? "Creating..." : "Create"}
+                </Button>
+                <Button 
+                  type="button"
+                  variant="outline"
+                  className="min-h-[44px]"
+                  onClick={() => setIsExpanded(false)}
+                  data-testid="button-cancel-project"
+                >
+                  Cancel
+                </Button>
               </form>
             </Form>
           </div>
