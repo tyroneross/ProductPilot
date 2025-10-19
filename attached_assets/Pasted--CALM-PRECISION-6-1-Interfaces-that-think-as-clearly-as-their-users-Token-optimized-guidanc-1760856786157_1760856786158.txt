@@ -1,0 +1,807 @@
+# CALM PRECISION 6.1
+
+*Interfaces that think as clearly as their users*
+
+> **Token-optimized guidance for LLM implementation**  
+> Plain language • Decision trees • Perceptual foundations • Audit-ready
+
+-----
+
+## PHILOSOPHY
+
+**Goal:** Cognitive predictability through information-first structure within accessibility envelope
+
+**Method:** Encode decision trees that LLMs can interpret and audit
+
+**Foundation:** Each rule traces to perceptual science (Gestalt, Fitts, Hick, Cognitive Load, Signal-to-Noise)
+
+-----
+
+## CORE PRINCIPLES
+
+### 1. Group, Don’t Isolate
+
+**Gestalt Proximity + Common Region**  
+Single border around related items, dividers between them. Individual borders imply separation.
+
+### 2. Size = Importance
+
+**Fitts’ Law**  
+Button size matches user intent weight. Critical conversions = large, quick actions = compact.
+
+### 3. Three-Line Hierarchy
+
+**Cognitive Load + Information Scent**  
+Title (14-16px, bold) → Description (12-14px) → Metadata (11-12px, muted). Consistent vertical rhythm.
+
+### 4. Progressive Disclosure
+
+**Hick’s Law**  
+Show less, reveal more on demand. Fewer visible choices = faster decisions.
+
+### 5. Text Over Decoration
+
+**Signal-to-Noise Ratio**  
+Color and weight create hierarchy, not boxes. Remove decoration that doesn’t aid comprehension.
+
+### 6. Content Over Chrome
+
+**Information Density**  
+≥70% content-chrome ratio. Users come for content, not interface.
+
+### 7. Natural Language
+
+**Mental Models**  
+Readable phrases over jargon. Match user vocabulary.
+
+### 8. Rhythm & Alignment
+
+**Gestalt Continuity**  
+8pt grid, consistent spacing, aligned baselines. Visual rhythm creates calm.
+
+### 9. Functional Integrity
+
+**Affordance Theory + Data Integrity**  
+Every interactive element must have:
+
+1. A working action (UI behavior)
+1. Real data source/destination (backend connection)
+
+**DON’T BUILD:**
+
+- Buttons without backend endpoints
+- Forms without submission APIs
+- Lists without data sources
+- Features as “visual placeholders”
+- Mock data that looks like real data
+
+**IF BUILDING INCREMENTALLY:**
+
+- Mark clearly what’s functional vs mock
+- Hide incomplete features rather than showing broken ones
+- Document which data is real vs placeholder
+- Use visible “Demo mode” warnings
+
+**WHY:** Non-functional interfaces violate user trust. Mock data creates false mental models. Placeholders waste cognitive effort.
+
+### 10. Content Resilience
+
+**Fault Tolerance**  
+Components handle variable formats gracefully: structured data, plain text, markdown.
+
+-----
+
+## DECISION TREES
+
+### Border Usage
+
+```mermaid
+graph TD
+    A[Need visual grouping?] -->|Yes| B{Items share type?}
+    A -->|No| C[Use whitespace only]
+    B -->|Yes| D[Single border around ALL<br/>Dividers between items]
+    B -->|No| E[Category headers<br/>Separate groups]
+```
+
+**Audit:** Do borders group or isolate?
+
+### Button Sizing
+
+```mermaid
+graph TD
+    A[User intent?] --> B{Core conversion?}
+    B -->|Yes| C[Full width<br/>e.g. login, checkout]
+    B -->|No| D{Equal choices?}
+    D -->|Yes| E[Side-by-side equal<br/>e.g. yes/no, join/skip]
+    D -->|No| F[Compact inline<br/>e.g. save, edit, cancel]
+```
+
+**Audit:** Does size match intent weight?
+
+### Content Format
+
+```mermaid
+graph TD
+    A[Receive content] --> B{Type?}
+    B -->|Object| C[Try flexible field names<br/>title/headline/name]
+    B -->|String with markdown| D[Render markdown]
+    B -->|Plain string| E[Render with paragraph breaks]
+    B -->|Null/undefined| F[Show empty state]
+    
+    C --> G[Apply three-line hierarchy]
+    D --> G
+    E --> G
+```
+
+**Audit:** Does component handle string AND object inputs?
+
+### Functional Integrity Check
+
+```mermaid
+graph TD
+    A[Building interactive element?] --> B{Has backend API?}
+    B -->|Yes| C{API implemented?}
+    B -->|No| D[STOP - Don't build yet]
+    C -->|Yes| E[Build with real data]
+    C -->|No| F{Demo/prototype only?}
+    F -->|Yes| G[Mark clearly as demo<br/>Don't look production-ready]
+    F -->|No| D
+```
+
+**Audit:** Is this connected to real backend or mock?
+
+### Element State
+
+```mermaid
+graph TD
+    A[Has working action?] --> B{Yes}
+    A --> C{No, but...}
+    B --> D[Make interactive]
+    C --> E{Coming soon?}
+    C --> F{Needs upgrade?}
+    C --> G{Permanent no access?}
+    E --> H[Mark 'Coming soon'<br/>or hide]
+    F --> I[Mark 'Pro'<br/>link to upgrade]
+    G --> J[HIDE entirely]
+```
+
+**Audit:** If I click this, will something happen?
+
+### Progressive Disclosure
+
+```mermaid
+graph TD
+    A[Content type?] --> B{Essential?}
+    B -->|Yes| C[Always visible]
+    B -->|No| D{Frequently needed?}
+    D -->|Yes| E[Expand on hover/tap]
+    D -->|No| F[Behind action/link]
+```
+
+**Audit:** Is user forced to see unnecessary detail?
+
+### Loading State
+
+```mermaid
+graph TD
+    A[Expected wait?] --> B{<100ms}
+    B -->|Yes| C[No indicator]
+    B -->|No| D{100ms-1s}
+    D -->|Yes| E[Spinner/pulse]
+    D -->|No| F{1s-3s}
+    F -->|Yes| G[Skeleton screen]
+    F -->|No| H[Progress bar]
+```
+
+**Audit:** Does loading pattern match wait time?
+
+-----
+
+## PATTERN CATALOG
+
+### Three-Line Content Structure
+
+**Title:** 14-16px, medium weight, high contrast (7:1)  
+**Description:** 12-14px, regular, medium contrast (4.5:1), 3-4 line limit  
+**Metadata:** 11-12px, regular, low contrast (3:1)
+
+**Spacing:** 3-4px after title, 4px after description (8pt grid aligned)
+
+**Mobile:** Single line preferred, max 2 lines for title
+
+**Applies to:** Search results, list items, cards, table rows
+
+### Grouped Container
+
+```
+SECTION HEADER (11px uppercase, gray-500)
+┌─────────────────────────────────┐ ← Single border
+│ Title            │    Metadata  │
+│ Description      │              │
+├─────────────────────────────────┤ ← Gradient divider
+│ Title 2          │    Metadata  │
+│ Description      │              │
+└─────────────────────────────────┘
+```
+
+**When to group:** Items share type, user scans multiple, actions apply to group
+
+**When NOT:** Items distinct, only 1-2 items, full-screen single item focus
+
+**Divider options:**
+
+- Subtle 1px line (default)
+- Gradient fade (modern, softer visual separation)
+- No divider if spacing sufficient (≥24px)
+
+### Flexible Content Handling
+
+**Accept:**
+
+- Object with varying field names
+- Plain text (single/multi-paragraph)
+- Markdown (headings, bold, bullets, links, paragraphs)
+- Null/undefined (show empty state)
+
+**Field name alternatives (try in order):**
+
+- Title: `title` → `headline` → `name` → `subject`
+- Description: `description` → `summary` → `content` → `body`
+- Date: `date` → `timestamp` → `published` → `created_at`
+
+**Minimum markdown support (all content components):**
+
+- Headings: `#` `##` `###`
+- Bold: `**text**`
+- Bullets: `- item`
+- Paragraphs: Double newline
+
+**Layout rules:**
+
+- Headings: Single line with truncate + tooltip in cards
+- Body: Natural wrap, leading-relaxed (1.5-1.6)
+- Alignment: Top-align multi-column content
+- Length: 3-4 lines visible, expand on demand
+
+### Status Indication
+
+**Text color only** (no background boxes):
+
+- Success: `green-600`
+- Warning: `amber-600`
+- Info: `blue-600`
+- Error: `red-600`
+- Neutral: `gray-600`
+
+**Exception:** Removable filter chips need subtle background (tap target)
+
+**Why:** Background adds visual weight without information value
+
+### Navigation States
+
+**Top Nav (Fiverr-style):**
+
+- Unselected: `gray-600` regular
+- Hover: `gray-900` color only (150ms)
+- Selected: `gray-900` medium + 2px bottom border
+- Never: Background boxes or pills
+
+**Side Nav (Google Classroom-style):**
+
+- Unselected: `gray-700` + `hover:bg-gray-100`
+- Selected: `bg-blue-50 text-blue-700` medium weight
+- Icons: 18px same color as text
+- Width: 224px fixed
+- Padding: 12px horizontal, 8px vertical
+
+**Section headers:** 11px uppercase, `gray-500`, tracking-wide
+
+**Hierarchical (Folk-style):**
+
+- Indent nested: 12px
+- Chevron rotates 90° (150ms)
+- Indicators: 8×8px squares
+- Badges: End of row, minimal
+
+**Dropdowns:**
+
+- Width: 224px (matches side nav)
+- Padding: 16px horizontal
+- Dividers: 1px `gray-100`, 4px margin
+- Hover: `bg-gray-50`
+- Danger: Separated + `red-600` + `hover:bg-red-50`
+
+### Element State Patterns
+
+**HIDE:** Permanently unavailable (lacks permission)
+
+- Don’t show in DOM
+- Example: Admin features for non-admins
+
+**DISABLE:** Contextually unavailable (user can fix)
+
+- `bg-gray-200 text-gray-400 cursor-not-allowed`
+- Optional helper text explaining condition
+- Example: Save button until form valid
+
+**MARK:** Available but requires action/upgrade
+
+- Normal styling + badge
+- “Coming soon” = amber badge
+- “Pro” = purple badge, links to upgrade
+- “Beta” = blue badge
+- Example: Premium features, upcoming features
+
+### Empty States
+
+**Not:** “No results found”
+
+**Instead:** Value-driven guidance
+
+- Recent searches (clickable)
+- Common searches
+- Contextual suggestions
+- Clear next action
+
+**Pattern:** Optional icon → purpose statement → CTA
+
+### Loading States
+
+**<100ms:** No indicator (feels instant)  
+**100ms-1s:** Spinner or pulse  
+**1s-3s:** Skeleton screen (matches final layout)  
+**>3s:** Progress bar (if determinate)
+
+**Skeleton rules:**
+
+- Match three-line pattern for lists
+- Subtle shimmer (1.5s cycle)
+- Max 5 skeleton items
+- Progressive loading: header → content → secondary (50-100ms stagger)
+
+-----
+
+## IMPLEMENTATION GUIDE (FOR LLMs)
+
+### Auto-Apply Rules
+
+1. **Content structure** → Three-line pattern (title, description, metadata)
+1. **Grouping** → Single border + dividers for related items
+1. **Button sizing** → Core conversion = full, quick action = compact
+1. **Category headers** → Above grouped content (11px uppercase gray-500)
+1. **Search debounce** → 300ms
+1. **Touch targets** → ≥44px mobile, ≥24px desktop
+1. **Loading states** → Match wait time (skeleton for 1-3s)
+1. **Empty states** → Provide value (recent/suggestions)
+1. **Status** → Text color only
+1. **Icons** → Max 2 colors per context
+1. **Content input** → Accept string OR object
+1. **Field names** → Try alternatives (title/headline/name)
+1. **Markdown** → Support `#` `**` `-` paragraphs minimum
+1. **Functional integrity** → Only build with real backend endpoints
+1. **Data sources** → Verify API exists before building UI
+
+### Always Ask Before
+
+1. Individual borders on list items (violates grouping)
+1. Full-width buttons for non-critical actions (violates Fitts)
+1. Background boxes for status (violates signal-to-noise)
+1. 2 icon colors in same context (violates cognitive load)
+1. Technical jargon without confirmation (violates mental models)
+1. Making non-functional elements look interactive (violates affordance)
+1. **Creating UI without real data source/API endpoint**
+1. **Building forms without backend submission handler**
+1. **Showing features with mock data that looks real**
+
+### Flexible Zones (User Can Override)
+
+**Maintain principle, vary implementation:**
+
+- Color values (maintain contrast ratios)
+- Border radius (stay consistent)
+- Font family (maintain size/weight ratios)
+- Spacing values (stay on 8pt grid)
+
+**Strict zones (audit as violations):**
+
+- Group vs individual borders
+- Button sizing by context
+- Three-line hierarchy
+- Touch targets ≥44px mobile
+- Contrast ≥4.5:1 text, ≥3:1 large
+- Content-chrome ≥70%
+- Functional integrity (no fake buttons)
+- **Real data sources required**
+
+### Content Handling Pattern
+
+When building components:
+
+```javascript
+// Accept flexible input
+function ContentCard({ data }) {
+  // Handle different types
+  if (typeof data === 'string') {
+    return renderMarkdown(data);
+  }
+  
+  // Extract with flexible field names
+  const title = data.title || data.headline || data.name;
+  const desc = data.description || data.summary || data.content;
+  const meta = data.date || data.timestamp;
+  
+  // Render what exists, omit what doesn't
+  return (
+    <div>
+      {title && <h3 className="font-medium">{title}</h3>}
+      {desc && <p className="text-gray-600">{desc}</p>}
+      {meta && <span className="text-gray-500 text-xs">{meta}</span>}
+    </div>
+  );
+}
+```
+
+When generating content (in prompts):
+
+```
+Use markdown for rich formatting:
+**Heading text**
+
+Body paragraph with natural flow.
+
+- Bullet point one
+- Bullet point two
+
+*Metadata info*
+```
+
+### Functional Integrity Implementation
+
+**CRITICAL: Verify backend before building UI**
+
+```jsx
+// ❌ DON'T: Mock data that looks real
+const [items, setItems] = useState([]);
+<button onClick={() => setItems([...items, { id: Math.random(), name: 'New' }])}>
+  Save
+</button>
+
+// ❌ DON'T: Placeholder API calls
+<button onClick={() => console.log('TODO: implement save')}>
+  Save
+</button>
+
+// ✅ DO: Only build if backend exists
+{hasBackendAPI && (
+  <button onClick={async () => {
+    const result = await fetch('/api/save', {
+      method: 'POST',
+      body: JSON.stringify(formData)
+    });
+    // Handle real response
+  }}>
+    Save
+  </button>
+)}
+
+// ✅ DO: Mark clearly as demo if prototyping
+<div className="border-2 border-amber-500 rounded-lg p-4">
+  <div className="flex items-center gap-2 mb-2">
+    <AlertTriangle size={16} className="text-amber-700" />
+    <p className="text-amber-700 text-xs font-medium">
+      Demo mode - not connected to real data
+    </p>
+  </div>
+  <button onClick={handleMockSave} className="...">
+    Save (Demo Only)
+  </button>
+</div>
+
+// ✅ DO: Hide incomplete features
+{isFeatureComplete && (
+  <button onClick={handleRealSave}>Save</button>
+)}
+```
+
+**When building incrementally:**
+
+1. Check if backend API exists
+1. If no → Don’t build UI yet OR clearly mark as demo
+1. If yes → Verify API works before building
+1. Document which features are real vs mock
+
+### Navigation Implementation
+
+**Top nav:**
+
+```jsx
+<nav className="flex gap-8 border-b border-gray-200">
+  {tabs.map(tab => (
+    <button className={`py-4 text-sm ${
+      active === tab 
+        ? 'text-gray-900 font-medium border-b-2 border-gray-900'
+        : 'text-gray-600 hover:text-gray-900'
+    }`}>
+      {tab}
+    </button>
+  ))}
+</nav>
+```
+
+**Side nav:**
+
+```jsx
+<nav className="w-56 space-y-1 p-3">
+  <h3 className="text-xs uppercase text-gray-500 tracking-wide px-3">
+    Section
+  </h3>
+  {items.map(item => (
+    <button className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg ${
+      active === item
+        ? 'bg-blue-50 text-blue-700 font-medium'
+        : 'text-gray-700 hover:bg-gray-100'
+    }`}>
+      <Icon size={18} />
+      <span>{item}</span>
+    </button>
+  ))}
+</nav>
+```
+
+### State Implementation
+
+**Functional integrity:**
+
+```jsx
+// ❌ DON'T: Non-functional button
+<button>Export PDF</button>
+
+// ✅ DO: Only if functional
+{exportAvailable && (
+  <button onClick={handleExport}>Export PDF</button>
+)}
+
+// ✅ OR: Mark as unavailable
+<div className="text-gray-500">
+  Export PDF 
+  <span className="text-xs ml-2">(Coming soon)</span>
+</div>
+```
+
+**Element states:**
+
+```jsx
+// HIDE - don't render
+{user.isAdmin && <button>Admin Panel</button>}
+
+// DISABLE - show but can't act
+<button 
+  disabled={!formValid}
+  className={formValid 
+    ? 'bg-blue-600 text-white' 
+    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+  }
+>
+  Save
+</button>
+
+// MARK - show with badge
+<button className="flex items-center gap-2">
+  Premium Feature
+  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">
+    Pro
+  </span>
+</button>
+```
+
+-----
+
+## ACCESSIBILITY (WCAG 2.2 AA)
+
+### Non-Negotiable Minimums
+
+|Requirement      |Minimum                        |Why                  |
+|-----------------|-------------------------------|---------------------|
+|Text contrast    |4.5:1 normal, 3:1 large        |Low vision legibility|
+|Touch targets    |44×44px mobile, 24×24px desktop|Fitts’ Law for input |
+|Focus indicators |Visible on all interactive     |Keyboard navigation  |
+|Color + text/icon|Never color alone              |Colorblind support   |
+|Motion respect   |Honor prefers-reduced-motion   |Vestibular disorder  |
+
+### Quick Accessibility Checks
+
+- [ ] Keyboard navigate entire UI?
+- [ ] Focus visible on all interactive?
+- [ ] Information clear without color?
+- [ ] Touch targets meet minimums?
+- [ ] Animations stop when user prefers reduced motion?
+
+-----
+
+## ANTI-PATTERNS
+
+|Pattern                         |Violation            |Fix                                     |Audit                                    |
+|--------------------------------|---------------------|----------------------------------------|-----------------------------------------|
+|Individual borders on list items|Gestalt Common Region|Single group border + dividers          |“Do borders group or isolate?”           |
+|Full-width for quick actions    |Fitts’ Law           |Compact inline buttons                  |“Does size match intent?”                |
+|Status badges with backgrounds  |Signal-to-Noise      |Text color only                         |“Does decoration aid comprehension?”     |
+|Navigation boxes on active tab  |Cognitive Load       |Text + bottom border                    |“Is this a button or state?”             |
+|>2 icon colors in context       |Cognitive Load       |Limit to 2 semantic colors              |“Count colors—≤2?”                       |
+|Technical jargon                |Mental Model Mismatch|Natural language                        |“Would my grandmother understand?”       |
+|Non-functional buttons          |Affordance Theory    |Only make interactive if action exists  |“If I click, does something happen?”     |
+|Mock data that looks real       |Data Integrity       |Mark as demo OR hide until backend ready|“Is this real data or mock?”             |
+|Forms without APIs              |Functional Integrity |Don’t build until backend exists        |“Where does this submit?”                |
+|Strict content schemas          |Brittleness          |Accept string OR object                 |“Does component handle variable formats?”|
+
+-----
+
+## AUDIT FRAMEWORK
+
+### Quick Audit (15 Questions)
+
+1. **Grouping:** Do borders group or isolate?
+1. **Button:** Does size match intent weight?
+1. **Content:** Is three-line hierarchy clear?
+1. **Disclosure:** Is user seeing only what’s needed?
+1. **Status:** Text color only or noisy badge?
+1. **Icons:** ≤2 colors in this context?
+1. **Language:** Natural or jargon?
+1. **Chrome:** Content-chrome ≥70%?
+1. **Loading:** Pattern matches wait time?
+1. **Functional:** If I click, will something happen?
+1. **Flexible:** Does component handle string AND object?
+1. **Format:** Are field names flexible?
+1. **Alignment:** Body text left-aligned, rows top-aligned?
+1. **Data:** Is this connected to real backend or mock?
+1. **Backend:** Does the API exist before building UI?
+
+### Deep Audit (By Principle)
+
+**Gestalt (Grouping):**
+
+- [ ] Related items share container with single border?
+- [ ] Dividers between items, not around each?
+- [ ] Unrelated items have whitespace/headers?
+
+**Fitts (Size):**
+
+- [ ] Core conversions use full-width?
+- [ ] Equal choices use side-by-side?
+- [ ] Quick actions use compact?
+- [ ] Touch targets ≥44px mobile, ≥24px desktop?
+
+**Cognitive Load (Predictability):**
+
+- [ ] Three-line pattern consistent?
+- [ ] Same elements in same positions?
+- [ ] Vertical rhythm on 8pt grid?
+
+**Signal-to-Noise (Clarity):**
+
+- [ ] Status uses text color only?
+- [ ] Icons ≤2 colors?
+- [ ] Decoration serves comprehension?
+
+**Hick (Disclosure):**
+
+- [ ] Detail revealed on demand?
+- [ ] Filters collapsible?
+- [ ] Advanced options hidden initially?
+
+**Mental Models (Language):**
+
+- [ ] Labels match user vocabulary?
+- [ ] Error messages explain what/why/how?
+- [ ] Time relative <24h (“2h ago”)?
+
+**Content Focus:**
+
+- [ ] Content-chrome ≥70%?
+- [ ] Search prominent?
+- [ ] Navigation doesn’t dominate?
+
+**Affordance (Integrity):**
+
+- [ ] All interactive elements have actions?
+- [ ] Non-functional items don’t look clickable?
+- [ ] States clearly marked (disabled, coming soon, pro)?
+- [ ] **Backend APIs verified before building UI?**
+- [ ] **Mock data clearly labeled as demo?**
+- [ ] **Forms have real submission endpoints?**
+
+**Resilience (Content):**
+
+- [ ] Accepts multiple input formats?
+- [ ] Tries alternative field names?
+- [ ] Supports basic markdown?
+- [ ] Handles null/undefined gracefully?
+
+-----
+
+## SEMANTIC TOKENS
+
+**Purpose:** User customizes while maintaining perceptual logic
+
+```
+Contrast (always relative, ratios enforced):
+  contrast.high    → ~7:1   → main text
+  contrast.medium  → ≥4.5:1 → descriptions  
+  contrast.low     → ≥3:1   → metadata
+  contrast.accent  → ≥4.5:1 → links, selected
+
+Surface:
+  surface.base      → page background
+  surface.elevated  → cards, raised elements
+  surface.grouped   → container for list groups
+
+Border:
+  border.group    → outer group border
+  border.divider  → dividers within groups
+  border.subtle   → hairline separators
+```
+
+-----
+
+## QUICK REFERENCE
+
+### One Sentence Per Principle
+
+1. Group related items with single border + dividers (Gestalt)
+1. Size buttons by user intent weight (Fitts)
+1. Title → description → metadata hierarchy (Cognitive Load)
+1. Show less, reveal more on demand (Hick)
+1. Text and color create hierarchy, not boxes (Signal-to-Noise)
+1. Maximize content, minimize chrome ≥70% (Information Density)
+1. Use natural language, not jargon (Mental Models)
+1. Align to 8pt grid for visual rhythm (Continuity)
+1. Only make interactive if action exists AND backend connected (Affordance + Data Integrity)
+1. Accept variable content formats gracefully (Fault Tolerance)
+
+### For Every Component Ask
+
+- Borders: group or isolate?
+- Buttons: size = intent?
+- Content: three-line hierarchy?
+- Status: text color only?
+- Icons: ≤2 colors?
+- Language: natural or jargon?
+- Chrome: ≥70% content?
+- Loading: pattern matches wait time?
+- Functional: if clicked, does something happen?
+- **Backend: is API verified/working?**
+- **Data: real source or mock?**
+- Format: handles string AND object?
+- Fields: tries alternative names?
+- Alignment: left-aligned text, top-aligned rows?
+- Markdown: supports `#` `**` `-` paragraphs?
+
+### North Star Questions
+
+When uncertain:
+
+1. Does this create cognitive predictability?
+1. Can I trace this to perceptual science?
+1. Will this be auditable by humans and LLMs?
+1. Does this reduce user strain?
+1. Is this quiet intelligence or ornament?
+1. **Is this connected to real data or just looks real?**
+
+-----
+
+## ADAPTATION NOTES
+
+### With Existing Brand
+
+**Adapts:** Primary color, font family, border radius, illustration style  
+**Strict:** Grouping logic, button sizing, hierarchy, ratios, touch targets, functional integrity, backend requirements
+
+### With Platform Conventions
+
+**Respect:** iOS HIG, Android Material, Web standards  
+**Maintain:** Grouping, sizing, hierarchy, content focus, data integrity
+
+-----
+
+*Version 6.1 - Updated with Data Integrity*  
+*Token-optimized • Plain language • Decision trees • Audit-ready*  
+*Foundation: Gestalt, Fitts, Hick, Cognitive Load, Signal-to-Noise, Affordance, Fault Tolerance*

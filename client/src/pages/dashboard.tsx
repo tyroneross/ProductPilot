@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Settings, User } from "lucide-react";
+import { useLocation } from "wouter";
+import { MessageCircle } from "lucide-react";
 import NewProjectForm from "@/components/new-project-form";
 import ContextFlow from "@/components/context-flow";
 import StageCard from "@/components/stage-card";
+import { Button } from "@/components/ui/button";
 import type { Project, Stage } from "@shared/schema";
 
 export default function Dashboard() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [, setLocation] = useLocation();
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -34,25 +37,9 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-h2 font-medium text-contrast-high">Product Development Assistant</h1>
-              <p className="text-small text-contrast-medium mt-1">
+              <p className="text-description text-contrast-medium mt-1">
                 Guided 5-stage workflow for systematic product development
               </p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <button 
-                onClick={() => alert('Settings panel coming soon!')}
-                className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center"
-                data-testid="button-settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-              <button 
-                onClick={() => alert('User profile coming soon!')}
-                className="text-contrast-medium hover:text-accent min-h-[44px] min-w-[44px] flex items-center justify-center"
-                data-testid="button-user"
-              >
-                <User className="w-5 h-5" />
-              </button>
             </div>
           </div>
         </div>
@@ -70,19 +57,21 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Project Stages Dashboard */}
+        {/* Project Content */}
         {currentProject && (
           <section>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-h3 font-medium text-contrast-high">Project Stages</h2>
+                <h2 className="text-h3 font-medium text-contrast-high">
+                  {currentProject.mode === "interview" ? "Interview Mode" : "Project Stages"}
+                </h2>
                 
                 {projects.length > 1 && (
                   <div className="flex items-center space-x-2">
-                    <span className="text-small text-contrast-medium">Current Project:</span>
+                    <span className="text-description text-contrast-medium">Current Project:</span>
                     <select
                       value={currentProjectId || ""}
                       onChange={(e) => setCurrentProjectId(e.target.value)}
-                      className="text-small font-medium text-contrast-high bg-transparent border-none"
+                      className="text-description font-medium text-contrast-high bg-transparent border-none"
                       data-testid="select-current-project"
                     >
                       {projects.map((project) => (
@@ -95,41 +84,51 @@ export default function Dashboard() {
                 )}
               </div>
               
-              {stagesLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className="bg-surface-primary rounded-lg p-6 animate-pulse">
-                      <div className="h-4 bg-gray-300 rounded mb-3"></div>
-                      <div className="h-3 bg-gray-200 rounded mb-4"></div>
-                      <div className="flex justify-between items-center">
-                        <div className="h-3 bg-gray-200 rounded w-16"></div>
-                        <div className="h-6 w-6 bg-gray-300 rounded-full"></div>
-                      </div>
+              {currentProject.mode === "interview" ? (
+                <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 text-center">
+                  <div className="max-w-2xl mx-auto">
+                    <div className="w-16 h-16 bg-accent rounded-full flex items-center justify-center mx-auto mb-4">
+                      <MessageCircle className="w-8 h-8 text-surface-primary" />
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {stages.map((stage) => (
-                    <StageCard key={stage.id} stage={stage} />
-                  ))}
-
-                  {/* Quick Actions Card */}
-                  <div className="bg-surface-primary rounded-lg shadow-sm p-6 border border-gray-200 border-dashed">
-                    <h3 className="text-body font-medium text-contrast-medium text-center mb-4">Quick Actions</h3>
-                    <div className="space-y-3">
-                      <button className="w-full text-left text-small text-contrast-medium hover:text-accent p-2 rounded hover:bg-surface-secondary transition-colors">
-                        Export All Outputs
-                      </button>
-                      <button className="w-full text-left text-small text-contrast-medium hover:text-accent p-2 rounded hover:bg-surface-secondary transition-colors">
-                        Generate Summary
-                      </button>
-                      <button className="w-full text-left text-small text-contrast-medium hover:text-accent p-2 rounded hover:bg-surface-secondary transition-colors">
-                        Reset Progress
-                      </button>
-                    </div>
+                    <h3 className="text-title text-contrast-high mb-2">
+                      PRD Interview Mode
+                    </h3>
+                    <p className="text-description text-contrast-medium mb-6 leading-relaxed">
+                      Answer structured questions to build a comprehensive Product Requirements Document. 
+                      The AI will guide you through gathering all necessary information for your PRD.
+                    </p>
+                    <Button
+                      onClick={() => setLocation(`/interview/${currentProject.id}`)}
+                      className="btn-primary min-h-[44px] px-8"
+                      data-testid="button-start-interview"
+                    >
+                      Start Interview
+                    </Button>
                   </div>
                 </div>
+              ) : (
+                <>
+                  {stagesLoading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className="bg-surface-primary rounded-lg p-6 animate-pulse">
+                          <div className="h-4 bg-gray-300 rounded mb-3"></div>
+                          <div className="h-3 bg-gray-200 rounded mb-4"></div>
+                          <div className="flex justify-between items-center">
+                            <div className="h-3 bg-gray-200 rounded w-16"></div>
+                            <div className="h-6 w-6 bg-gray-300 rounded-full"></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {stages.map((stage) => (
+                        <StageCard key={stage.id} stage={stage} />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </section>
         )}

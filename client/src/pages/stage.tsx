@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, Settings } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import ChatInterface from "@/components/chat-interface";
-
 import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
 import type { Stage } from "@shared/schema";
@@ -53,21 +52,12 @@ export default function StagePage() {
             </Button>
             <div>
               <h1 className="text-h3 font-medium text-contrast-high">{stage.title}</h1>
-              <p className="text-small text-contrast-medium">{stage.description}</p>
+              <p className="text-description text-contrast-medium">{stage.description}</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="text-small text-contrast-medium">Progress:</span>
-            <span className="text-small font-medium text-accent">{stage.progress}%</span>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="min-h-[44px] min-w-[44px]"
-              onClick={() => alert('Settings panel coming soon!')}
-              data-testid="button-stage-settings"
-            >
-              <Settings className="w-4 h-4" />
-            </Button>
+            <span className="text-metadata text-contrast-medium">Progress:</span>
+            <span className="text-description font-medium text-accent">{stage.progress}%</span>
           </div>
         </div>
       </header>

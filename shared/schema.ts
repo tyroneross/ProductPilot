@@ -7,6 +7,7 @@ export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description").notNull(),
+  mode: text("mode").notNull().default("stage-based"), // "stage-based" | "interview"
   aiModel: text("ai_model").notNull().default("claude-sonnet"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -40,6 +41,7 @@ export const messages = pgTable("messages", {
 export const insertProjectSchema = createInsertSchema(projects).pick({
   name: true,
   description: true,
+  mode: true,
   aiModel: true,
 });
 

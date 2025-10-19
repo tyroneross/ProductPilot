@@ -52,10 +52,10 @@ export default function InsightsPanel({ stage }: InsightsPanelProps) {
 
   return (
     <div className="h-full bg-surface-primary p-4">
-      <div className="pb-3">
-        <h3 className="text-body font-medium text-contrast-high flex items-center justify-between">
+      <div className="pb-4">
+        <h3 className="text-title text-contrast-high flex items-center justify-between">
           Discussion Goals
-          <span className="text-small font-normal text-accent">
+          <span className="text-metadata text-accent">
             {completionPercentage}%
           </span>
         </h3>
@@ -67,57 +67,59 @@ export default function InsightsPanel({ stage }: InsightsPanelProps) {
         </div>
       </div>
       
-      <div className="space-y-3">
-        {keyInsights.length === 0 ? (
-          <p className="text-small text-contrast-medium">
-            No discussion goals defined for this stage.
-          </p>
-        ) : (
-          keyInsights.map((insight, index) => {
+      {keyInsights.length === 0 ? (
+        <p className="text-description text-contrast-medium">
+          No discussion goals defined for this stage.
+        </p>
+      ) : (
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          {keyInsights.map((insight, index) => {
             const isCompleted = completedInsights.includes(insight);
             return (
-              <div
-                key={index}
-                className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 hover:bg-surface-secondary transition-colors cursor-pointer"
-                onClick={() => toggleInsight(insight)}
-                data-testid={`insight-${index}`}
-              >
-                <button className="mt-0.5 min-w-[16px] text-accent hover:text-accent-dark">
-                  {isCompleted ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Circle className="w-4 h-4" />
-                  )}
-                </button>
-                <div className="flex-1">
-                  <span
-                    className={`text-small leading-relaxed block ${
-                      isCompleted 
-                        ? "text-contrast-medium line-through" 
-                        : "text-contrast-high"
-                    }`}
-                  >
-                    {insight}
-                  </span>
-                  {!isCompleted && (
-                    <p className="text-xs text-contrast-medium mt-1">
-                      Click to mark as discussed
-                    </p>
-                  )}
+              <div key={index}>
+                <div
+                  className="flex items-start space-x-3 p-3 hover:bg-surface-secondary transition-colors cursor-pointer"
+                  onClick={() => toggleInsight(insight)}
+                  data-testid={`insight-${index}`}
+                >
+                  <button className="mt-0.5 min-w-[16px] text-accent hover:text-accent-dark">
+                    {isCompleted ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <Circle className="w-4 h-4" />
+                    )}
+                  </button>
+                  <div className="flex-1">
+                    <span
+                      className={`text-description leading-relaxed block ${
+                        isCompleted 
+                          ? "text-contrast-medium line-through" 
+                          : "text-contrast-high"
+                      }`}
+                    >
+                      {insight}
+                    </span>
+                    {!isCompleted && (
+                      <p className="text-metadata text-contrast-medium mt-1">
+                        Click to mark as discussed
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {index < keyInsights.length - 1 && (
+                  <div className="border-t border-gray-200" />
+                )}
               </div>
             );
-          })
-        )}
-        
-        {keyInsights.length > 0 && (
-          <div className="pt-3 border-t border-gray-200">
-            <p className="text-xs text-contrast-medium text-center">
+          })}
+          
+          <div className="border-t border-gray-200 p-3 bg-surface-secondary">
+            <p className="text-metadata text-contrast-medium text-center">
               {completedInsights.length} of {keyInsights.length} goals discussed
             </p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

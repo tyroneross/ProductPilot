@@ -26,6 +26,7 @@ export default function NewProjectForm({ onProjectCreated }: NewProjectFormProps
     defaultValues: {
       name: "",
       description: "A new product development project",
+      mode: "stage-based",
       aiModel: "claude-sonnet",
     },
   });
@@ -78,41 +79,65 @@ export default function NewProjectForm({ onProjectCreated }: NewProjectFormProps
         {isExpanded && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="flex gap-3">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem className="flex-1">
-                      <FormControl>
-                        <Input
-                          placeholder="Enter your project name..."
-                          className="min-h-[44px]"
-                          data-testid="input-project-name"
-                          {...field}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <div className="flex gap-3">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem className="flex-1">
+                        <FormControl>
+                          <Input
+                            placeholder="Enter your project name..."
+                            className="min-h-[44px]"
+                            data-testid="input-project-name"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="mode"
+                    render={({ field }) => (
+                      <FormItem className="w-48">
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger className="min-h-[44px]" data-testid="select-project-mode">
+                              <SelectValue placeholder="Select mode" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="stage-based">Stage-Based</SelectItem>
+                            <SelectItem value="interview">Interview Mode</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 
-                <Button 
-                  type="submit" 
-                  className="btn-primary min-h-[44px] px-6"
-                  disabled={createProjectMutation.isPending}
-                  data-testid="button-create-project"
-                >
-                  {createProjectMutation.isPending ? "Creating..." : "Create"}
-                </Button>
-                <Button 
-                  type="button"
-                  variant="outline"
-                  className="min-h-[44px]"
-                  onClick={() => setIsExpanded(false)}
-                  data-testid="button-cancel-project"
-                >
-                  Cancel
-                </Button>
+                <div className="flex gap-3 justify-end">
+                  <Button 
+                    type="button"
+                    variant="outline"
+                    className="min-h-[44px]"
+                    onClick={() => setIsExpanded(false)}
+                    data-testid="button-cancel-project"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    type="submit" 
+                    className="btn-primary min-h-[44px] px-6"
+                    disabled={createProjectMutation.isPending}
+                    data-testid="button-create-project"
+                  >
+                    {createProjectMutation.isPending ? "Creating..." : "Create Project"}
+                  </Button>
+                </div>
               </form>
             </Form>
           </div>
