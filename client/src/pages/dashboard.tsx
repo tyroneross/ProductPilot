@@ -57,80 +57,88 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Project Content */}
+        {/* Existing Projects */}
         {currentProject && (
           <section>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-h3 font-medium text-contrast-high">
-                  {currentProject.mode === "interview" ? "Interview Mode" : "Project Stages"}
-                </h2>
-                
-                {projects.length > 1 && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-description text-contrast-medium">Current Project:</span>
-                    <select
-                      value={currentProjectId || ""}
-                      onChange={(e) => setCurrentProjectId(e.target.value)}
-                      className="text-description font-medium text-contrast-high bg-transparent border-none"
-                      data-testid="select-current-project"
-                    >
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-h3 font-medium text-contrast-high">Your Products</h2>
               
-              {currentProject.mode === "interview" ? (
-                <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 text-center">
-                  <div className="max-w-2xl mx-auto">
-                    <div className="w-16 h-16 bg-accent rounded-full flex items-center justify-center mx-auto mb-4">
-                      <MessageCircle className="w-8 h-8 text-surface-primary" />
-                    </div>
-                    <h3 className="text-title text-contrast-high mb-2">
-                      PRD Interview Mode
-                    </h3>
-                    <p className="text-description text-contrast-medium mb-6 leading-relaxed">
-                      Answer structured questions to build a comprehensive Product Requirements Document. 
-                      The AI will guide you through gathering all necessary information for your PRD.
+              {projects.length > 1 && (
+                <div className="flex items-center space-x-2">
+                  <span className="text-description text-contrast-medium">Viewing:</span>
+                  <select
+                    value={currentProjectId || ""}
+                    onChange={(e) => setCurrentProjectId(e.target.value)}
+                    className="text-description font-medium text-contrast-high bg-transparent border-none"
+                    data-testid="select-current-project"
+                  >
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div
+                className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => setLocation(`/documents/${currentProject.id}`)}
+                data-testid="card-view-documents"
+              >
+                <div className="flex items-start space-x-4">
+                  <div className="p-3 bg-accent rounded-lg">
+                    <MessageCircle className="w-6 h-6 text-surface-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-title text-contrast-high mb-1">View Documents</h3>
+                    <p className="text-description text-contrast-medium mb-3">
+                      See PRD, architecture, and all generated documentation
                     </p>
-                    <Button
-                      onClick={() => setLocation(`/interview/${currentProject.id}`)}
-                      className="btn-primary min-h-[44px] px-8"
-                      data-testid="button-start-interview"
-                    >
-                      Start Interview
-                    </Button>
+                    <div className="flex items-center space-x-2 text-accent">
+                      <span className="text-description font-medium">View & Iterate</span>
+                      <span>→</span>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <>
-                  {stagesLoading ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className="bg-surface-primary rounded-lg p-6 animate-pulse">
-                          <div className="h-4 bg-gray-300 rounded mb-3"></div>
-                          <div className="h-3 bg-gray-200 rounded mb-4"></div>
-                          <div className="flex justify-between items-center">
-                            <div className="h-3 bg-gray-200 rounded w-16"></div>
-                            <div className="h-6 w-6 bg-gray-300 rounded-full"></div>
-                          </div>
-                        </div>
-                      ))}
+              </div>
+
+              <div
+                className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => setLocation(`/interview/${currentProject.id}`)}
+                data-testid="card-continue-building"
+              >
+                <div className="flex items-start space-x-4">
+                  <div className="p-3 bg-surface-secondary rounded-lg">
+                    <MessageCircle className="w-6 h-6 text-contrast-high" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-title text-contrast-high mb-1">Continue Building</h3>
+                    <p className="text-description text-contrast-medium mb-3">
+                      Add more details or refine your product through conversation
+                    </p>
+                    <div className="flex items-center space-x-2 text-accent">
+                      <span className="text-description font-medium">Start Chat</span>
+                      <span>→</span>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {stages.map((stage) => (
-                        <StageCard key={stage.id} stage={stage} />
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </section>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {!stagesLoading && stages.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-title text-contrast-high mb-4">Or work stage-by-stage</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {stages.map((stage) => (
+                    <StageCard key={stage.id} stage={stage} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
         )}
 
         {!currentProject && !projectsLoading && projects.length === 0 && (

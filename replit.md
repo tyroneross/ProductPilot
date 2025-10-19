@@ -2,9 +2,15 @@
 
 ## Overview
 
-A full-stack React application that provides an AI-powered product development workflow system. The app offers two modes: a structured 5-stage development process and an interview-style PRD builder. Both modes feature integrated chat interfaces powered by OpenAI. Built with React/TypeScript frontend, Express.js backend, and PostgreSQL database using Drizzle ORM.
+A full-stack React application that helps users build comprehensive product documentation through AI-powered conversation. Users describe what they want to build, and the AI guides them through creating a complete PRD, architecture design, coding prompts, and development guide. Built with React/TypeScript frontend, Express.js backend, and PostgreSQL database using Drizzle ORM.
 
 **Design System:** Implements Calm Precision 6.1 design principles for cognitive predictability and information-first structure.
+
+**Core Features:**
+- Conversational product definition through AI interview
+- Comprehensive documentation generation (PRD, architecture, prompts, guide)
+- Document view for iterating on existing products
+- Optional stage-by-stage workflow for structured refinement
 
 ## User Preferences
 
@@ -71,26 +77,29 @@ Preferred communication style: Simple, everyday language.
 - **Touch Targets**: Minimum 44×44px on mobile, 24×24px on desktop
 - **Accessibility**: WCAG 2.2 AA compliance (4.5:1 text contrast minimum)
 
-### Development Workflow
+### User Workflow
 
-**Two Workflow Modes:**
+**Primary Flow (Conversation-First):**
 
-1. **Stage-Based Mode** (Default)
-   - 5 stages with free navigation between all stages
-   - Discussion Goals: Left sidebar with question-based goals for quick iteration
-   - Progress Tracking: 0-100% completion scoring based on completed discussion goals
-   - Context Flow: Visual representation of stage progression and current status
-   - Chat Integration: Stage-specific AI assistants with custom prompts
-   - Speed-Optimized: Single questions per goal unless user wants to elaborate or edit
+1. **New Product Creation**
+   - User describes what they want to build
+   - Immediately enters conversational interview mode
+   - AI guides through gathering comprehensive product information
+   - Generates PRD, architecture design, coding prompts, and development guide
 
-2. **Interview Mode** (New)
-   - Sequential conversational flow to gather PRD information
-   - AI-guided interview process with structured questions
-   - Automatic PRD construction from interview responses
-   - Focus on Product Requirements (Stage 2) completion
-   - Simplified workflow for users preferring conversational interaction
+2. **Existing Product Access**
+   - **View Documents**: See all generated documentation (PRD, architecture, etc.)
+   - **Continue Building**: Iterate through conversation to refine and add details
+   - **Stage-by-Stage**: Optional structured workflow for targeted refinement
 
-**Mode Selection:** Users choose their preferred mode when creating a new project.
+**Alternative Approaches:**
+
+- **Document View**: Review and iterate on complete product documentation
+- **Stage-Based Mode**: Work through 5 stages systematically with Discussion Goals
+  - Discussion Goals: Left sidebar with question-based goals for quick iteration
+  - Progress Tracking: 0-100% completion scoring per stage
+  - Context Flow: Visual representation of stage progression
+  - Chat Integration: Stage-specific AI assistants with custom prompts
 
 ## External Dependencies
 

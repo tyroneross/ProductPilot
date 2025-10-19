@@ -101,12 +101,12 @@ export default function InterviewPage() {
               </div>
               <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
                 <p className="text-description text-contrast-high leading-relaxed">
-                  Hello! I'm here to help you create a comprehensive Product Requirements Document
-                  through a structured interview process. I'll ask you questions about your product
-                  idea, and your answers will help build a complete PRD.
+                  Hi! I'll help you build comprehensive product documentation through conversation.
+                  By the end, you'll have a complete PRD, architecture design, coding prompts, 
+                  and development guide.
                 </p>
                 <p className="text-description text-contrast-high leading-relaxed mt-3">
-                  Let's start with the basics: <strong>What product are you building?</strong>
+                  Let's start: <strong>What product are you building, and what problem does it solve?</strong>
                 </p>
               </div>
             </div>
