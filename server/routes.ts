@@ -121,8 +121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ message: "Project not found" });
         }
 
-        // Get existing messages BEFORE creating the new one to avoid double-counting
+        // Get existing messages BEFORE creating the new one to get accurate count
         const existingMessages = await storage.getMessagesByStage(req.params.stageId);
+        
+        // Create and save the user message first for resilient error handling
+        const message = await storage.createMessage(messageData);
         
         // Build conversation history with the new user message
         const aiMessages: AIMessage[] = [
@@ -137,7 +140,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Special handling for PRD stage (stage 2) to prevent premature document generation
           if (stage.stageNumber === 2) {
-            // Count only existing user messages, not the current one being processed
+            // Count existing messages + 1 for the message we just created
             const userMessageCount = existingMessages.filter(m => m.role === "user").length + 1;
             
             // If we have fewer than 6 user messages and the AI generated a document, force it to ask questions instead
@@ -190,9 +193,7 @@ Include a complete HTML document with basic styling. Keep it simple but function
             }
           }
           
-          // Create user message AFTER AI processing to avoid race conditions
-          const message = await storage.createMessage(messageData);
-          
+          // Create AI response message
           const aiMessage = await storage.createMessage({
             stageId: req.params.stageId,
             role: "assistant",
