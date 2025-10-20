@@ -108,8 +108,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stageId: req.params.stageId,
       });
       
-      const message = await storage.createMessage(messageData);
-      
       // If this is a user message, generate AI response
       if (messageData.role === "user") {
         const stage = await storage.getStage(req.params.stageId);
@@ -117,15 +115,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ message: "Stage not found" });
         }
 
-        const messages = await storage.getMessagesByStage(req.params.stageId);
+        // Get project to use its AI model as default
+        const project = await storage.getProject(stage.projectId);
+        if (!project) {
+          return res.status(404).json({ message: "Project not found" });
+        }
+
+        // Get existing messages BEFORE creating the new one to avoid double-counting
+        const existingMessages = await storage.getMessagesByStage(req.params.stageId);
+        
+        // Build conversation history with the new user message
         const aiMessages: AIMessage[] = [
           { role: "system", content: stage.systemPrompt },
-          ...messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+          ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
           { role: "user", content: messageData.content }
         ];
 
         try {
-          const aiResponse = await aiService.chat(aiMessages, stage.aiModel || "gpt-4o");
+          const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
+          let aiResponse = await aiService.chat(aiMessages, modelToUse);
+          
+          // Special handling for PRD stage (stage 2) to prevent premature document generation
+          if (stage.stageNumber === 2) {
+            // Count only existing user messages, not the current one being processed
+            const userMessageCount = existingMessages.filter(m => m.role === "user").length + 1;
+            
+            // If we have fewer than 6 user messages and the AI generated a document, force it to ask questions instead
+            if (userMessageCount < 6) {
+              const hasDocumentStructure = aiResponse.content.includes("##") || 
+                                         aiResponse.content.includes("# Product") ||
+                                         aiResponse.content.includes("# PRD") ||
+                                         aiResponse.content.includes("Executive Summary") ||
+                                         aiResponse.content.match(/\n\n.*:\n-/); // bullet lists with headers
+              
+              if (hasDocumentStructure || aiResponse.content.length > 800) {
+                // Override with simple questions instead
+                const overridePrompt = `The user said: "${messageData.content}". 
+
+You MUST respond with ONLY 2-3 simple questions to learn more. Do NOT generate any document, sections, or headers.
+
+Just ask questions like:
+1. [Question about who will use this]
+2. [Question about key features]
+3. [Question about constraints]
+
+Keep it conversational and brief.`;
+                
+                aiResponse = await aiService.chat([
+                  { role: "system", content: "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions." },
+                  { role: "user", content: overridePrompt }
+                ], modelToUse);
+              }
+            }
+          }
+          
+          // Special handling for UI Design stage (stage 3) to ensure HTML wireframes
+          if (stage.stageNumber === 3) {
+            const hasHTML = aiResponse.content.includes("<!DOCTYPE") || 
+                           aiResponse.content.includes("<html") ||
+                           aiResponse.content.includes("```html");
+            
+            if (!hasHTML) {
+              // Force HTML wireframe generation
+              const overridePrompt = `Create a simple HTML wireframe for: "${messageData.content}". 
+
+You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme (#FF6B35 for primary elements, #FFA500 for accents).
+
+Include a complete HTML document with basic styling. Keep it simple but functional.`;
+              
+              aiResponse = await aiService.chat([
+                { role: "system", content: "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks." },
+                { role: "user", content: overridePrompt }
+              ], modelToUse);
+            }
+          }
+          
+          // Create user message AFTER AI processing to avoid race conditions
+          const message = await storage.createMessage(messageData);
+          
           const aiMessage = await storage.createMessage({
             stageId: req.params.stageId,
             role: "assistant",
