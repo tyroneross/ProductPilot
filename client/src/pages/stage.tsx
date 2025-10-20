@@ -1,18 +1,50 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, SkipForward } from "lucide-react";
 import ChatInterface from "@/components/chat-interface";
 import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import type { Stage } from "@shared/schema";
 
 export default function StagePage() {
   const { stageId } = useParams();
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: stage, isLoading } = useQuery<Stage>({
     queryKey: ["/api/stages", stageId],
     enabled: !!stageId,
+  });
+
+  const skipStageMutation = useMutation({
+    mutationFn: async () => {
+      if (!stageId) return null;
+      const res = await apiRequest("PATCH", `/api/stages/${stageId}`, {
+        progress: 100,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/stages", stageId] });
+      if (stage) {
+        queryClient.invalidateQueries({ queryKey: ["/api/projects", stage.projectId, "stages"] });
+      }
+      toast({
+        title: "Stage skipped",
+        description: "You can always come back to this stage later.",
+      });
+      setLocation("/projects");
+    },
+    onError: () => {
+      toast({
+        title: "Failed to skip stage",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   if (isLoading) {
@@ -55,9 +87,22 @@ export default function StagePage() {
               <p className="text-description text-contrast-medium">{stage.description}</p>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-metadata text-contrast-medium">Progress:</span>
-            <span className="text-description font-medium text-accent">{stage.progress}%</span>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <span className="text-metadata text-contrast-medium">Progress:</span>
+              <span className="text-description font-medium text-accent">{stage.progress}%</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => skipStageMutation.mutate()}
+              disabled={skipStageMutation.isPending}
+              className="min-h-[44px]"
+              data-testid="button-skip-stage"
+            >
+              <SkipForward className="w-4 h-4 mr-2" />
+              Skip Stage
+            </Button>
           </div>
         </div>
       </header>

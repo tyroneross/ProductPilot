@@ -44,10 +44,14 @@ Preferred communication style: Simple, everyday language.
 - **Storage Modes**: PostgreSQL (production) with in-memory fallback (development)
 
 ### AI Integration
-- **Provider**: OpenAI GPT-4o as the primary AI model
-- **Service Layer**: Abstracted AI service supporting multiple models (Claude Sonnet, GPT variants)
+- **Provider**: Anthropic Claude as primary (Sonnet for most stages, Haiku for UI wireframes)
+- **Secondary**: OpenAI GPT-4o support
+- **Service Layer**: Abstracted AI service supporting multiple models
 - **Chat Interface**: Conversational AI with system prompts and context management
 - **Structured Outputs**: JSON response formatting for data extraction
+- **Backend Validation**:
+  - PRD stage: Prevents premature document generation (requires 5+ user messages)
+  - UI Design stage: Ensures HTML wireframes are generated (orange theme)
 
 ### Design System
 
@@ -79,27 +83,54 @@ Preferred communication style: Simple, everyday language.
 
 ### User Workflow
 
-**Primary Flow (Conversation-First):**
+**New Flexible Entry Flow:**
 
-1. **New Product Creation**
-   - User describes what they want to build
-   - Immediately enters conversational interview mode
-   - AI guides through gathering comprehensive product information
-   - Generates PRD, architecture design, coding prompts, and development guide
+1. **Landing Page** (/)
+   - Simple "What do you want to build?" textarea
+   - No project creation required upfront
+   - User describes product idea in plain language
 
-2. **Existing Product Access**
-   - **View Documents**: See all generated documentation (PRD, architecture, etc.)
-   - **Continue Building**: Iterate through conversation to refine and add details
-   - **Stage-by-Stage**: Optional structured workflow for targeted refinement
+2. **Workflow Selection**
+   After describing the idea, choose from two modes:
+   
+   **Interview Mode** (/session/interview):
+   - Conversational Q&A session
+   - AI asks 5-7 clarifying questions before generating PRD
+   - Lazy project creation: first message triggers temporary project
+   - Save button always visible for naming/saving project anytime
+   
+   **Section-by-Section Mode** (/session/sections):
+   - View all 6 stages as cards
+   - Choose specific sections to work on
+   - Skip sections not needed
+   - Working draft created for stages display
+   - Save button allows renaming/finalizing project
 
-**Alternative Approaches:**
+3. **Save Functionality**
+   - Save button visible throughout workflow
+   - Opens dialog to name/rename project
+   - Can save at any time during process
+   - Interview mode: lazy creation on first message
+   - Section mode: temporary draft until saved
 
-- **Document View**: Review and iterate on complete product documentation
-- **Stage-Based Mode**: Work through 5 stages systematically with Discussion Goals
-  - Discussion Goals: Left sidebar with question-based goals for quick iteration
-  - Progress Tracking: 0-100% completion scoring per stage
-  - Context Flow: Visual representation of stage progression
-  - Chat Integration: Stage-specific AI assistants with custom prompts
+4. **Skip Feature**
+   - Skip button on all stage pages
+   - Marks stage as complete (100% progress)
+   - Redirects to projects page
+   - User can return to stage anytime
+
+5. **Existing Projects** (/projects)
+   - View all saved projects
+   - Access documents, continue building, or work stage-by-stage
+   - Classic project management view
+
+**6 Stages:**
+1. Requirements & Discussion Goals
+2. Product Requirements (PRD) - Conversational with Claude Sonnet
+3. UI Design & Wireframes - HTML mockups with Claude Haiku
+4. Architecture Design
+5. Coding Prompts
+6. Development Guide
 
 ## External Dependencies
 

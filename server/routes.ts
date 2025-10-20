@@ -41,6 +41,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/projects/:id", async (req, res) => {
+    try {
+      const updates = z.object({
+        name: z.string().optional(),
+        description: z.string().optional(),
+        mode: z.enum(["interview", "stage-based"]).optional(),
+        aiModel: z.string().optional(),
+      }).parse(req.body);
+      
+      const project = await storage.getProject(req.params.id);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      
+      const updatedProject = await storage.updateProject(req.params.id, updates);
+      res.json(updatedProject);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid project data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update project" });
+    }
+  });
+
   app.delete("/api/projects/:id", async (req, res) => {
     try {
       const deleted = await storage.deleteProject(req.params.id);
@@ -108,6 +132,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stageId: req.params.stageId,
       });
       
+      const message = await storage.createMessage(messageData);
+      
       // If this is a user message, generate AI response
       if (messageData.role === "user") {
         const stage = await storage.getStage(req.params.stageId);
@@ -121,17 +147,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ message: "Project not found" });
         }
 
-        // Get existing messages BEFORE creating the new one to get accurate count
+        // Get existing messages (including the one we just created)
         const existingMessages = await storage.getMessagesByStage(req.params.stageId);
         
-        // Create and save the user message first for resilient error handling
-        const message = await storage.createMessage(messageData);
-        
-        // Build conversation history with the new user message
+        // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
           { role: "system", content: stage.systemPrompt },
-          ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-          { role: "user", content: messageData.content }
+          ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))
         ];
 
         try {
@@ -140,8 +162,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Special handling for PRD stage (stage 2) to prevent premature document generation
           if (stage.stageNumber === 2) {
-            // Count existing messages + 1 for the message we just created
-            const userMessageCount = existingMessages.filter(m => m.role === "user").length + 1;
+            // Count user messages (including the one we just created)
+            const userMessageCount = existingMessages.filter(m => m.role === "user").length;
             
             // If we have fewer than 6 user messages and the AI generated a document, force it to ask questions instead
             if (userMessageCount < 6) {

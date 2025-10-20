@@ -5,6 +5,7 @@ interface IStorage {
   createProject(project: InsertProject): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
   getAllProjects(): Promise<Project[]>;
+  updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
 
   // Stages  
@@ -136,6 +137,21 @@ class MemStorage implements IStorage {
     return Array.from(this.projects.values());
   }
 
+  async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
+    const existing = this.projects.get(id);
+    if (!existing) {
+      return undefined;
+    }
+    
+    const updated: Project = {
+      ...existing,
+      ...updates,
+      updatedAt: new Date(),
+    };
+    this.projects.set(id, updated);
+    return updated;
+  }
+
   async deleteProject(id: string): Promise<boolean> {
     const deleted = this.projects.delete(id);
     // Also delete related stages and messages
@@ -241,6 +257,23 @@ class PostgresStorage implements IStorage {
     const { projects } = await import("@shared/schema");
     const { desc } = await import("drizzle-orm");
     return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+  }
+
+  async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
+    const { projects } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    
+    const finalUpdates: any = { ...updates };
+    if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
+      finalUpdates.updatedAt = new Date();
+    }
+    
+    const [updatedProject] = await this.db.update(projects)
+      .set(finalUpdates)
+      .where(eq(projects.id, id))
+      .returning();
+    
+    return updatedProject;
   }
 
   async deleteProject(id: string): Promise<boolean> {
