@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, FileText, Code, Layout, ListTodo } from "lucide-react";
+import { ArrowLeft, FileText, Code, Layout, ListTodo, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project, Stage } from "@shared/schema";
 
@@ -42,24 +42,31 @@ export default function DocumentsPage() {
       description: "User stories, features, and success metrics",
     },
     {
+      id: "ui-design",
+      title: "UI Design & Wireframes",
+      icon: Palette,
+      stage: stages.find((s) => s.stageNumber === 3),
+      description: "Simple wireframe mockups with orange theme",
+    },
+    {
       id: "architecture",
       title: "System Architecture",
       icon: Layout,
-      stage: stages.find((s) => s.stageNumber === 3),
+      stage: stages.find((s) => s.stageNumber === 4),
       description: "Technical design and architecture decisions",
     },
     {
       id: "prompts",
       title: "Coding Prompts",
       icon: Code,
-      stage: stages.find((s) => s.stageNumber === 4),
+      stage: stages.find((s) => s.stageNumber === 5),
       description: "AI-optimized implementation instructions",
     },
     {
       id: "guide",
       title: "Development Guide",
       icon: ListTodo,
-      stage: stages.find((s) => s.stageNumber === 5),
+      stage: stages.find((s) => s.stageNumber === 6),
       description: "Implementation roadmap and milestones",
     },
   ];
@@ -101,7 +108,7 @@ export default function DocumentsPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {documents.map((doc) => {
             const Icon = doc.icon;
             const hasContent = doc.stage && doc.stage.progress > 0;
@@ -113,11 +120,11 @@ export default function DocumentsPage() {
                 onClick={() => doc.stage && setLocation(`/stage/${doc.stage.id}`)}
                 data-testid={`document-${doc.id}`}
               >
-                <div className="flex items-start space-x-4">
-                  <div className={`p-3 rounded-lg ${hasContent ? 'bg-accent' : 'bg-surface-secondary'}`}>
+                <div className="flex flex-col space-y-3">
+                  <div className={`p-3 rounded-lg self-start ${hasContent ? 'bg-accent' : 'bg-surface-secondary'}`}>
                     <Icon className={`w-6 h-6 ${hasContent ? 'text-surface-primary' : 'text-contrast-medium'}`} />
                   </div>
-                  <div className="flex-1">
+                  <div>
                     <h3 className="text-title text-contrast-high mb-1">{doc.title}</h3>
                     <p className="text-description text-contrast-medium mb-3">{doc.description}</p>
                     {doc.stage && (

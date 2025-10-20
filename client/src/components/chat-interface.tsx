@@ -4,6 +4,7 @@ import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
+import WireframePreview from "@/components/wireframe-preview";
 import type { Stage, Message } from "@shared/schema";
 
 interface ChatInterfaceProps {
@@ -46,6 +47,19 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const extractHTMLFromMessage = (content: string): string | null => {
+    const htmlMatch = content.match(/```html\n([\s\S]*?)\n```/);
+    if (htmlMatch) return htmlMatch[1];
+    
+    if (content.includes("<!DOCTYPE html") || content.includes("<html")) {
+      return content;
+    }
+    
+    return null;
+  };
+
+  const isUIDesignStage = stage.stageNumber === 3;
+
   return (
     <>
       <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ maxHeight: "calc(90vh - 200px)" }}>
@@ -61,32 +75,47 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
             </div>
           </div>
         ) : (
-          messages.map((message: Message) => (
-            <div 
-              key={message.id} 
-              className={`flex items-start space-x-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
-              data-testid={`message-${message.role}-${message.id}`}
-            >
+          messages.map((message: Message) => {
+            const htmlContent = isUIDesignStage && message.role === "assistant" 
+              ? extractHTMLFromMessage(message.content) 
+              : null;
+
+            return (
               <div 
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-small font-medium ${
-                  message.role === "user" 
-                    ? "bg-contrast-high text-surface-primary" 
-                    : "bg-accent text-surface-primary"
-                }`}
+                key={message.id} 
+                className={`flex items-start space-x-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
+                data-testid={`message-${message.role}-${message.id}`}
               >
-                {message.role === "user" ? "U" : "AI"}
+                <div 
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-small font-medium ${
+                    message.role === "user" 
+                      ? "bg-contrast-high text-surface-primary" 
+                      : "bg-accent text-surface-primary"
+                  }`}
+                >
+                  {message.role === "user" ? "U" : "AI"}
+                </div>
+                <div 
+                  className={`flex-1 rounded-lg p-3 ${
+                    message.role === "user" 
+                      ? "bg-accent text-surface-primary" 
+                      : "bg-surface-secondary text-contrast-high"
+                  } ${htmlContent ? "max-w-none" : ""}`}
+                >
+                  {htmlContent ? (
+                    <div className="space-y-3">
+                      <p className="text-small whitespace-pre-wrap">{message.content.replace(/```html\n[\s\S]*?\n```/, "[See wireframe preview below]")}</p>
+                      <div className="border border-gray-300 rounded-lg overflow-hidden" style={{ height: "500px" }}>
+                        <WireframePreview htmlContent={htmlContent} />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-small whitespace-pre-wrap">{message.content}</p>
+                  )}
+                </div>
               </div>
-              <div 
-                className={`flex-1 rounded-lg p-3 ${
-                  message.role === "user" 
-                    ? "bg-accent text-surface-primary" 
-                    : "bg-surface-secondary text-contrast-high"
-                }`}
-              >
-                <p className="text-small whitespace-pre-wrap">{message.content}</p>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
         
         {sendMessageMutation.isPending && (

@@ -16,7 +16,7 @@ export const projects = pgTable("projects", {
 export const stages = pgTable("stages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  stageNumber: integer("stage_number").notNull(), // 1-5
+  stageNumber: integer("stage_number").notNull(), // 1-6
   title: text("title").notNull(),
   description: text("description").notNull(),
   progress: integer("progress").notNull().default(0), // 0-100
@@ -104,27 +104,67 @@ Ask clarifying questions and ensure all critical aspects are covered before movi
   {
     stageNumber: 2,
     title: "Product Requirements",
-    description: "Create detailed PRD document",
-    systemPrompt: `You are a product requirements specialist. Help create a comprehensive PRD including:
+    description: "Create detailed PRD through conversation",
+    systemPrompt: `You are a product requirements specialist. Your goal is to create a comprehensive PRD, but ONLY after gathering sufficient information through conversation.
 
-1. Executive summary
-2. User stories and acceptance criteria
-3. Feature prioritization
-4. Technical requirements
-5. Success metrics and KPIs
+IMPORTANT RULES:
+1. DO NOT generate a full PRD on the first response
+2. Ask 3-5 focused questions to understand the user's needs deeply
+3. Explore user stories, use cases, and specific scenarios
+4. Dig into edge cases and user workflows
+5. Only when you have comprehensive understanding (usually after 5+ exchanges), offer to generate the full PRD
 
-Structure the output as a professional PRD document.`,
+Start by asking about:
+- Who are the specific users and what problems are they facing?
+- What are the key user journeys and workflows?
+- What features are absolutely essential vs nice-to-have?
+- What constraints exist (technical, business, timeline)?
+- How will success be measured?
+
+Be conversational, curious, and thorough. Guide the user to think deeply about their product.`,
     isUnlocked: true,
     keyInsights: [
-      "Executive summary written",
-      "User stories with acceptance criteria",
-      "Feature prioritization matrix",
-      "Technical requirements specified",
-      "KPIs and success metrics defined"
+      "User stories and personas explored in depth",
+      "Key workflows and journeys mapped",
+      "Feature prioritization discussed",
+      "Success metrics and KPIs defined",
+      "Full PRD document generated"
     ],
   },
   {
     stageNumber: 3,
+    title: "UI Design & Wireframes",
+    description: "Generate simple wireframe mockups",
+    systemPrompt: `You are a UI/UX designer specializing in creating simple, functional wireframes. Your task is to generate HTML wireframes based on the product requirements.
+
+WIREFRAME GENERATION RULES:
+1. Create simple, clean HTML wireframes using basic tags
+2. Use inline styles with an orange color scheme (#FF6B35 for primary, #FFA500 for accents)
+3. Focus on layout, navigation, and key UI elements
+4. Include placeholders for text, images, and interactive elements
+5. Keep it simple - this is a wireframe, not a full design
+6. Use semantic HTML (header, nav, main, section, footer)
+7. Add comments to explain sections
+
+Ask the user about:
+- Which pages/screens should be wireframed?
+- What are the key user interactions?
+- Are there specific UI patterns they prefer?
+- What devices should be considered?
+
+Generate clean, viewable HTML that demonstrates the UI structure.`,
+    aiModel: "claude-haiku",
+    isUnlocked: true,
+    keyInsights: [
+      "Key screens and pages identified",
+      "Navigation structure defined",
+      "User interaction flows mapped",
+      "Wireframes generated for main views",
+      "UI dependencies documented for architecture"
+    ],
+  },
+  {
+    stageNumber: 4,
     title: "System Architecture",
     description: "Design technical architecture",
     systemPrompt: `You are a senior software architect. Design comprehensive system architecture including:
@@ -135,18 +175,24 @@ Structure the output as a professional PRD document.`,
 4. Scalability considerations
 5. Security architecture
 
+IMPORTANT: Reference the UI wireframes from the previous stage to inform your architecture decisions:
+- If there's a search bar, determine what type of search is needed (semantic, keyword, full-text)
+- If there's real-time features, plan for WebSockets or polling
+- If there's user-generated content, plan storage and moderation
+- If there's complex forms, plan validation and data processing
+
 Provide detailed technical specifications and architectural decisions.`,
     isUnlocked: true,
     keyInsights: [
       "System components defined",
       "Data flow architecture designed",
-      "Technology stack selected",
+      "Technology stack selected based on UI needs",
       "Scalability strategy planned",
       "Security architecture specified"
     ],
   },
   {
-    stageNumber: 4,
+    stageNumber: 5,
     title: "Coding Prompts",
     description: "Generate optimized coding instructions",
     systemPrompt: `You are an expert in agentic IDE tools and prompt engineering. Generate optimized prompts for:
@@ -168,7 +214,7 @@ Optimize for the selected AI model and agentic IDE workflow.`,
     ],
   },
   {
-    stageNumber: 5,
+    stageNumber: 6,
     title: "Development Guide",
     description: "Step-by-step implementation guide",
     systemPrompt: `You are a development project manager. Create a comprehensive implementation guide with:
