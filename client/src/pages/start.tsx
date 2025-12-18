@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Sparkles, MessageCircle, ListChecks } from "lucide-react";
+import { Sparkles, MessageCircle, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -15,7 +15,7 @@ export default function StartPage() {
     }
   };
 
-  const handleModeSelection = async (mode: "interview" | "sections") => {
+  const handleModeSelection = async (mode: "interview" | "survey") => {
     // Create a session in local storage to hold the idea temporarily
     sessionStorage.setItem("productIdea", description);
     sessionStorage.setItem("workflowMode", mode);
@@ -23,7 +23,7 @@ export default function StartPage() {
     if (mode === "interview") {
       setLocation("/session/interview");
     } else {
-      setLocation("/session/sections");
+      setLocation("/session/survey");
     }
   };
 
@@ -58,19 +58,19 @@ export default function StartPage() {
             </button>
 
             <button
-              onClick={() => handleModeSelection("sections")}
+              onClick={() => handleModeSelection("survey")}
               className="bg-surface-primary rounded-lg border-2 border-gray-200 p-8 hover:border-accent hover:shadow-lg transition-all text-left group"
-              data-testid="button-select-sections-mode"
+              data-testid="button-select-survey-mode"
             >
               <div className="p-3 bg-surface-secondary rounded-lg w-fit mb-4 group-hover:scale-110 transition-transform">
-                <ListChecks className="w-8 h-8 text-contrast-high" />
+                <ClipboardList className="w-8 h-8 text-contrast-high" />
               </div>
-              <h3 className="text-h4 font-medium text-contrast-high mb-2">Section-by-Section Mode</h3>
+              <h3 className="text-h4 font-medium text-contrast-high mb-2">Survey Mode</h3>
               <p className="text-description text-contrast-medium mb-4">
-                Work through each section individually. Skip sections you don't need and focus on what matters to you.
+                Quick discovery chat then a dynamic survey with sliders and selects. Efficient way to capture detailed requirements.
               </p>
               <div className="flex items-center text-accent">
-                <span className="text-description font-medium">Choose Sections</span>
+                <span className="text-description font-medium">Start Survey</span>
                 <span className="ml-2">→</span>
               </div>
             </button>

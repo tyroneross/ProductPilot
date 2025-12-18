@@ -10,6 +10,7 @@ import InterviewPage from "@/pages/interview";
 import DocumentsPage from "@/pages/documents";
 import SessionInterviewPage from "@/pages/session-interview";
 import SessionSectionsPage from "@/pages/session-sections";
+import SessionSurveyPage from "@/pages/session-survey";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/documents/:projectId" component={DocumentsPage} />
       <Route path="/session/interview" component={SessionInterviewPage} />
       <Route path="/session/sections" component={SessionSectionsPage} />
+      <Route path="/session/survey" component={SessionSurveyPage} />
       <Route component={NotFound} />
     </Switch>
   );
