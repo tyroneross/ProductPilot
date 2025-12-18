@@ -12,6 +12,7 @@ export const projects = pgTable("projects", {
   surveyPhase: text("survey_phase").default("discovery"), // "discovery" | "survey" | "complete"
   surveyDefinition: jsonb("survey_definition"), // AI-generated survey questions
   surveyResponses: jsonb("survey_responses"), // User's survey answers
+  customPrompts: jsonb("custom_prompts"), // User-defined LLM prompts for various uses
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -49,7 +50,23 @@ export const insertProjectSchema = createInsertSchema(projects).pick({
   surveyPhase: true,
   surveyDefinition: true,
   surveyResponses: true,
+  customPrompts: true,
 });
+
+// Custom prompt types for user-defined LLM prompts
+export const CustomPromptSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  prompt: z.string(),
+  category: z.enum(["requirements", "features", "architecture", "coding", "testing", "general"]),
+  isActive: z.boolean().default(true),
+});
+
+export const CustomPromptsSchema = z.array(CustomPromptSchema);
+
+export type CustomPrompt = z.infer<typeof CustomPromptSchema>;
+export type CustomPrompts = z.infer<typeof CustomPromptsSchema>;
 
 // Survey question types for the dynamic form
 export const SurveyQuestionSchema = z.object({

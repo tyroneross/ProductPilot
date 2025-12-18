@@ -51,6 +51,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         surveyPhase: z.enum(["discovery", "survey", "complete"]).optional(),
         surveyDefinition: z.any().optional(),
         surveyResponses: z.any().optional(),
+        customPrompts: z.any().optional(),
       }).parse(req.body);
       
       const project = await storage.getProject(req.params.id);
@@ -263,24 +264,35 @@ Include a complete HTML document with basic styling. Keep it simple but function
       const prdStage = stages.find(s => s.stageNumber === 2);
       const discoveryMessages = prdStage ? await storage.getMessagesByStage(prdStage.id) : [];
 
-      const surveyPrompt = `Based on this product idea and discovery conversation, generate a comprehensive survey to capture the information needed to create detailed product documentation.
+      const surveyPrompt = `You are creating a DYNAMIC, PERSONALIZED survey based on THIS SPECIFIC product idea. Analyze the product type and tailor every question to be relevant.
 
 Product Idea: "${project.description}"
 
 Discovery Conversation:
 ${discoveryMessages.map(m => `${m.role}: ${m.content}`).join('\n')}
 
-Generate a survey with 5 sections (one for each documentation phase):
-1. Requirements (user personas, problem statement, goals)
-2. Product Features (core features, priority, MVP scope)
-3. User Experience (key workflows, UI preferences)
-4. Technical Architecture (scale, integrations, tech preferences)
-5. Development Plan (timeline, team size, constraints)
+CRITICAL INSTRUCTIONS:
+1. ANALYZE the product type first (mobile app, web app, SaaS, marketplace, API, game, etc.)
+2. TAILOR all questions specifically to this product - generic questions are NOT acceptable
+3. Use product-specific terminology and options that match what the user described
+4. Reference specific features or concepts mentioned in the conversation
 
-Each section should have 3-5 questions. Use these question types strategically:
-- "slider" for scales/priorities/ratings (include min, max, minLabel, maxLabel)
-- "single-select" for mutually exclusive choices (include options array)
-- "multi-select" for selecting multiple items (include options array)
+Generate a survey with 5 sections:
+1. Requirements - tailored to THIS product's user base and problem space
+2. Product Features - specific to features that make sense for THIS product type
+3. User Experience - relevant to how THIS product would be used
+4. Technical Architecture - appropriate tech choices for THIS product type
+5. Development Plan - realistic for THIS product scope
+
+Question Type Guidelines:
+- "slider" (1-5 or 1-10 scale) for priorities, importance, complexity ratings
+- "single-select" for mutually exclusive choices - OPTIONS MUST BE SPECIFIC TO THIS PRODUCT
+- "multi-select" for selecting multiple applicable items - OPTIONS MUST BE RELEVANT
+
+EXAMPLE of product-specific questions:
+- For a "task management app": "Which task views are essential?" with options like "List view", "Kanban board", "Calendar view", "Timeline/Gantt"
+- For an "e-commerce platform": "Which payment methods will you support?" with options like "Credit cards", "PayPal", "Crypto", "Buy now pay later"
+- For a "fitness app": "Which tracking features are priorities?" with options like "Workout logging", "Nutrition tracking", "Sleep monitoring", "Heart rate"
 
 Respond with ONLY valid JSON in this exact format:
 {
@@ -291,14 +303,14 @@ Respond with ONLY valid JSON in this exact format:
       "description": "Define your target users and core objectives",
       "questions": [
         {
-          "id": "q1_user_tech_level",
+          "id": "q1_example",
           "section": "requirements",
-          "question": "How technical are your target users?",
+          "question": "[Product-specific question]",
           "type": "slider",
           "min": 1,
           "max": 5,
-          "minLabel": "Non-technical",
-          "maxLabel": "Highly technical",
+          "minLabel": "[Relevant label]",
+          "maxLabel": "[Relevant label]",
           "required": true
         }
       ]

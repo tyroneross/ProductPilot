@@ -39,6 +39,7 @@ class MemStorage implements IStorage {
       surveyPhase: insertProject.surveyPhase || "discovery",
       surveyDefinition: insertProject.surveyDefinition || null,
       surveyResponses: insertProject.surveyResponses || null,
+      customPrompts: insertProject.customPrompts || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
