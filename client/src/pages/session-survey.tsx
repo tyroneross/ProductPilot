@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, Send, Save, ChevronRight, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,12 @@ import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Project, Stage, Message, SurveyDefinition, SurveyResponse } from "@shared/schema";
+import type { Project, Stage, Message, SurveyDefinition, SurveyResponse, CustomPrompt } from "@shared/schema";
 
 export default function SessionSurveyPage() {
   const [, setLocation] = useLocation();
@@ -22,6 +24,16 @@ export default function SessionSurveyPage() {
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse>({});
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [isGeneratingDocs, setIsGeneratingDocs] = useState(false);
+  const [showPromptsSection, setShowPromptsSection] = useState(false);
+  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
+  const [showAddPromptDialog, setShowAddPromptDialog] = useState(false);
+  const [newPrompt, setNewPrompt] = useState<Partial<CustomPrompt>>({
+    name: "",
+    description: "",
+    prompt: "",
+    category: "general",
+    isActive: true,
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const draftCreated = useRef(false);
   const queryClient = useQueryClient();
@@ -55,6 +67,12 @@ export default function SessionSurveyPage() {
       createDraftProject();
     }
   }, []);
+
+  useEffect(() => {
+    if (project?.customPrompts) {
+      setCustomPrompts(project.customPrompts as CustomPrompt[]);
+    }
+  }, [project?.customPrompts]);
 
   const createDraftProject = async () => {
     try {
@@ -222,6 +240,62 @@ export default function SessionSurveyPage() {
     if (projectName.trim()) {
       saveProjectMutation.mutate(projectName);
     }
+  };
+
+  const savePromptsMutation = useMutation({
+    mutationFn: async (prompts: CustomPrompt[]) => {
+      if (projectId) {
+        const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { customPrompts: prompts });
+        return res.json();
+      }
+      return null;
+    },
+    onSuccess: () => {
+      refetchProject();
+      toast({
+        title: "Prompts saved!",
+        description: "Your custom prompts have been saved.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Failed to save prompts",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleAddPrompt = () => {
+    if (newPrompt.name && newPrompt.prompt) {
+      const prompt: CustomPrompt = {
+        id: `prompt_${Date.now()}`,
+        name: newPrompt.name,
+        description: newPrompt.description || "",
+        prompt: newPrompt.prompt,
+        category: newPrompt.category as CustomPrompt["category"] || "general",
+        isActive: true,
+      };
+      const updatedPrompts = [...customPrompts, prompt];
+      setCustomPrompts(updatedPrompts);
+      savePromptsMutation.mutate(updatedPrompts);
+      setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
+      setShowAddPromptDialog(false);
+    }
+  };
+
+  const handleDeletePrompt = (id: string) => {
+    const updatedPrompts = customPrompts.filter((p) => p.id !== id);
+    setCustomPrompts(updatedPrompts);
+    savePromptsMutation.mutate(updatedPrompts);
+  };
+
+  const handleTogglePrompt = (id: string) => {
+    const updatedPrompts = customPrompts.map((p) =>
+      p.id === id ? { ...p, isActive: !p.isActive } : p
+    );
+    setCustomPrompts(updatedPrompts);
+    savePromptsMutation.mutate(updatedPrompts);
   };
 
   useEffect(() => {
@@ -529,15 +603,31 @@ export default function SessionSurveyPage() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            onClick={handleSave}
-            className="min-h-[44px]"
-            data-testid="button-save-project"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            Save Project
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowPromptsSection(true)}
+              className="min-h-[44px]"
+              data-testid="button-manage-prompts"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Prompts
+              {customPrompts.length > 0 && (
+                <span className="ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
+                  {customPrompts.length}
+                </span>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSave}
+              className="min-h-[44px]"
+              data-testid="button-save-project"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Save Project
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -566,6 +656,160 @@ export default function SessionSurveyPage() {
               </Button>
               <Button onClick={handleSaveWithName} disabled={!projectName.trim()}>
                 Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPromptsSection} onOpenChange={setShowPromptsSection}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Custom LLM Prompts</DialogTitle>
+            <DialogDescription>
+              Define custom prompts to use throughout your app. These prompts can be used for requirements, features, architecture, coding, or testing.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex justify-between items-center">
+              <span className="text-description text-contrast-medium">
+                {customPrompts.length} prompt{customPrompts.length !== 1 ? "s" : ""} defined
+              </span>
+              <Button
+                onClick={() => setShowAddPromptDialog(true)}
+                className="btn-primary"
+                data-testid="button-add-prompt"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Prompt
+              </Button>
+            </div>
+
+            {customPrompts.length === 0 ? (
+              <div className="text-center py-8 text-contrast-medium">
+                <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p className="text-description">No custom prompts yet.</p>
+                <p className="text-metadata">Add prompts to customize AI behavior in your app.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {customPrompts.map((prompt) => (
+                  <div
+                    key={prompt.id}
+                    className={`bg-surface-secondary rounded-lg p-4 border ${
+                      prompt.isActive ? "border-accent" : "border-gray-200 opacity-60"
+                    }`}
+                    data-testid={`prompt-card-${prompt.id}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <h4 className="text-title font-medium text-contrast-high">{prompt.name}</h4>
+                          <span className="text-xs bg-surface-primary px-2 py-0.5 rounded text-contrast-medium">
+                            {prompt.category}
+                          </span>
+                        </div>
+                        {prompt.description && (
+                          <p className="text-metadata text-contrast-medium mb-2">{prompt.description}</p>
+                        )}
+                        <p className="text-description text-contrast-high line-clamp-2">{prompt.prompt}</p>
+                      </div>
+                      <div className="flex items-center space-x-2 ml-4">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleTogglePrompt(prompt.id)}
+                          className={prompt.isActive ? "text-accent" : "text-contrast-medium"}
+                          data-testid={`button-toggle-prompt-${prompt.id}`}
+                        >
+                          {prompt.isActive ? "Active" : "Inactive"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeletePrompt(prompt.id)}
+                          className="text-red-500 hover:text-red-700"
+                          data-testid={`button-delete-prompt-${prompt.id}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showAddPromptDialog} onOpenChange={setShowAddPromptDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custom Prompt</DialogTitle>
+            <DialogDescription>
+              Create a new LLM prompt for use in your application.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-description mb-2 block">Name</Label>
+              <Input
+                placeholder="e.g., Code Review Prompt"
+                value={newPrompt.name}
+                onChange={(e) => setNewPrompt({ ...newPrompt, name: e.target.value })}
+                data-testid="input-prompt-name"
+              />
+            </div>
+            <div>
+              <Label className="text-description mb-2 block">Category</Label>
+              <Select
+                value={newPrompt.category}
+                onValueChange={(value) => setNewPrompt({ ...newPrompt, category: value as CustomPrompt["category"] })}
+              >
+                <SelectTrigger data-testid="select-prompt-category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="requirements">Requirements</SelectItem>
+                  <SelectItem value="features">Features</SelectItem>
+                  <SelectItem value="architecture">Architecture</SelectItem>
+                  <SelectItem value="coding">Coding</SelectItem>
+                  <SelectItem value="testing">Testing</SelectItem>
+                  <SelectItem value="general">General</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-description mb-2 block">Description (optional)</Label>
+              <Input
+                placeholder="Brief description of what this prompt does"
+                value={newPrompt.description}
+                onChange={(e) => setNewPrompt({ ...newPrompt, description: e.target.value })}
+                data-testid="input-prompt-description"
+              />
+            </div>
+            <div>
+              <Label className="text-description mb-2 block">Prompt</Label>
+              <Textarea
+                placeholder="Enter your LLM prompt here..."
+                value={newPrompt.prompt}
+                onChange={(e) => setNewPrompt({ ...newPrompt, prompt: e.target.value })}
+                className="min-h-[150px]"
+                data-testid="textarea-prompt-content"
+              />
+            </div>
+            <div className="flex justify-end space-x-2">
+              <Button variant="ghost" onClick={() => setShowAddPromptDialog(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAddPrompt} 
+                disabled={!newPrompt.name?.trim() || !newPrompt.prompt?.trim()}
+                data-testid="button-save-prompt"
+              >
+                Add Prompt
               </Button>
             </div>
           </div>
