@@ -202,8 +202,13 @@ export default function SessionSurveyPage() {
 
   const handleSubmitSurvey = async () => {
     setIsGeneratingDocs(true);
-    await submitSurveyMutation.mutateAsync();
-    setIsGeneratingDocs(false);
+    try {
+      await submitSurveyMutation.mutateAsync();
+    } catch (error) {
+      // Error is already handled by mutation's onError
+    } finally {
+      setIsGeneratingDocs(false);
+    }
   };
 
   const handleSave = () => {
