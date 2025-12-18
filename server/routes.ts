@@ -371,17 +371,53 @@ Respond with ONLY valid JSON in this exact format:
       // Get stages to update with generated content
       const stages = await storage.getStagesByProject(req.params.projectId);
       
+      // Get active custom prompts organized by category
+      const customPrompts = (project.customPrompts || []) as { id: string; name: string; prompt: string; category: string; isActive: boolean; }[];
+      const activePrompts = customPrompts.filter(p => p.isActive);
+      
+      // Create custom prompts context for AI
+      const customPromptsContext = activePrompts.length > 0 
+        ? `\n\nUSER'S CUSTOM PROMPTS (incorporate these into your response where appropriate):\n${activePrompts.map(p => `- ${p.name} [${p.category}]: ${p.prompt}`).join('\n')}`
+        : '';
+      
       // Generate documentation for each stage based on survey responses
       const surveyContext = `
 Product: ${project.description}
 Survey Definition: ${JSON.stringify(project.surveyDefinition)}
-Survey Responses: ${JSON.stringify(project.surveyResponses)}
+Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsContext}
 `;
 
+      // Map stage numbers to categories for reliable routing
+      // Stage 1: Requirements Definition, Stage 2: PRD Writing, Stage 3: Architecture Design
+      // Stage 4: Coding Prompts, Stage 5: Development Guide
+      const stageCategoryMap: Record<number, string> = {
+        1: 'requirements',
+        2: 'requirements',
+        3: 'architecture',
+        4: 'coding',
+        5: 'testing',
+      };
+
       for (const stage of stages) {
+        // Use stage number for deterministic category mapping, fallback to title-based matching
+        const stageCategory = stageCategoryMap[stage.stageNumber] || (() => {
+          const titleLower = stage.title.toLowerCase();
+          if (titleLower.includes('requirement') || titleLower.includes('prd') || titleLower.includes('goal') || titleLower.includes('scope')) return 'requirements';
+          if (titleLower.includes('feature') || titleLower.includes('ui') || titleLower.includes('design') || titleLower.includes('wireframe') || titleLower.includes('mockup')) return 'features';
+          if (titleLower.includes('architecture') || titleLower.includes('system') || titleLower.includes('infrastructure')) return 'architecture';
+          if (titleLower.includes('coding') || titleLower.includes('prompt') || titleLower.includes('implementation') || titleLower.includes('code')) return 'coding';
+          if (titleLower.includes('test') || titleLower.includes('qa') || titleLower.includes('quality') || titleLower.includes('guide') || titleLower.includes('deploy') || titleLower.includes('release')) return 'testing';
+          return 'general';
+        })();
+        
+        const relevantPrompts = activePrompts.filter(p => p.category === stageCategory || p.category === 'general');
+        const stagePromptsContext = relevantPrompts.length > 0
+          ? `\n\nRelevant custom prompts for this section:\n${relevantPrompts.map(p => `- ${p.name}: ${p.prompt}`).join('\n')}`
+          : '';
+        
         const docPrompt = `Based on this survey data, generate comprehensive content for the "${stage.title}" section.
 
-${surveyContext}
+${surveyContext}${stagePromptsContext}
 
 Generate detailed, professional documentation appropriate for this section. Be thorough and specific based on the survey answers provided.`;
 

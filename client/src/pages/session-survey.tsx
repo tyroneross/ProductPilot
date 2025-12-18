@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles } from "lucide-react";
+import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ export default function SessionSurveyPage() {
   const [showPromptsSection, setShowPromptsSection] = useState(false);
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
   const [showAddPromptDialog, setShowAddPromptDialog] = useState(false);
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [newPrompt, setNewPrompt] = useState<Partial<CustomPrompt>>({
     name: "",
     description: "",
@@ -268,20 +269,57 @@ export default function SessionSurveyPage() {
 
   const handleAddPrompt = () => {
     if (newPrompt.name && newPrompt.prompt) {
-      const prompt: CustomPrompt = {
-        id: `prompt_${Date.now()}`,
-        name: newPrompt.name,
-        description: newPrompt.description || "",
-        prompt: newPrompt.prompt,
-        category: newPrompt.category as CustomPrompt["category"] || "general",
-        isActive: true,
-      };
-      const updatedPrompts = [...customPrompts, prompt];
+      let updatedPrompts: CustomPrompt[];
+      
+      if (editingPromptId) {
+        updatedPrompts = customPrompts.map((p) =>
+          p.id === editingPromptId
+            ? {
+                ...p,
+                name: newPrompt.name!,
+                description: newPrompt.description || "",
+                prompt: newPrompt.prompt!,
+                category: newPrompt.category as CustomPrompt["category"] || "general",
+                isActive: p.isActive,
+              }
+            : p
+        );
+      } else {
+        const prompt: CustomPrompt = {
+          id: `prompt_${Date.now()}`,
+          name: newPrompt.name,
+          description: newPrompt.description || "",
+          prompt: newPrompt.prompt,
+          category: newPrompt.category as CustomPrompt["category"] || "general",
+          isActive: true,
+        };
+        updatedPrompts = [...customPrompts, prompt];
+      }
+      
       setCustomPrompts(updatedPrompts);
       savePromptsMutation.mutate(updatedPrompts);
       setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
+      setEditingPromptId(null);
       setShowAddPromptDialog(false);
     }
+  };
+
+  const handleEditPrompt = (prompt: CustomPrompt) => {
+    setNewPrompt({
+      name: prompt.name,
+      description: prompt.description,
+      prompt: prompt.prompt,
+      category: prompt.category,
+      isActive: prompt.isActive,
+    });
+    setEditingPromptId(prompt.id);
+    setShowAddPromptDialog(true);
+  };
+
+  const handleOpenAddDialog = () => {
+    setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
+    setEditingPromptId(null);
+    setShowAddPromptDialog(true);
   };
 
   const handleDeletePrompt = (id: string) => {
@@ -677,7 +715,7 @@ export default function SessionSurveyPage() {
                 {customPrompts.length} prompt{customPrompts.length !== 1 ? "s" : ""} defined
               </span>
               <Button
-                onClick={() => setShowAddPromptDialog(true)}
+                onClick={handleOpenAddDialog}
                 className="btn-primary"
                 data-testid="button-add-prompt"
               >
@@ -719,6 +757,15 @@ export default function SessionSurveyPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => handleEditPrompt(prompt)}
+                          className="text-contrast-medium hover:text-contrast-high"
+                          data-testid={`button-edit-prompt-${prompt.id}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => handleTogglePrompt(prompt.id)}
                           className={prompt.isActive ? "text-accent" : "text-contrast-medium"}
                           data-testid={`button-toggle-prompt-${prompt.id}`}
@@ -744,12 +791,18 @@ export default function SessionSurveyPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showAddPromptDialog} onOpenChange={setShowAddPromptDialog}>
+      <Dialog open={showAddPromptDialog} onOpenChange={(open) => {
+        if (!open) {
+          setEditingPromptId(null);
+          setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
+        }
+        setShowAddPromptDialog(open);
+      }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Custom Prompt</DialogTitle>
+            <DialogTitle>{editingPromptId ? "Edit Custom Prompt" : "Add Custom Prompt"}</DialogTitle>
             <DialogDescription>
-              Create a new LLM prompt for use in your application.
+              {editingPromptId ? "Update your LLM prompt." : "Create a new LLM prompt for use in your application."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -809,7 +862,7 @@ export default function SessionSurveyPage() {
                 disabled={!newPrompt.name?.trim() || !newPrompt.prompt?.trim()}
                 data-testid="button-save-prompt"
               >
-                Add Prompt
+                {editingPromptId ? "Save Changes" : "Add Prompt"}
               </Button>
             </div>
           </div>
