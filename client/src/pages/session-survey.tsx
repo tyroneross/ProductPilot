@@ -414,7 +414,7 @@ export default function SessionSurveyPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-gray-200 p-6 bg-surface-primary">
+      <div className="border-t border-gray-200 p-4 md:p-6 bg-surface-primary sticky bottom-0 z-10">
         {canGenerateSurvey && (
           <div className="mb-4 p-4 bg-surface-secondary rounded-lg border border-accent">
             <p className="text-description text-contrast-high mb-3">
@@ -441,19 +441,20 @@ export default function SessionSurveyPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex space-x-3">
+        <form onSubmit={handleSubmit} className="flex space-x-2 md:space-x-3">
           <Input
             type="text"
             placeholder="Type your answer..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            className="flex-1 min-h-[44px]"
+            className="flex-1 min-h-[44px] text-base"
             disabled={sendMessageMutation.isPending || !prdStage}
             data-testid="input-discovery-message"
+            autoComplete="off"
           />
           <Button
             type="submit"
-            className="btn-primary min-h-[44px] min-w-[44px]"
+            className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
             disabled={!inputValue.trim() || sendMessageMutation.isPending || !prdStage}
             data-testid="button-send-discovery-message"
           >

@@ -34,7 +34,9 @@ class MemStorage implements IStorage {
   async createProject(insertProject: InsertProject): Promise<Project> {
     const project: Project = {
       id: this.generateId(),
-      ...insertProject,
+      name: insertProject.name,
+      description: insertProject.description,
+      mode: insertProject.mode || "interview",
       aiModel: insertProject.aiModel || "claude-sonnet",
       surveyPhase: insertProject.surveyPhase || "discovery",
       surveyDefinition: insertProject.surveyDefinition || null,
@@ -64,7 +66,51 @@ class MemStorage implements IStorage {
         stageNumber: 2,
         title: "PRD Writing",
         description: "Create comprehensive Product Requirements Document",
-        systemPrompt: "You are a PRD writing specialist. Help create detailed product specifications.",
+        systemPrompt: `<CRITICAL_INSTRUCTION>
+You are an interviewer gathering requirements. You MUST NOT generate any PRD document until AFTER at least 6 user responses.
+
+FIRST: Count how many USER messages exist in this conversation.
+- If USER messages < 6: Ask ONE question ONLY. DO NOT generate ANY document sections, headers, or formatted content.
+- If USER messages >= 6: You may offer to generate the PRD if you have sufficient information.
+
+IMPORTANT: ASK ONLY ONE QUESTION AT A TIME. This makes the conversation feel natural and less overwhelming.
+
+YOUR RESPONSE FORMAT when USER messages < 6:
+1. Briefly acknowledge their previous answer (1-2 sentences max)
+2. Ask exactly ONE focused follow-up question
+3. Keep your response short and conversational
+
+Example GOOD responses:
+"That makes sense! Who are the primary users of this app?"
+
+"Great context. What's the one problem they face that frustrates them most?"
+
+"Interesting! How do they currently handle this without your app?"
+
+Example BAD response (too many questions):
+"Let me understand better:
+1. Who are the primary users?
+2. What problem do they face?
+3. How do they handle it now?"
+<DO_NOT_ASK_MULTIPLE_QUESTIONS>
+
+CONVERSATION FLOW (one question per exchange):
+Exchange 1: Who are the target users?
+Exchange 2: What problem are they facing?
+Exchange 3: What's the core solution/value prop?
+Exchange 4: What are the must-have features?
+Exchange 5: Any technical or business constraints?
+Exchange 6: How will you measure success?
+Exchange 7+: Offer to generate the PRD
+
+QUESTION TOPICS (ask ONE per response):
+- Target users and their pain points
+- Core problem being solved
+- Essential features vs nice-to-haves
+- Key user workflows
+- Technical or business constraints
+- Success metrics
+</CRITICAL_INSTRUCTION>`,
         keyInsights: [
           "What are your key user stories?",
           "What features are absolutely essential?",
@@ -170,12 +216,17 @@ class MemStorage implements IStorage {
   async createStage(insertStage: InsertStage): Promise<Stage> {
     const stage: Stage = {
       id: this.generateId(),
-      ...insertStage,
-      progress: insertStage.progress || 0,
-      isUnlocked: insertStage.isUnlocked !== undefined ? insertStage.isUnlocked : true,
-      outputs: insertStage.outputs || null,
-      keyInsights: insertStage.keyInsights || null,
-      completedInsights: insertStage.completedInsights || null,
+      projectId: insertStage.projectId,
+      stageNumber: insertStage.stageNumber,
+      title: insertStage.title,
+      description: insertStage.description,
+      systemPrompt: insertStage.systemPrompt,
+      aiModel: insertStage.aiModel || null,
+      progress: 0,
+      isUnlocked: true,
+      outputs: null,
+      keyInsights: null,
+      completedInsights: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

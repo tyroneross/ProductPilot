@@ -286,20 +286,21 @@ export default function SessionInterviewPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-gray-200 p-6 bg-surface-primary">
-          <form onSubmit={handleSubmit} className="flex space-x-3">
+        <div className="border-t border-gray-200 p-4 md:p-6 bg-surface-primary sticky bottom-0 z-10">
+          <form onSubmit={handleSubmit} className="flex space-x-2 md:space-x-3">
             <Input
               type="text"
               placeholder="Type your answer..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              className="flex-1 min-h-[44px]"
+              className="flex-1 min-h-[44px] text-base"
               disabled={sendMessageMutation.isPending}
               data-testid="input-interview-message"
+              autoComplete="off"
             />
             <Button
               type="submit"
-              className="btn-primary min-h-[44px] min-w-[44px]"
+              className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
               disabled={!inputValue.trim() || sendMessageMutation.isPending}
               data-testid="button-send-interview-message"
             >
