@@ -36,6 +36,9 @@ class MemStorage implements IStorage {
       id: this.generateId(),
       ...insertProject,
       aiModel: insertProject.aiModel || "claude-sonnet",
+      surveyPhase: insertProject.surveyPhase || "discovery",
+      surveyDefinition: insertProject.surveyDefinition || null,
+      surveyResponses: insertProject.surveyResponses || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

@@ -7,8 +7,11 @@ export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description").notNull(),
-  mode: text("mode").notNull().default("stage-based"), // "stage-based" | "interview"
+  mode: text("mode").notNull().default("stage-based"), // "stage-based" | "interview" | "survey"
   aiModel: text("ai_model").notNull().default("claude-sonnet"),
+  surveyPhase: text("survey_phase").default("discovery"), // "discovery" | "survey" | "complete"
+  surveyDefinition: jsonb("survey_definition"), // AI-generated survey questions
+  surveyResponses: jsonb("survey_responses"), // User's survey answers
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -43,7 +46,43 @@ export const insertProjectSchema = createInsertSchema(projects).pick({
   description: true,
   mode: true,
   aiModel: true,
+  surveyPhase: true,
+  surveyDefinition: true,
+  surveyResponses: true,
 });
+
+// Survey question types for the dynamic form
+export const SurveyQuestionSchema = z.object({
+  id: z.string(),
+  section: z.string(), // Which section this relates to (requirements, prd, architecture, etc.)
+  question: z.string(),
+  type: z.enum(["slider", "single-select", "multi-select"]),
+  options: z.array(z.string()).optional(), // For select types
+  min: z.number().optional(), // For slider
+  max: z.number().optional(), // For slider
+  minLabel: z.string().optional(), // For slider
+  maxLabel: z.string().optional(), // For slider
+  required: z.boolean().default(true),
+});
+
+export const SurveyDefinitionSchema = z.object({
+  sections: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    questions: z.array(SurveyQuestionSchema),
+  })),
+});
+
+export const SurveyResponseSchema = z.record(z.string(), z.union([
+  z.number(), // For sliders
+  z.string(), // For single-select
+  z.array(z.string()), // For multi-select
+]));
+
+export type SurveyQuestion = z.infer<typeof SurveyQuestionSchema>;
+export type SurveyDefinition = z.infer<typeof SurveyDefinitionSchema>;
+export type SurveyResponse = z.infer<typeof SurveyResponseSchema>;
 
 export const insertStageSchema = createInsertSchema(stages).pick({
   projectId: true,
