@@ -16,16 +16,15 @@ const isAdmin: RequestHandler = (req: any, res, next) => {
     return res.status(401).json({ message: "Unauthorized" });
   }
   
-  // Check if user email or name matches admin list
+  // Check if user email or ID matches admin list
   const userEmail = user.claims.email || "";
-  const userName = `${user.claims.first_name || ""} ${user.claims.last_name || ""}`.trim();
   const userId = user.claims.sub || "";
   
-  // For now, allow any authenticated user to be admin (can restrict later)
-  // You can add specific user IDs or emails to restrict access
-  if (!ADMIN_USERS.includes(userId) && !ADMIN_USERS.includes(userEmail) && !ADMIN_USERS.some(admin => userName.toLowerCase().includes(admin.toLowerCase()))) {
-    // For initial setup, allow all authenticated users
-    // return res.status(403).json({ message: "Forbidden: Admin access required" });
+  // Check against allowlist - user ID or email must match
+  const isAllowed = ADMIN_USERS.includes(userId) || ADMIN_USERS.includes(userEmail);
+  
+  if (!isAllowed) {
+    return res.status(403).json({ message: "Forbidden: Admin access required" });
   }
   
   next();
@@ -514,8 +513,8 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  // Admin Prompts CRUD
-  app.get("/api/admin/prompts", isAuthenticated, async (req, res) => {
+  // Admin Prompts CRUD (protected by isAdmin middleware)
+  app.get("/api/admin/prompts", isAuthenticated, isAdmin, async (req, res) => {
     try {
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
@@ -525,7 +524,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.get("/api/admin/prompts/:id", isAuthenticated, async (req, res) => {
+  app.get("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
     try {
       const prompt = await storage.getAdminPrompt(req.params.id);
       if (!prompt) {
@@ -537,7 +536,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.post("/api/admin/prompts", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/prompts", isAuthenticated, isAdmin, async (req: any, res) => {
     try {
       const promptData = insertAdminPromptSchema.parse(req.body);
       const userId = req.user?.claims?.sub || "unknown";
@@ -555,7 +554,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.put("/api/admin/prompts/:id", isAuthenticated, async (req: any, res) => {
+  app.put("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req: any, res) => {
     try {
       const updates = insertAdminPromptSchema.partial().parse(req.body);
       const userId = req.user?.claims?.sub || "unknown";
@@ -575,7 +574,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.delete("/api/admin/prompts/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
     try {
       const deleted = await storage.deleteAdminPrompt(req.params.id);
       if (!deleted) {
@@ -588,7 +587,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
   });
 
   // Seed default prompts if none exist
-  app.post("/api/admin/prompts/seed", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/prompts/seed", isAuthenticated, isAdmin, async (req: any, res) => {
     try {
       const existingPrompts = await storage.getAllAdminPrompts();
       if (existingPrompts.length > 0) {
