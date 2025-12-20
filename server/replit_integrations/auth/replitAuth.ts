@@ -18,11 +18,25 @@ const getOidcConfig = memoize(
   { maxAge: 3600 * 1000 }
 );
 
+// Build database URL from Replit PostgreSQL environment variables
+function getDatabaseUrl(): string {
+  if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
+    const host = process.env.PGHOST;
+    const user = process.env.PGUSER;
+    const password = process.env.PGPASSWORD;
+    const database = process.env.PGDATABASE;
+    const port = process.env.PGPORT || "5432";
+    // No SSL for Replit's local PostgreSQL
+    return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+  }
+  return process.env.DATABASE_URL || "";
+}
+
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
+    conString: getDatabaseUrl(),
     createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",

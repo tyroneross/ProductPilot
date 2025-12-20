@@ -1,14 +1,32 @@
 import { neon } from "@neondatabase/serverless";
 
+// Build database URL from Replit PostgreSQL environment variables
+function getDatabaseUrl(): string {
+  // If individual PG* vars are available, construct the URL from them
+  if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
+    const host = process.env.PGHOST;
+    const user = process.env.PGUSER;
+    const password = process.env.PGPASSWORD;
+    const database = process.env.PGDATABASE;
+    const port = process.env.PGPORT || "5432";
+    // No SSL for Replit's local PostgreSQL
+    return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+  }
+  
+  // Fallback to DATABASE_URL if set
+  if (process.env.DATABASE_URL) {
+    return process.env.DATABASE_URL;
+  }
+  
+  throw new Error("Database connection not configured. Please ensure PostgreSQL is provisioned.");
+}
+
 export async function runMigrations() {
   try {
     console.log("Running database migrations...");
     
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL environment variable is required");
-    }
-    
-    const sql = neon(process.env.DATABASE_URL);
+    const databaseUrl = getDatabaseUrl();
+    const sql = neon(databaseUrl);
     
     // Create projects table
     await sql`
@@ -50,6 +68,47 @@ export async function runMigrations() {
         "role" text NOT NULL,
         "content" text NOT NULL,
         "created_at" timestamp DEFAULT now() NOT NULL
+      )
+    `;
+    
+    // Create users table for auth
+    await sql`
+      CREATE TABLE IF NOT EXISTS "users" (
+        "id" text PRIMARY KEY NOT NULL,
+        "email" text,
+        "first_name" text,
+        "last_name" text,
+        "profile_image_url" text,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `;
+    
+    // Create sessions table for connect-pg-simple
+    await sql`
+      CREATE TABLE IF NOT EXISTS "sessions" (
+        "sid" varchar NOT NULL PRIMARY KEY,
+        "sess" json NOT NULL,
+        "expire" timestamp(6) NOT NULL
+      )
+    `;
+    
+    // Create index on sessions expire
+    await sql`
+      CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")
+    `;
+    
+    // Create admin_prompts table
+    await sql`
+      CREATE TABLE IF NOT EXISTS "admin_prompts" (
+        "id" serial PRIMARY KEY,
+        "key" text UNIQUE NOT NULL,
+        "name" text NOT NULL,
+        "description" text,
+        "content" text NOT NULL,
+        "category" text DEFAULT 'general' NOT NULL,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
       )
     `;
     
