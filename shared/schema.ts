@@ -3,6 +3,33 @@ import { pgTable, text, varchar, jsonb, integer, timestamp, boolean } from "driz
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Re-export auth models for Replit Auth integration
+export * from "./models/auth";
+
+// Admin prompts table for managing all app prompts
+export const adminPrompts = pgTable("admin_prompts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  scope: text("scope").notNull(), // "stage" | "system" | "discovery"
+  targetKey: text("target_key").notNull(), // e.g., "stage_1", "stage_2", "discovery_initial"
+  label: text("label").notNull(), // Human-readable name
+  description: text("description"),
+  content: text("content").notNull(), // The actual prompt text
+  isDefault: boolean("is_default").notNull().default(false), // Is this a system default?
+  stageNumber: integer("stage_number"), // Optional: for stage-specific prompts
+  updatedBy: varchar("updated_by"), // GitHub username of last editor
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAdminPromptSchema = createInsertSchema(adminPrompts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAdminPrompt = z.infer<typeof insertAdminPromptSchema>;
+export type AdminPrompt = typeof adminPrompts.$inferSelect;
+
 export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),

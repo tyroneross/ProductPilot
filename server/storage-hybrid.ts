@@ -1,4 +1,4 @@
-import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage } from "@shared/schema";
+import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
 
 interface IStorage {
   // Projects
@@ -19,6 +19,14 @@ interface IStorage {
   getMessagesByStage(stageId: string): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
   deleteMessagesByStage(stageId: string): Promise<void>;
+
+  // Admin Prompts
+  getAllAdminPrompts(): Promise<AdminPrompt[]>;
+  getAdminPrompt(id: string): Promise<AdminPrompt | undefined>;
+  createAdminPrompt(prompt: InsertAdminPrompt): Promise<AdminPrompt>;
+  updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined>;
+  deleteAdminPrompt(id: string): Promise<boolean>;
+  seedDefaultPrompts(userId: string): Promise<void>;
 }
 
 // In-memory storage fallback
@@ -285,6 +293,88 @@ QUESTION TOPICS (ask ONE per response):
       this.messages.delete(message.id);
     }
   }
+
+  // Admin Prompts - In-memory implementation
+  private adminPrompts: Map<string, AdminPrompt> = new Map();
+
+  async getAllAdminPrompts(): Promise<AdminPrompt[]> {
+    return Array.from(this.adminPrompts.values());
+  }
+
+  async getAdminPrompt(id: string): Promise<AdminPrompt | undefined> {
+    return this.adminPrompts.get(id);
+  }
+
+  async createAdminPrompt(insertPrompt: InsertAdminPrompt): Promise<AdminPrompt> {
+    const prompt: AdminPrompt = {
+      id: this.generateId(),
+      scope: insertPrompt.scope,
+      targetKey: insertPrompt.targetKey,
+      label: insertPrompt.label,
+      description: insertPrompt.description || null,
+      content: insertPrompt.content,
+      isDefault: insertPrompt.isDefault || false,
+      stageNumber: insertPrompt.stageNumber || null,
+      updatedBy: insertPrompt.updatedBy || null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.adminPrompts.set(prompt.id, prompt);
+    return prompt;
+  }
+
+  async updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined> {
+    const existing = this.adminPrompts.get(id);
+    if (!existing) return undefined;
+    
+    const updated: AdminPrompt = {
+      ...existing,
+      ...updates,
+      updatedAt: new Date(),
+    };
+    this.adminPrompts.set(id, updated);
+    return updated;
+  }
+
+  async deleteAdminPrompt(id: string): Promise<boolean> {
+    return this.adminPrompts.delete(id);
+  }
+
+  async seedDefaultPrompts(userId: string): Promise<void> {
+    const { DEFAULT_STAGES } = await import("@shared/schema");
+    
+    // Seed stage prompts
+    for (const stage of DEFAULT_STAGES) {
+      await this.createAdminPrompt({
+        scope: "stage",
+        targetKey: `stage_${stage.stageNumber}`,
+        label: stage.title,
+        description: stage.description,
+        content: stage.systemPrompt,
+        isDefault: true,
+        stageNumber: stage.stageNumber,
+        updatedBy: userId,
+      });
+    }
+
+    // Seed discovery prompt
+    await this.createAdminPrompt({
+      scope: "discovery",
+      targetKey: "discovery_initial",
+      label: "Discovery Initial Prompt",
+      description: "The initial prompt used to start the discovery conversation in Survey Mode",
+      content: `You are a product discovery expert helping users define their product vision. Ask clarifying questions one at a time to understand:
+- What problem they're solving
+- Who their target users are
+- Key features and functionality
+- Technical constraints or preferences
+- Success metrics
+
+Be conversational and encouraging. After 4-5 exchanges, you'll have enough context to generate a personalized survey.`,
+      isDefault: true,
+      updatedBy: userId,
+    });
+  }
 }
 
 // PostgreSQL storage using Drizzle
@@ -413,6 +503,85 @@ class PostgresStorage implements IStorage {
     const { messages } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
     await this.db.delete(messages).where(eq(messages.stageId, stageId));
+  }
+
+  // Admin Prompts - PostgreSQL implementation
+  async getAllAdminPrompts(): Promise<AdminPrompt[]> {
+    const { adminPrompts } = await import("@shared/schema");
+    return await this.db.select().from(adminPrompts);
+  }
+
+  async getAdminPrompt(id: string): Promise<AdminPrompt | undefined> {
+    const { adminPrompts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createAdminPrompt(insertPrompt: InsertAdminPrompt): Promise<AdminPrompt> {
+    const { adminPrompts } = await import("@shared/schema");
+    const [prompt] = await this.db.insert(adminPrompts).values(insertPrompt).returning();
+    return prompt;
+  }
+
+  async updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined> {
+    const { adminPrompts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    
+    const finalUpdates: any = { ...updates };
+    if (!finalUpdates.updatedAt) {
+      finalUpdates.updatedAt = new Date();
+    }
+    
+    const [updatedPrompt] = await this.db.update(adminPrompts)
+      .set(finalUpdates)
+      .where(eq(adminPrompts.id, id))
+      .returning();
+    
+    return updatedPrompt;
+  }
+
+  async deleteAdminPrompt(id: string): Promise<boolean> {
+    const { adminPrompts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const result = await this.db.delete(adminPrompts).where(eq(adminPrompts.id, id));
+    return result.rowCount > 0;
+  }
+
+  async seedDefaultPrompts(userId: string): Promise<void> {
+    const { DEFAULT_STAGES } = await import("@shared/schema");
+    
+    // Seed stage prompts
+    for (const stage of DEFAULT_STAGES) {
+      await this.createAdminPrompt({
+        scope: "stage",
+        targetKey: `stage_${stage.stageNumber}`,
+        label: stage.title,
+        description: stage.description,
+        content: stage.systemPrompt,
+        isDefault: true,
+        stageNumber: stage.stageNumber,
+        updatedBy: userId,
+      });
+    }
+
+    // Seed discovery prompt
+    await this.createAdminPrompt({
+      scope: "discovery",
+      targetKey: "discovery_initial",
+      label: "Discovery Initial Prompt",
+      description: "The initial prompt used to start the discovery conversation in Survey Mode",
+      content: `You are a product discovery expert helping users define their product vision. Ask clarifying questions one at a time to understand:
+- What problem they're solving
+- Who their target users are
+- Key features and functionality
+- Technical constraints or preferences
+- Success metrics
+
+Be conversational and encouraging. After 4-5 exchanges, you'll have enough context to generate a personalized survey.`,
+      isDefault: true,
+      updatedBy: userId,
+    });
   }
 }
 

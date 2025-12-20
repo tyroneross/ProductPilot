@@ -11,6 +11,7 @@ import DocumentsPage from "@/pages/documents";
 import SessionInterviewPage from "@/pages/session-interview";
 import SessionSectionsPage from "@/pages/session-sections";
 import SessionSurveyPage from "@/pages/session-survey";
+import AdminPage from "@/pages/admin";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/session/interview" component={SessionInterviewPage} />
       <Route path="/session/sections" component={SessionSectionsPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
+      <Route path="/admin" component={AdminPage} />
       <Route component={NotFound} />
     </Switch>
   );

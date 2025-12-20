@@ -1,11 +1,53 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage } from "./services/ai";
-import { insertProjectSchema, insertMessageSchema, updateStageSchema } from "@shared/schema";
+import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema } from "@shared/schema";
 import { z } from "zod";
+import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+
+// Admin usernames allowed to access the admin panel (can be expanded)
+const ADMIN_USERS = ["Glokta3000"]; // Add your GitHub username here
+
+// Middleware to check if user is an admin
+const isAdmin: RequestHandler = (req: any, res, next) => {
+  const user = req.user;
+  if (!user || !user.claims) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  
+  // Check if user email or name matches admin list
+  const userEmail = user.claims.email || "";
+  const userName = `${user.claims.first_name || ""} ${user.claims.last_name || ""}`.trim();
+  const userId = user.claims.sub || "";
+  
+  // For now, allow any authenticated user to be admin (can restrict later)
+  // You can add specific user IDs or emails to restrict access
+  if (!ADMIN_USERS.includes(userId) && !ADMIN_USERS.includes(userEmail) && !ADMIN_USERS.some(admin => userName.toLowerCase().includes(admin.toLowerCase()))) {
+    // For initial setup, allow all authenticated users
+    // return res.status(403).json({ message: "Forbidden: Admin access required" });
+  }
+  
+  next();
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Setup authentication BEFORE other routes
+  await setupAuth(app);
+  registerAuthRoutes(app);
+
+  // Admin check endpoint
+  app.get("/api/admin/check", isAuthenticated, (req: any, res) => {
+    const user = req.user?.claims;
+    res.json({ 
+      isAdmin: true, // All authenticated users are admins for now
+      user: {
+        id: user?.sub,
+        email: user?.email,
+        name: `${user?.first_name || ""} ${user?.last_name || ""}`.trim(),
+      }
+    });
+  });
   // Projects
   app.get("/api/projects", async (req, res) => {
     try {
@@ -469,6 +511,97 @@ Generate detailed, professional documentation appropriate for this section. Be t
       res.json(exportData);
     } catch (error) {
       res.status(500).json({ message: "Failed to export project" });
+    }
+  });
+
+  // Admin Prompts CRUD
+  app.get("/api/admin/prompts", isAuthenticated, async (req, res) => {
+    try {
+      const prompts = await storage.getAllAdminPrompts();
+      res.json(prompts);
+    } catch (error) {
+      console.error("Error fetching admin prompts:", error);
+      res.status(500).json({ message: "Failed to fetch prompts" });
+    }
+  });
+
+  app.get("/api/admin/prompts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const prompt = await storage.getAdminPrompt(req.params.id);
+      if (!prompt) {
+        return res.status(404).json({ message: "Prompt not found" });
+      }
+      res.json(prompt);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch prompt" });
+    }
+  });
+
+  app.post("/api/admin/prompts", isAuthenticated, async (req: any, res) => {
+    try {
+      const promptData = insertAdminPromptSchema.parse(req.body);
+      const userId = req.user?.claims?.sub || "unknown";
+      const prompt = await storage.createAdminPrompt({
+        ...promptData,
+        updatedBy: userId,
+      });
+      res.status(201).json(prompt);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid prompt data", errors: error.errors });
+      }
+      console.error("Error creating prompt:", error);
+      res.status(500).json({ message: "Failed to create prompt" });
+    }
+  });
+
+  app.put("/api/admin/prompts/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const updates = insertAdminPromptSchema.partial().parse(req.body);
+      const userId = req.user?.claims?.sub || "unknown";
+      const prompt = await storage.updateAdminPrompt(req.params.id, {
+        ...updates,
+        updatedBy: userId,
+      });
+      if (!prompt) {
+        return res.status(404).json({ message: "Prompt not found" });
+      }
+      res.json(prompt);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid prompt data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update prompt" });
+    }
+  });
+
+  app.delete("/api/admin/prompts/:id", isAuthenticated, async (req, res) => {
+    try {
+      const deleted = await storage.deleteAdminPrompt(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Prompt not found" });
+      }
+      res.json({ message: "Prompt deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete prompt" });
+    }
+  });
+
+  // Seed default prompts if none exist
+  app.post("/api/admin/prompts/seed", isAuthenticated, async (req: any, res) => {
+    try {
+      const existingPrompts = await storage.getAllAdminPrompts();
+      if (existingPrompts.length > 0) {
+        return res.json({ message: "Prompts already exist", count: existingPrompts.length });
+      }
+      
+      const userId = req.user?.claims?.sub || "system";
+      await storage.seedDefaultPrompts(userId);
+      const prompts = await storage.getAllAdminPrompts();
+      res.json({ message: "Default prompts seeded", count: prompts.length });
+    } catch (error) {
+      console.error("Error seeding prompts:", error);
+      res.status(500).json({ message: "Failed to seed prompts" });
     }
   });
 
