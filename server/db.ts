@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import * as schema from "@shared/schema";
 
 // Build database URL from Replit PostgreSQL environment variables
@@ -11,7 +11,6 @@ function getDatabaseUrl(): string {
     const password = process.env.PGPASSWORD;
     const database = process.env.PGDATABASE;
     const port = process.env.PGPORT || "5432";
-    // No SSL for Replit's local PostgreSQL
     return `postgresql://${user}:${password}@${host}:${port}/${database}`;
   }
   
@@ -23,13 +22,8 @@ function getDatabaseUrl(): string {
   throw new Error("Database connection not configured. Please ensure PostgreSQL is provisioned.");
 }
 
-const databaseUrl = getDatabaseUrl();
-
-const sql = neon(databaseUrl, {
-  fetchOptions: {
-    // Allow self-signed certs for development
-    rejectUnauthorized: false,
-  },
+const pool = new Pool({
+  connectionString: getDatabaseUrl(),
 });
 
-export const db = drizzle(sql, { schema });
+export const db = drizzle(pool, { schema });

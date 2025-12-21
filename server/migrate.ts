@@ -1,19 +1,16 @@
-import { neon } from "@neondatabase/serverless";
+import { Pool } from "pg";
 
 // Build database URL from Replit PostgreSQL environment variables
 function getDatabaseUrl(): string {
-  // If individual PG* vars are available, construct the URL from them
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
     const host = process.env.PGHOST;
     const user = process.env.PGUSER;
     const password = process.env.PGPASSWORD;
     const database = process.env.PGDATABASE;
     const port = process.env.PGPORT || "5432";
-    // No SSL for Replit's local PostgreSQL
     return `postgresql://${user}:${password}@${host}:${port}/${database}`;
   }
   
-  // Fallback to DATABASE_URL if set
   if (process.env.DATABASE_URL) {
     return process.env.DATABASE_URL;
   }
@@ -22,14 +19,13 @@ function getDatabaseUrl(): string {
 }
 
 export async function runMigrations() {
+  const pool = new Pool({ connectionString: getDatabaseUrl() });
+  
   try {
     console.log("Running database migrations...");
     
-    const databaseUrl = getDatabaseUrl();
-    const sql = neon(databaseUrl);
-    
     // Create projects table
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "projects" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
         "name" text NOT NULL,
@@ -38,10 +34,10 @@ export async function runMigrations() {
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
       )
-    `;
+    `);
     
     // Create stages table
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "stages" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
         "project_id" varchar NOT NULL,
@@ -58,10 +54,10 @@ export async function runMigrations() {
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
       )
-    `;
+    `);
     
     // Create messages table
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "messages" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
         "stage_id" varchar NOT NULL,
@@ -69,10 +65,10 @@ export async function runMigrations() {
         "content" text NOT NULL,
         "created_at" timestamp DEFAULT now() NOT NULL
       )
-    `;
+    `);
     
     // Create users table for auth
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "users" (
         "id" text PRIMARY KEY NOT NULL,
         "email" text,
@@ -82,24 +78,24 @@ export async function runMigrations() {
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
       )
-    `;
+    `);
     
     // Create sessions table for connect-pg-simple
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "sessions" (
         "sid" varchar NOT NULL PRIMARY KEY,
         "sess" json NOT NULL,
         "expire" timestamp(6) NOT NULL
       )
-    `;
+    `);
     
     // Create index on sessions expire
-    await sql`
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")
-    `;
+    `);
     
     // Create admin_prompts table
-    await sql`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS "admin_prompts" (
         "id" serial PRIMARY KEY,
         "key" text UNIQUE NOT NULL,
@@ -110,10 +106,10 @@ export async function runMigrations() {
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
       )
-    `;
+    `);
     
     // Add foreign key constraints if they don't exist
-    await sql`
+    await pool.query(`
       DO $$ 
       BEGIN
         IF NOT EXISTS (
@@ -124,9 +120,9 @@ export async function runMigrations() {
           FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;
         END IF;
       END $$;
-    `;
+    `);
     
-    await sql`
+    await pool.query(`
       DO $$ 
       BEGIN
         IF NOT EXISTS (
@@ -137,12 +133,14 @@ export async function runMigrations() {
           FOREIGN KEY ("stage_id") REFERENCES "public"."stages"("id") ON DELETE cascade ON UPDATE no action;
         END IF;
       END $$;
-    `;
+    `);
     
     console.log("Database migrations completed successfully!");
     return true;
   } catch (error) {
     console.error("Error running migrations:", error);
     return false;
+  } finally {
+    await pool.end();
   }
 }
