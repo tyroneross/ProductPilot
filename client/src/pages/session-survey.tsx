@@ -43,6 +43,9 @@ export default function SessionSurveyPage() {
   const productIdea = sessionStorage.getItem("productIdea") || "";
   const projectType = sessionStorage.getItem("projectType") || "not-sure";
   const projectPurpose = sessionStorage.getItem("projectPurpose") || "";
+  
+  const intakeAnswersRaw = sessionStorage.getItem("intakeAnswers");
+  const intakeAnswers = intakeAnswersRaw ? JSON.parse(intakeAnswersRaw) : null;
 
   const { data: project, refetch: refetchProject } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -77,39 +80,56 @@ export default function SessionSurveyPage() {
     }
   }, [project?.customPrompts]);
 
-  const getProjectTypeLabel = (type: string) => {
+  const getPlatformLabel = (platform: string) => {
     const labels: Record<string, string> = {
+      "desktop": "Desktop Website",
+      "mobile-web": "Mobile Website",
       "mobile-app": "Mobile App",
-      "web-app": "Web Application",
-      "web-page": "Website/Landing Page",
-      "not-sure": "Undecided",
+      "backend": "Backend/API",
+    };
+    return labels[platform] || platform;
+  };
+
+  const getBuildingTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      "prototype": "Prototype/Demo",
+      "internal": "Internal Tool",
+      "product": "User Product",
+      "scale": "Scalable Product",
     };
     return labels[type] || type;
   };
 
-  const getProjectPurposeLabel = (purpose: string) => {
+  const getCoreBehaviorLabel = (behavior: string) => {
     const labels: Record<string, string> = {
-      "consumer": "Consumer/Social",
-      "business": "Business/Professional",
-      "ecommerce": "E-commerce/Marketplace",
-      "internal": "Internal/Operations",
-      "creative": "Creative/Entertainment",
-      "educational": "Educational/Informational",
+      "data": "Data Management",
+      "content": "Content Display",
+      "search": "Search/Discovery",
+      "automate": "Automation",
+      "ai-assist": "AI-Assisted",
     };
-    return labels[purpose] || "";
+    return labels[behavior] || behavior;
+  };
+
+  const getIntakeContext = () => {
+    if (!intakeAnswers) return "";
+    const parts = [];
+    if (intakeAnswers.buildingType) parts.push(getBuildingTypeLabel(intakeAnswers.buildingType));
+    if (intakeAnswers.platform) parts.push(getPlatformLabel(intakeAnswers.platform));
+    if (intakeAnswers.coreBehavior) parts.push(getCoreBehaviorLabel(intakeAnswers.coreBehavior));
+    return parts.join(" • ");
   };
 
   const createDraftProject = async () => {
     try {
-      const projectTypeLabel = getProjectTypeLabel(projectType);
-      const purposeLabel = getProjectPurposeLabel(projectPurpose);
-      const contextLabel = purposeLabel ? `[${projectTypeLabel} - ${purposeLabel}]` : `[${projectTypeLabel}]`;
+      const contextLabel = getIntakeContext() || getPlatformLabel(projectType);
       const res = await apiRequest("POST", "/api/projects", {
         name: `Survey Draft - ${new Date().toLocaleTimeString()}`,
-        description: `${contextLabel} ${productIdea.slice(0, 200)}`,
+        description: `[${contextLabel}] ${productIdea.slice(0, 200)}`,
         mode: "survey",
         aiModel: "claude-sonnet",
         surveyPhase: "discovery",
+        intakeAnswers: intakeAnswers,
       });
       const newProject = await res.json();
       setProjectId(newProject.id);
@@ -374,41 +394,32 @@ export default function SessionSurveyPage() {
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
 
   const getFirstQuestion = () => {
-    const purposeQuestions: Record<string, Record<string, string>> = {
-      "mobile-app": {
-        "consumer": "For your consumer mobile app, what's the main problem it solves for users? How often would they use it?",
-        "business": "For your B2B mobile app, what business problem does it solve? Will it integrate with existing tools?",
-        "ecommerce": "For your mobile commerce app, what products or services will you sell? Will users need accounts?",
-        "internal": "For your internal mobile app, which team will use it? What workflow does it improve?",
-        "creative": "For your creative mobile app, what's the main experience you want users to have?",
-        "educational": "For your educational mobile app, what will users learn? How will you track progress?",
-        "default": "For your mobile app, who will be the primary users? What problem does it solve?",
-      },
-      "web-app": {
-        "consumer": "For your consumer web app, what's the main activity users will do? Will they need to create accounts?",
-        "business": "For your B2B web app, what business process does it improve? How will companies discover it?",
-        "ecommerce": "For your e-commerce platform, what products or services will you sell? Do you need inventory management?",
-        "internal": "For your internal web app, how many people will use it? What's the current workflow it's replacing?",
-        "creative": "For your creative web app, what can users create or experience? How will they share their work?",
-        "educational": "For your educational platform, what subjects will you cover? How will you deliver content?",
-        "default": "For your web application, who will be the primary users? Will they need to create accounts?",
-      },
-      "web-page": {
-        "consumer": "For your consumer website, what action do you want visitors to take? Sign up, download, or purchase?",
-        "business": "For your business website, what's your main conversion goal? Lead capture, demos, or direct contact?",
-        "ecommerce": "For your product landing page, what makes your offering unique? What's your pricing model?",
-        "internal": "For your internal documentation site, what information needs to be easily accessible?",
-        "creative": "For your creative portfolio/showcase, what work will you feature? How do you want to be contacted?",
-        "educational": "For your informational site, what key topics will you cover? How will visitors navigate content?",
-        "default": "For your website, who is your target audience? What action do you want visitors to take?",
-      },
-      "not-sure": {
-        "default": "To help determine the right platform, tell me: where will your users primarily access this - on their phones, computers, or both?",
-      },
-    };
-    
-    const typeQuestions = purposeQuestions[projectType as keyof typeof purposeQuestions] || purposeQuestions["not-sure"];
-    return typeQuestions[projectPurpose as keyof typeof typeQuestions] || typeQuestions["default" as keyof typeof typeQuestions] || "What problem does this solve for your users?";
+    if (intakeAnswers) {
+      const { buildingType, coreBehavior, platform, aiUsage } = intakeAnswers;
+      
+      if (coreBehavior === "ai-assist" || aiUsage === "generate" || aiUsage === "automate") {
+        return "Tell me about the AI features you envision. What will the AI help users do, and what inputs will it need?";
+      }
+      if (coreBehavior === "data") {
+        return "What data will users be managing? Walk me through the main actions they'll take.";
+      }
+      if (coreBehavior === "automate") {
+        return "What tasks or workflows will this automate? What triggers them and what's the output?";
+      }
+      if (coreBehavior === "search") {
+        return "What will users be searching for or discovering? How should results be organized?";
+      }
+      if (platform === "backend") {
+        return "Tell me about the API you're building. What are the main endpoints and who will consume them?";
+      }
+      if (buildingType === "prototype") {
+        return "What's the core concept you want to validate? What's the minimum to prove the idea works?";
+      }
+      if (buildingType === "internal") {
+        return "What internal problem does this solve? Who on your team will use it and how often?";
+      }
+    }
+    return "Tell me more about your idea. What problem does it solve, and who are the main users?";
   };
 
   const renderDiscoveryPhase = () => (
@@ -420,12 +431,13 @@ export default function SessionSurveyPage() {
           </div>
           <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
             <p className="text-description text-contrast-high leading-relaxed">
-              I'll ask you a few questions to understand your {getProjectTypeLabel(projectType).toLowerCase()} idea, then generate a comprehensive survey.
+              Based on your intake answers, I'll ask a few targeted questions to understand your vision, then generate a comprehensive survey.
             </p>
-            <p className="text-description text-contrast-high leading-relaxed mt-3">
-              You're building a <strong>{getProjectTypeLabel(projectType)}</strong>
-              {projectPurpose && <> for <strong>{getProjectPurposeLabel(projectPurpose)}</strong></>}: "{productIdea}"
-            </p>
+            {getIntakeContext() && (
+              <p className="text-description text-contrast-medium leading-relaxed mt-2">
+                <span className="text-metadata bg-surface-secondary px-2 py-1 rounded">{getIntakeContext()}</span>
+              </p>
+            )}
             <p className="text-description text-contrast-high leading-relaxed mt-3">
               <strong>{getFirstQuestion()}</strong>
             </p>

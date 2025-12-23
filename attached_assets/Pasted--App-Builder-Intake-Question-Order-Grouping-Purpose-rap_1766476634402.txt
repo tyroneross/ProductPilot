@@ -1,0 +1,178 @@
+# App Builder Intake — Question Order & Grouping
+*Purpose: rapidly infer product specs and generate high-fidelity, clean, vibe-coded apps and websites for solo builders and small teams.*
+
+---
+
+## Onboarding Design Principle
+**Progress from intent → shape → quality → acceleration.**  
+Each group should feel like a *natural decision*, not a technical hurdle.  
+One screen per group. No branching until after completion.
+
+---
+
+# GROUP 1 — Intent (What & Why)
+> Anchor the user mentally before asking for constraints.
+
+### 1. What are you building?
+**Options:**
+- A quick prototype or demo  
+- An internal tool  
+- A real product for users  
+- A polished product I want to scale  
+
+*Inference unlocked:* spec depth, guardrails, default assumptions.
+
+---
+
+### 2. Who is it for?
+**Options:**
+- Just me  
+- A small team  
+- Everyday users (non-technical)  
+- Developers / technical users  
+
+*Inference unlocked:* UX complexity, onboarding, permissions, error tolerance.
+
+---
+
+# GROUP 2 — Shape (Where & What)
+> Define the surface area and core behavior.
+
+### 3. Where will it be used?
+**Options:**
+- Website (desktop-first)  
+- Website (mobile-first)  
+- Mobile app (iOS / Android)  
+- Backend / API only  
+
+*Inference unlocked:* layout system, navigation model, rendering assumptions.
+
+---
+
+### 4. What does it mostly do?
+**Options:**
+- Collect and manage data  
+- Display content or information  
+- Help users search or discover things  
+- Automate tasks or workflows  
+- Help users think, write, or decide (AI-assisted)  
+
+*Inference unlocked:* state model, component patterns, data flows.
+
+---
+
+# GROUP 3 — Intelligence (AI Use)
+> Make AI explicit but understandable.
+
+### 5. How will AI be used?
+**Options:**
+- No AI  
+- AI helps users (suggestions, summaries)  
+- AI generates results users rely on  
+- AI runs tasks automatically  
+
+*Inference unlocked:* human-in-loop needs, guardrails, explainability level.
+
+---
+
+# GROUP 4 — Quality Bar (How Good)
+> Set expectations for structure and trade-offs.
+
+### 6. How production-ready should this be?
+**Options:**
+- Rough but fast  
+- Clean and understandable  
+- Very clean and extensible  
+
+*Inference unlocked:* abstraction depth, testing, refactoring tolerance.
+
+---
+
+### 7. How fast do you want the first version?
+**Options:**
+- Days  
+- Weeks  
+- No rush — get it right  
+
+*Inference unlocked:* scope compression, code generation aggressiveness.
+
+---
+
+# GROUP 5 — Priority (Forced Trade-off)
+> Prevent “everything matters” answers.
+
+### 8. What matters most right now?
+**Options (choose one):**
+- Speed  
+- Clean code  
+- Visual polish  
+- Flexibility later  
+
+*Inference unlocked:* final resolution of conflicts across earlier answers.
+
+---
+
+## End State
+At completion, the system has enough signal to:
+- Generate a product spec (PRD-lite)
+- Output a clean technical plan
+- Produce high-fidelity “vibe-coded” prompts for Cursor / v0 / Claude
+- Auto-resolve trade-offs without follow-up questions
+
+---
+
+# Onboarding UI Concepts (Idea-Level)
+
+### 1. Single Path, No Branching
+All users answer the same questions.  
+Advanced logic happens **after** submission, not during.
+
+---
+
+### 2. Progressive Commitment
+- Early questions feel conceptual
+- Later questions feel practical
+- Users never feel “locked in”
+
+---
+
+### 3. Visual Grouping, Not Pages of Text
+Each group:
+- Short title (“Intent”, “Shape”, “Quality”)
+- 1–2 sentence helper text
+- Radio cards with icons
+
+---
+
+### 4. Opinionated Resolution (Invisible to User)
+Conflicts are resolved by the system:
+- Speed + Clean → smaller scope
+- AI + Fast → assistive AI only
+- Polish + Backend → flag mismatch internally
+
+No warnings unless the result would be misleading.
+
+---
+
+### 5. Immediate Value Signal
+After submission, show:
+> “Based on your answers, we’ll generate a clean, production-ready spec optimized for **[X]**.”
+
+This builds trust before showing any output.
+
+---
+
+## Strong Constraint (Do Not Break)
+Do **not** allow:
+- Multi-select platforms
+- “Other” free-text answers
+- Skipping the priority question
+
+Those reduce clarity more than they help.
+
+---
+
+If you want next steps, I can:
+- Map each answer → exact spec sections generated
+- Design the post-survey confirmation screen
+- Define the prompt contract for each output artifact
