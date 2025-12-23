@@ -41,6 +41,7 @@ export default function SessionSurveyPage() {
   const { toast } = useToast();
 
   const productIdea = sessionStorage.getItem("productIdea") || "";
+  const projectType = sessionStorage.getItem("projectType") || "not-sure";
 
   const { data: project, refetch: refetchProject } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -75,11 +76,22 @@ export default function SessionSurveyPage() {
     }
   }, [project?.customPrompts]);
 
+  const getProjectTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      "mobile-app": "Mobile App",
+      "web-app": "Web Application",
+      "web-page": "Website/Landing Page",
+      "not-sure": "Undecided",
+    };
+    return labels[type] || type;
+  };
+
   const createDraftProject = async () => {
     try {
+      const projectTypeLabel = getProjectTypeLabel(projectType);
       const res = await apiRequest("POST", "/api/projects", {
         name: `Survey Draft - ${new Date().toLocaleTimeString()}`,
-        description: productIdea.slice(0, 200),
+        description: `[${projectTypeLabel}] ${productIdea.slice(0, 200)}`,
         mode: "survey",
         aiModel: "claude-sonnet",
         surveyPhase: "discovery",
@@ -346,6 +358,16 @@ export default function SessionSurveyPage() {
   const currentSection = surveyDefinition?.sections?.[currentSectionIndex];
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
 
+  const getProjectTypeQuestion = () => {
+    const typeQuestions: Record<string, string> = {
+      "mobile-app": "For your mobile app, who will be the primary users? Are they iOS, Android, or both?",
+      "web-app": "For your web application, who will be the primary users? Will they need to create accounts?",
+      "web-page": "For your website, who is your target audience? What action do you want visitors to take?",
+      "not-sure": "To help determine the right platform, tell me: where will your users primarily access this - on their phones, computers, or both?",
+    };
+    return typeQuestions[projectType] || typeQuestions["not-sure"];
+  };
+
   const renderDiscoveryPhase = () => (
     <div className="flex-1 flex flex-col">
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -355,13 +377,13 @@ export default function SessionSurveyPage() {
           </div>
           <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
             <p className="text-description text-contrast-high leading-relaxed">
-              Welcome to Survey Mode! I'll ask you a few quick questions to understand your product idea, then generate a comprehensive survey.
+              I'll ask you a few questions to understand your {getProjectTypeLabel(projectType).toLowerCase()} idea, then generate a comprehensive survey.
             </p>
             <p className="text-description text-contrast-high leading-relaxed mt-3">
-              You mentioned: <strong>"{productIdea}"</strong>
+              You're building a <strong>{getProjectTypeLabel(projectType)}</strong>: "{productIdea}"
             </p>
             <p className="text-description text-contrast-high leading-relaxed mt-3">
-              <strong>Let's start: Who will be the primary users of this product?</strong>
+              <strong>{getProjectTypeQuestion()}</strong>
             </p>
           </div>
         </div>
