@@ -7,7 +7,7 @@ import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 
 // Admin usernames allowed to access the admin panel (can be expanded)
-const ADMIN_USERS = ["Glokta3000"]; // Add your GitHub username here
+const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
 
 // Middleware to check if user is an admin
 const isAdmin: RequestHandler = (req: any, res, next) => {
@@ -195,9 +195,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get existing messages (including the one we just created)
         const existingMessages = await storage.getMessagesByStage(req.params.stageId);
         
+        // Try to get admin prompt from database, fallback to stage's default systemPrompt
+        const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+        const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
+        
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
-          { role: "system", content: stage.systemPrompt },
+          { role: "system", content: systemPromptToUse },
           ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))
         ];
 
@@ -463,8 +467,12 @@ ${surveyContext}${stagePromptsContext}
 Generate detailed, professional documentation appropriate for this section. Be thorough and specific based on the survey answers provided.`;
 
         try {
+          // Try to get admin prompt from database, fallback to stage's default systemPrompt
+          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
+          
           const response = await aiService.chat([
-            { role: "system", content: stage.systemPrompt },
+            { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
           ], "claude-sonnet");
 

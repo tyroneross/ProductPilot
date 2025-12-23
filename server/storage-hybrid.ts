@@ -23,6 +23,7 @@ interface IStorage {
   // Admin Prompts
   getAllAdminPrompts(): Promise<AdminPrompt[]>;
   getAdminPrompt(id: string): Promise<AdminPrompt | undefined>;
+  getAdminPromptByTargetKey(targetKey: string): Promise<AdminPrompt | undefined>;
   createAdminPrompt(prompt: InsertAdminPrompt): Promise<AdminPrompt>;
   updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined>;
   deleteAdminPrompt(id: string): Promise<boolean>;
@@ -305,6 +306,11 @@ QUESTION TOPICS (ask ONE per response):
     return this.adminPrompts.get(id);
   }
 
+  async getAdminPromptByTargetKey(targetKey: string): Promise<AdminPrompt | undefined> {
+    const prompts = Array.from(this.adminPrompts.values());
+    return prompts.find(p => p.targetKey === targetKey);
+  }
+
   async createAdminPrompt(insertPrompt: InsertAdminPrompt): Promise<AdminPrompt> {
     const prompt: AdminPrompt = {
       id: this.generateId(),
@@ -515,6 +521,13 @@ class PostgresStorage implements IStorage {
     const { adminPrompts } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getAdminPromptByTargetKey(targetKey: string): Promise<AdminPrompt | undefined> {
+    const { adminPrompts } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.targetKey, targetKey)).limit(1);
     return result[0];
   }
 
