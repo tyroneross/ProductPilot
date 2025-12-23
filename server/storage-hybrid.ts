@@ -1,4 +1,5 @@
 import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
+import { db } from "./db";
 
 interface IStorage {
   // Projects
@@ -619,11 +620,21 @@ Be conversational and encouraging. After 4-5 exchanges, you'll have enough conte
 // Create the storage instance with proper fallback
 function createStorage(): IStorage {
   try {
-    // Always use in-memory storage for now until database is properly configured
-    console.log("Using in-memory storage");
+    // Check if database environment is available
+    const hasDatabase = !!(
+      process.env.DATABASE_URL || 
+      (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE)
+    );
+    
+    if (hasDatabase && db) {
+      console.log("Using PostgreSQL storage");
+      return new PostgresStorage(db);
+    }
+    
+    console.log("Using in-memory storage (no database configured)");
     return new MemStorage();
   } catch (error) {
-    console.log("Fallback to in-memory storage");
+    console.log("Fallback to in-memory storage:", error);
     return new MemStorage();
   }
 }
