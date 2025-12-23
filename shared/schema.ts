@@ -34,7 +34,7 @@ export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description").notNull(),
-  mode: text("mode").notNull().default("stage-based"), // "stage-based" | "interview" | "survey"
+  mode: text("mode").notNull().default("survey"), // "survey" is the default and primary mode
   aiModel: text("ai_model").notNull().default("claude-sonnet"),
   surveyPhase: text("survey_phase").default("discovery"), // "discovery" | "survey" | "complete"
   surveyDefinition: jsonb("survey_definition"), // AI-generated survey questions

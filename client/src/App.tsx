@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,7 +8,6 @@ import ProjectsPage from "@/pages/projects";
 import StagePage from "@/pages/stage";
 import InterviewPage from "@/pages/interview";
 import DocumentsPage from "@/pages/documents";
-import SessionInterviewPage from "@/pages/session-interview";
 import SessionSectionsPage from "@/pages/session-sections";
 import SessionSurveyPage from "@/pages/session-survey";
 import AdminPage from "@/pages/admin";
@@ -22,7 +21,7 @@ function Router() {
       <Route path="/stage/:stageId" component={StagePage} />
       <Route path="/interview/:projectId" component={InterviewPage} />
       <Route path="/documents/:projectId" component={DocumentsPage} />
-      <Route path="/session/interview" component={SessionInterviewPage} />
+      <Route path="/session/interview">{() => <Redirect to="/session/survey" />}</Route>
       <Route path="/session/sections" component={SessionSectionsPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
       <Route path="/admin" component={AdminPage} />
