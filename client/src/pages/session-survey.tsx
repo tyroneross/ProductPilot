@@ -46,6 +46,9 @@ export default function SessionSurveyPage() {
   
   const intakeAnswersRaw = sessionStorage.getItem("intakeAnswers");
   const intakeAnswers = intakeAnswersRaw ? JSON.parse(intakeAnswersRaw) : null;
+  
+  const minimumDetailsRaw = sessionStorage.getItem("minimumDetails");
+  const minimumDetails = minimumDetailsRaw ? JSON.parse(minimumDetailsRaw) : null;
 
   const { data: project, refetch: refetchProject } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -123,13 +126,15 @@ export default function SessionSurveyPage() {
   const createDraftProject = async () => {
     try {
       const contextLabel = getIntakeContext() || getPlatformLabel(projectType);
+      const problemStatement = minimumDetails?.problemStatement || productIdea;
       const res = await apiRequest("POST", "/api/projects", {
         name: `Survey Draft - ${new Date().toLocaleTimeString()}`,
-        description: `[${contextLabel}] ${productIdea.slice(0, 200)}`,
+        description: `[${contextLabel}] ${problemStatement.slice(0, 200)}`,
         mode: "survey",
         aiModel: "claude-sonnet",
         surveyPhase: "discovery",
         intakeAnswers: intakeAnswers,
+        minimumDetails: minimumDetails,
       });
       const newProject = await res.json();
       setProjectId(newProject.id);
@@ -394,8 +399,17 @@ export default function SessionSurveyPage() {
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
 
   const getFirstQuestion = () => {
+    if (minimumDetails) {
+      const goals = minimumDetails.userGoals?.filter((g: string) => g.trim()).join(", ");
+      if (goals) {
+        return `I see your top goals are: ${goals}. Let's dive deeper — which of these is the absolute must-have for v1?`;
+      }
+      if (minimumDetails.v1Definition) {
+        return `Your v1 definition is clear. What's the biggest risk or unknown that could prevent you from shipping this?`;
+      }
+    }
     if (intakeAnswers) {
-      const { buildingType, coreBehavior, platform, aiUsage } = intakeAnswers;
+      const { buildingType, coreBehavior, aiUsage } = intakeAnswers;
       
       if (coreBehavior === "ai-assist" || aiUsage === "generate" || aiUsage === "automate") {
         return "Tell me about the AI features you envision. What will the AI help users do, and what inputs will it need?";
@@ -408,9 +422,6 @@ export default function SessionSurveyPage() {
       }
       if (coreBehavior === "search") {
         return "What will users be searching for or discovering? How should results be organized?";
-      }
-      if (platform === "backend") {
-        return "Tell me about the API you're building. What are the main endpoints and who will consume them?";
       }
       if (buildingType === "prototype") {
         return "What's the core concept you want to validate? What's the minimum to prove the idea works?";
@@ -431,12 +442,21 @@ export default function SessionSurveyPage() {
           </div>
           <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
             <p className="text-description text-contrast-high leading-relaxed">
-              Based on your intake answers, I'll ask a few targeted questions to understand your vision, then generate a comprehensive survey.
+              I've got your project details. Let me ask a few follow-up questions to generate comprehensive specs.
             </p>
-            {getIntakeContext() && (
-              <p className="text-description text-contrast-medium leading-relaxed mt-2">
-                <span className="text-metadata bg-surface-secondary px-2 py-1 rounded">{getIntakeContext()}</span>
-              </p>
+            {(getIntakeContext() || minimumDetails?.problemStatement) && (
+              <div className="mt-3 p-3 bg-surface-secondary rounded-lg">
+                {minimumDetails?.problemStatement && (
+                  <p className="text-description text-contrast-high mb-2">
+                    <strong>Problem:</strong> {minimumDetails.problemStatement}
+                  </p>
+                )}
+                {getIntakeContext() && (
+                  <p className="text-metadata text-contrast-medium">
+                    {getIntakeContext()}
+                  </p>
+                )}
+              </div>
             )}
             <p className="text-description text-contrast-high leading-relaxed mt-3">
               <strong>{getFirstQuestion()}</strong>

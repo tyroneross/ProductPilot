@@ -8,6 +8,7 @@ import {
   Clock, Calendar, Infinity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 type IntakeAnswers = {
   buildingType: string | null;
@@ -20,71 +21,98 @@ type IntakeAnswers = {
   priority: string | null;
 };
 
-const GROUPS = [
-  { id: 1, title: "Intent", subtitle: "What & Why" },
-  { id: 2, title: "Shape", subtitle: "Where & What" },
-  { id: 3, title: "Intelligence", subtitle: "AI Use" },
-  { id: 4, title: "Quality", subtitle: "How Good" },
-  { id: 5, title: "Priority", subtitle: "Trade-off" },
+const QUESTIONS = [
+  {
+    id: "buildingType",
+    group: "Intent",
+    question: "What are you building?",
+    options: [
+      { id: "prototype", label: "Quick prototype or demo", icon: FlaskConical },
+      { id: "internal", label: "Internal tool", icon: Wrench },
+      { id: "product", label: "Real product for users", icon: Users },
+      { id: "scale", label: "Polished product to scale", icon: Rocket },
+    ],
+  },
+  {
+    id: "targetAudience",
+    group: "Intent",
+    question: "Who is it for?",
+    options: [
+      { id: "me", label: "Just me", icon: Users },
+      { id: "team", label: "A small team", icon: Users },
+      { id: "consumers", label: "Everyday users", icon: Users },
+      { id: "developers", label: "Developers", icon: Code },
+    ],
+  },
+  {
+    id: "platform",
+    group: "Shape",
+    question: "Where will it be used?",
+    options: [
+      { id: "desktop", label: "Website (desktop-first)", icon: Monitor },
+      { id: "mobile-web", label: "Website (mobile-first)", icon: Globe },
+      { id: "mobile-app", label: "Mobile app", icon: Smartphone },
+      { id: "backend", label: "Backend / API only", icon: Server },
+    ],
+  },
+  {
+    id: "coreBehavior",
+    group: "Shape",
+    question: "What does it mostly do?",
+    options: [
+      { id: "data", label: "Collect and manage data", icon: Database },
+      { id: "content", label: "Display content", icon: Eye },
+      { id: "search", label: "Search or discover", icon: Search },
+      { id: "automate", label: "Automate tasks", icon: Cog },
+      { id: "ai-assist", label: "AI-assisted work", icon: Brain },
+    ],
+  },
+  {
+    id: "aiUsage",
+    group: "Intelligence",
+    question: "How will AI be used?",
+    options: [
+      { id: "none", label: "No AI", icon: Cog },
+      { id: "assist", label: "AI helps users", icon: Brain },
+      { id: "generate", label: "AI generates results", icon: Sparkles },
+      { id: "automate", label: "AI runs automatically", icon: Zap },
+    ],
+  },
+  {
+    id: "productionReady",
+    group: "Quality",
+    question: "How production-ready?",
+    options: [
+      { id: "rough", label: "Rough but fast", icon: Zap },
+      { id: "clean", label: "Clean and understandable", icon: Code },
+      { id: "extensible", label: "Very clean and extensible", icon: GitBranch },
+    ],
+  },
+  {
+    id: "timeline",
+    group: "Quality",
+    question: "How fast for v1?",
+    options: [
+      { id: "days", label: "Days", icon: Clock },
+      { id: "weeks", label: "Weeks", icon: Calendar },
+      { id: "no-rush", label: "No rush", icon: Infinity },
+    ],
+  },
+  {
+    id: "priority",
+    group: "Priority",
+    question: "What matters most?",
+    options: [
+      { id: "speed", label: "Speed", icon: Zap },
+      { id: "clean-code", label: "Clean code", icon: Code },
+      { id: "polish", label: "Visual polish", icon: Palette },
+      { id: "flexibility", label: "Flexibility", icon: GitBranch },
+    ],
+  },
 ];
 
-const Q1_OPTIONS = [
-  { id: "prototype", label: "A quick prototype or demo", icon: FlaskConical, inference: "Fast iteration, minimal polish" },
-  { id: "internal", label: "An internal tool", icon: Wrench, inference: "Functional focus, trusted users" },
-  { id: "product", label: "A real product for users", icon: Users, inference: "Production quality, user-facing" },
-  { id: "scale", label: "A polished product I want to scale", icon: Rocket, inference: "Enterprise-grade, extensible" },
-];
-
-const Q2_OPTIONS = [
-  { id: "me", label: "Just me", icon: Users, inference: "Minimal onboarding, personal preferences" },
-  { id: "team", label: "A small team", icon: Users, inference: "Basic permissions, collaboration" },
-  { id: "consumers", label: "Everyday users (non-technical)", icon: Users, inference: "Simple UX, error tolerance" },
-  { id: "developers", label: "Developers / technical users", icon: Code, inference: "Power features, documentation" },
-];
-
-const Q3_OPTIONS = [
-  { id: "desktop", label: "Website (desktop-first)", icon: Monitor, inference: "Wide layouts, keyboard navigation" },
-  { id: "mobile-web", label: "Website (mobile-first)", icon: Globe, inference: "Touch-first, responsive" },
-  { id: "mobile-app", label: "Mobile app (iOS / Android)", icon: Smartphone, inference: "Native features, app store" },
-  { id: "backend", label: "Backend / API only", icon: Server, inference: "No UI, API-first" },
-];
-
-const Q4_OPTIONS = [
-  { id: "data", label: "Collect and manage data", icon: Database, inference: "Forms, CRUD, storage" },
-  { id: "content", label: "Display content or information", icon: Eye, inference: "Read-focused, static or CMS" },
-  { id: "search", label: "Help users search or discover things", icon: Search, inference: "Search, filters, recommendations" },
-  { id: "automate", label: "Automate tasks or workflows", icon: Cog, inference: "Background jobs, integrations" },
-  { id: "ai-assist", label: "Help users think, write, or decide (AI-assisted)", icon: Brain, inference: "AI-powered features" },
-];
-
-const Q5_OPTIONS = [
-  { id: "none", label: "No AI", icon: Cog, inference: "Traditional logic only" },
-  { id: "assist", label: "AI helps users (suggestions, summaries)", icon: Brain, inference: "Human in the loop" },
-  { id: "generate", label: "AI generates results users rely on", icon: Sparkles, inference: "AI-primary outputs" },
-  { id: "automate", label: "AI runs tasks automatically", icon: Zap, inference: "Autonomous AI agents" },
-];
-
-const Q6_OPTIONS = [
-  { id: "rough", label: "Rough but fast", icon: Zap, inference: "Speed over polish" },
-  { id: "clean", label: "Clean and understandable", icon: Code, inference: "Balanced quality" },
-  { id: "extensible", label: "Very clean and extensible", icon: GitBranch, inference: "Architecture first" },
-];
-
-const Q7_OPTIONS = [
-  { id: "days", label: "Days", icon: Clock, inference: "Maximum speed" },
-  { id: "weeks", label: "Weeks", icon: Calendar, inference: "Reasonable scope" },
-  { id: "no-rush", label: "No rush — get it right", icon: Infinity, inference: "Quality focus" },
-];
-
-const Q8_OPTIONS = [
-  { id: "speed", label: "Speed", icon: Zap, inference: "Ship fast" },
-  { id: "clean-code", label: "Clean code", icon: Code, inference: "Maintainable" },
-  { id: "polish", label: "Visual polish", icon: Palette, inference: "Pixel perfect" },
-  { id: "flexibility", label: "Flexibility later", icon: GitBranch, inference: "Extensible" },
-];
-
-export default function StartPage() {
-  const [currentGroup, setCurrentGroup] = useState(1);
+export default function IntakePage() {
+  const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<IntakeAnswers>({
     buildingType: null,
     targetAudience: null,
@@ -97,222 +125,95 @@ export default function StartPage() {
   });
   const [, setLocation] = useLocation();
 
-  const updateAnswer = (key: keyof IntakeAnswers, value: string) => {
-    setAnswers(prev => ({ ...prev, [key]: value }));
-  };
+  const question = QUESTIONS[currentQuestion];
+  const progress = ((currentQuestion + 1) / QUESTIONS.length) * 100;
+  const currentAnswer = answers[question.id as keyof IntakeAnswers];
 
-  const canContinue = () => {
-    switch (currentGroup) {
-      case 1: return answers.buildingType && answers.targetAudience;
-      case 2: return answers.platform && answers.coreBehavior;
-      case 3: return answers.aiUsage;
-      case 4: return answers.productionReady && answers.timeline;
-      case 5: return answers.priority;
-      default: return false;
-    }
+  const handleSelect = (optionId: string) => {
+    setAnswers(prev => ({ ...prev, [question.id]: optionId }));
   };
 
   const handleContinue = () => {
-    if (currentGroup < 5) {
-      setCurrentGroup(currentGroup + 1);
+    if (currentQuestion < QUESTIONS.length - 1) {
+      setCurrentQuestion(currentQuestion + 1);
     } else {
       sessionStorage.setItem("intakeAnswers", JSON.stringify(answers));
       sessionStorage.setItem("projectType", answers.platform || "web-app");
       sessionStorage.setItem("projectPurpose", answers.coreBehavior || "");
-      sessionStorage.setItem("productIdea", "");
       sessionStorage.setItem("workflowMode", "survey");
-      setLocation("/session/survey");
+      setLocation("/details");
     }
   };
 
   const handleBack = () => {
-    if (currentGroup > 1) {
-      setCurrentGroup(currentGroup - 1);
+    if (currentQuestion > 0) {
+      setCurrentQuestion(currentQuestion - 1);
+    } else {
+      setLocation("/");
     }
   };
-
-  const renderOption = (
-    option: { id: string; label: string; icon: React.ElementType; inference: string },
-    selectedValue: string | null,
-    onSelect: (id: string) => void
-  ) => {
-    const Icon = option.icon;
-    const isSelected = selectedValue === option.id;
-    return (
-      <button
-        key={option.id}
-        onClick={() => onSelect(option.id)}
-        className={`bg-surface-primary rounded-lg border-2 p-4 hover:border-accent hover:shadow-md transition-all text-left group ${
-          isSelected ? "border-accent ring-2 ring-accent/20" : "border-gray-200"
-        }`}
-        data-testid={`option-${option.id}`}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg transition-colors ${
-            isSelected ? "bg-accent text-surface-primary" : "bg-surface-secondary group-hover:bg-accent/10"
-          }`}>
-            <Icon className="w-5 h-5" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-title font-medium text-contrast-high">{option.label}</span>
-              {isSelected && <Check className="w-4 h-4 text-accent" />}
-            </div>
-            <span className="text-metadata text-contrast-low">{option.inference}</span>
-          </div>
-        </div>
-      </button>
-    );
-  };
-
-  const renderGroup1 = () => (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">What are you building?</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Q1_OPTIONS.map(opt => renderOption(opt, answers.buildingType, (id) => updateAnswer("buildingType", id)))}
-        </div>
-      </div>
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">Who is it for?</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Q2_OPTIONS.map(opt => renderOption(opt, answers.targetAudience, (id) => updateAnswer("targetAudience", id)))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderGroup2 = () => (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">Where will it be used?</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Q3_OPTIONS.map(opt => renderOption(opt, answers.platform, (id) => updateAnswer("platform", id)))}
-        </div>
-      </div>
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">What does it mostly do?</h2>
-        <div className="grid grid-cols-1 gap-3">
-          {Q4_OPTIONS.map(opt => renderOption(opt, answers.coreBehavior, (id) => updateAnswer("coreBehavior", id)))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderGroup3 = () => (
-    <div>
-      <h2 className="text-h4 font-medium text-contrast-high mb-2">How will AI be used?</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {Q5_OPTIONS.map(opt => renderOption(opt, answers.aiUsage, (id) => updateAnswer("aiUsage", id)))}
-      </div>
-    </div>
-  );
-
-  const renderGroup4 = () => (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">How production-ready should this be?</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {Q6_OPTIONS.map(opt => renderOption(opt, answers.productionReady, (id) => updateAnswer("productionReady", id)))}
-        </div>
-      </div>
-      <div>
-        <h2 className="text-h4 font-medium text-contrast-high mb-2">How fast do you want the first version?</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {Q7_OPTIONS.map(opt => renderOption(opt, answers.timeline, (id) => updateAnswer("timeline", id)))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderGroup5 = () => (
-    <div>
-      <h2 className="text-h4 font-medium text-contrast-high mb-2">What matters most right now?</h2>
-      <p className="text-description text-contrast-medium mb-4">Choose one. This helps resolve trade-offs.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {Q8_OPTIONS.map(opt => renderOption(opt, answers.priority, (id) => updateAnswer("priority", id)))}
-      </div>
-    </div>
-  );
-
-  const renderCurrentGroup = () => {
-    switch (currentGroup) {
-      case 1: return renderGroup1();
-      case 2: return renderGroup2();
-      case 3: return renderGroup3();
-      case 4: return renderGroup4();
-      case 5: return renderGroup5();
-      default: return null;
-    }
-  };
-
-  const currentGroupInfo = GROUPS.find(g => g.id === currentGroup);
 
   return (
-    <div className="min-h-screen bg-surface-secondary flex items-center justify-center p-6">
-      <div className="max-w-3xl w-full">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-3 bg-accent rounded-full mb-4">
-            <Sparkles className="w-8 h-8 text-surface-primary" />
-          </div>
-          <div className="flex items-center justify-center gap-2 mb-2">
-            {GROUPS.map((group, index) => (
-              <div key={group.id} className="flex items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                    group.id < currentGroup
-                      ? "bg-green-500 text-white"
-                      : group.id === currentGroup
-                      ? "bg-accent text-white"
-                      : "bg-gray-200 text-contrast-medium"
-                  }`}
-                >
-                  {group.id < currentGroup ? <Check className="w-4 h-4" /> : group.id}
-                </div>
-                {index < GROUPS.length - 1 && (
-                  <div className={`w-8 h-0.5 ${group.id < currentGroup ? "bg-green-500" : "bg-gray-200"}`} />
-                )}
-              </div>
-            ))}
-          </div>
-          <h1 className="text-h2 font-medium text-contrast-high">
-            {currentGroupInfo?.title}
+    <div className="min-h-screen bg-surface-secondary flex flex-col">
+      <div className="w-full max-w-2xl mx-auto px-6 pt-6">
+        <Progress value={progress} className="h-2" />
+        <div className="flex justify-between mt-2 text-metadata text-contrast-medium">
+          <span>{question.group}</span>
+          <span>{currentQuestion + 1} of {QUESTIONS.length}</span>
+        </div>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="max-w-lg w-full">
+          <h1 className="text-h2 font-medium text-contrast-high text-center mb-8">
+            {question.question}
           </h1>
-          <p className="text-body text-contrast-medium">
-            {currentGroupInfo?.subtitle}
-          </p>
-        </div>
 
-        <div className="bg-surface-primary rounded-lg border border-gray-200 p-6 shadow-lg mb-6">
-          {renderCurrentGroup()}
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            {currentGroup > 1 && (
-              <Button
-                variant="ghost"
-                onClick={handleBack}
-                data-testid="button-back"
-              >
-                ← Back
-              </Button>
-            )}
-            <button
-              onClick={() => setLocation("/projects")}
-              className="text-description text-accent hover:underline"
-              data-testid="link-view-existing-projects"
-            >
-              View existing projects
-            </button>
+          <div className="space-y-3">
+            {question.options.map((option) => {
+              const Icon = option.icon;
+              const isSelected = currentAnswer === option.id;
+              return (
+                <button
+                  key={option.id}
+                  onClick={() => handleSelect(option.id)}
+                  className={`w-full flex items-center gap-4 p-4 rounded-lg border-2 transition-all text-left ${
+                    isSelected 
+                      ? "border-accent bg-accent/5" 
+                      : "border-gray-200 bg-surface-primary hover:border-accent/50"
+                  }`}
+                  data-testid={`option-${option.id}`}
+                >
+                  <div className={`p-2 rounded-lg ${isSelected ? "bg-accent text-white" : "bg-surface-secondary"}`}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <span className="text-body font-medium text-contrast-high flex-1">
+                    {option.label}
+                  </span>
+                  {isSelected && <Check className="w-5 h-5 text-accent" />}
+                </button>
+              );
+            })}
           </div>
+        </div>
+      </div>
+
+      <div className="w-full max-w-2xl mx-auto px-6 pb-6">
+        <div className="flex items-center justify-between">
+          <Button
+            variant="ghost"
+            onClick={handleBack}
+            data-testid="button-back"
+          >
+            ← Back
+          </Button>
           <Button
             onClick={handleContinue}
-            disabled={!canContinue()}
+            disabled={!currentAnswer}
             className="btn-primary min-h-[44px] px-8"
             data-testid="button-continue"
           >
-            {currentGroup === 5 ? "Generate Spec" : "Continue"}
+            {currentQuestion === QUESTIONS.length - 1 ? "Continue" : "Next"}
           </Button>
         </div>
       </div>

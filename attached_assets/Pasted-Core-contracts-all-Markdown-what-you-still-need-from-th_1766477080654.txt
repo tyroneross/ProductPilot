@@ -1,0 +1,156 @@
+Core contracts (all Markdown) + what you still need from the user
+
+Below are the 7 core Markdown contracts you’ll generate by default: 1–6 + Backlog. For each: (a) target output and (b) the minimum extra info you still need beyond your 8-question survey (intent/shape/AI/quality/speed/priority).
+
+⸻
+
+1) Intake Summary Contract
+
+Target output (Markdown)
+
+01_requirements.md — canonical “source of truth” that normalizes survey answers into explicit requirements, assumptions, and constraints. Used as input for every other contract.
+
+Additional user info needed (minimum)
+	•	One-sentence problem statement: “Users need to ___ because ___.”
+	•	Primary success definition: “This is successful if ___.”
+	•	Hard constraints: budget ceiling (even a range), must-use/must-avoid tools (if any)
+	•	Example of expected output: screenshot/link or 1–2 sentences of what “good output” looks like
+
+Key questions
+	•	What is the job this app performs in one sentence?
+	•	What would make you say “this worked” after 2 weeks of use?
+	•	Any must-use or must-avoid tools (e.g., Supabase only, no Firebase)?
+	•	Show 1 example app/site you want it to feel like (link is fine).
+
+⸻
+
+2) Product Spec Contract (PRD-lite)
+
+Target output (Markdown)
+
+02_prd.md — MVP-first spec: scope, core workflows, key screens, acceptance criteria, and risks.
+
+Additional user info needed (minimum)
+	•	Top 3 user goals (bullets)
+	•	MVP boundaries: 3 “in” and 3 “out”
+	•	Primary user journey: where the user starts and ends (one flow)
+
+Key questions
+	•	What are the top 3 things the user should accomplish?
+	•	What is explicitly out of scope for v1?
+	•	What’s the single most important workflow end-to-end?
+	•	Any compliance/security expectations you already know?
+
+⸻
+
+3) User Flows Contract
+
+Target output (Markdown)
+
+03_flows.md — 3–7 flows with: entry → steps → success state + common failure states.
+
+Additional user info needed (minimum)
+	•	List of 3–7 actions users take (verbs): “create, edit, share…”
+	•	Top 3 edge cases (e.g., “no data yet”, “invalid input”, “user cancels”)
+	•	Any role differences (even if simple: “creator vs viewer”)
+
+Key questions
+	•	What are the main actions users take (3–7 verbs)?
+	•	What are the most common “oops” moments?
+	•	Are there different roles or permission levels?
+	•	Should anything require approval/review?
+
+⸻
+
+4) Information Architecture Contract
+
+Target output (Markdown)
+
+04_ia.md — screens/routes + navigation model + what’s public vs logged-in.
+
+Additional user info needed (minimum)
+	•	Screen list (even rough): “Home, Dashboard, Settings…”
+	•	Navigation preference: “sidebar / top nav / tabs / single page”
+	•	Brand tone: 2–3 adjectives (e.g., “minimal, bold, playful”)
+
+Key questions
+	•	What screens do you believe exist in v1? (rough list is fine)
+	•	How should users move around? (tabs, sidebar, simple single page)
+	•	Any pages that must be public (marketing site, landing page)?
+	•	Any inspiration for the look/feel?
+
+⸻
+
+5) Data Contract
+
+Target output (Markdown)
+
+05_data.md — entities/fields/relationships + constraints + lifecycle notes (delete/export) written for humans (no SQL required in core mode).
+
+Additional user info needed (minimum)
+	•	What objects exist? (nouns): “Project, Source, Spec…”
+	•	Critical fields for each object (3–7 per object)
+	•	Ownership rules: who owns what (user/team/org)
+	•	Data limits: rough scale caps (records per project, file sizes)
+
+Key questions
+	•	What are the main “things” you store? (nouns)
+	•	For each thing, what fields matter most?
+	•	Who owns/controls each thing (user vs team)?
+	•	Any limits we should assume (files, items, projects)?
+
+⸻
+
+6) API / Actions Contract
+
+Target output (Markdown)
+
+06_actions.md — action catalog mapping flows → actions with inputs/outputs, validation rules, and error behavior (no OpenAPI needed).
+
+Additional user info needed (minimum)
+	•	Action list aligned to flows (10–25 is normal)
+	•	Validation expectations: what is required vs optional
+	•	Failure handling preference: strict vs forgiving (block vs warn)
+	•	External integrations? (even “none”)
+
+Key questions
+	•	What actions must exist (create/update/delete/generate/export)?
+	•	What fields are required to complete each action?
+	•	Should invalid input block the user or allow “draft” saves?
+	•	Any external services involved (email, payments, docs, CRM)?
+
+⸻
+
+7) Backlog Contract
+
+Target output (Markdown)
+
+07_backlog.md — prioritized build plan: epics → stories → tasks, each with definition of done and dependencies. Includes a “vertical slice first” plan.
+
+Additional user info needed (minimum)
+	•	MVP milestone definition: what “done” means for v1
+	•	Your build order preference: “ship UI first” vs “data first” vs “end-to-end slice”
+	•	Time budget: hours/week or target ship date (rough)
+
+Key questions
+	•	What is the v1 milestone? (what can it do end-to-end?)
+	•	Do you prefer building UI-first, data-first, or vertical-slice-first?
+	•	Roughly how much time do you have to build this?
+	•	Any deadlines that matter?
+
+⸻
+
+One practical UI implication
+
+After the 8 survey questions, your UI should collect only one more screen of inputs as “Minimum Details”:
+	•	Problem statement (1 sentence)
+	•	Top 3 user goals
+	•	Main objects (nouns) + key fields
+	•	Main actions (verbs)
+	•	Inspiration link (optional)
+	•	Definition of “v1 done”
+	•	Must-use / must-avoid tools (optional)
+
+That single screen is enough to generate solid outputs for all 7 contracts without turning onboarding into a tax form.
+
+If you want, I can propose a single combined “Minimum Details” form that maps each field to the contracts above (so the user never sees the complexity).

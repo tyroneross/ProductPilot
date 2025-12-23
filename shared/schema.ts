@@ -40,6 +40,8 @@ export const projects = pgTable("projects", {
   surveyDefinition: jsonb("survey_definition"), // AI-generated survey questions
   surveyResponses: jsonb("survey_responses"), // User's survey answers
   customPrompts: jsonb("custom_prompts"), // User-defined LLM prompts for various uses
+  intakeAnswers: jsonb("intake_answers"), // Answers from 8-question intake flow
+  minimumDetails: jsonb("minimum_details"), // Problem statement, goals, objects, actions, v1 definition
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -78,6 +80,8 @@ export const insertProjectSchema = createInsertSchema(projects).pick({
   surveyDefinition: true,
   surveyResponses: true,
   customPrompts: true,
+  intakeAnswers: true,
+  minimumDetails: true,
 });
 
 // Custom prompt types for user-defined LLM prompts
