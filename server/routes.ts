@@ -235,7 +235,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Try to get admin prompt from database, fallback to stage's default systemPrompt
         const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
-        const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
+        let systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
+        
+        // Build project context from intake answers and minimum details
+        let projectContext = "";
+        
+        // Helper to parse JSON safely (handles both objects and JSON strings)
+        const parseJsonField = (field: any): Record<string, any> | null => {
+          if (!field) return null;
+          if (typeof field === 'object') return field;
+          if (typeof field === 'string') {
+            try {
+              return JSON.parse(field);
+            } catch {
+              return null;
+            }
+          }
+          return null;
+        };
+        
+        if (project.description) {
+          projectContext += `\n\n=== PRODUCT IDEA ===\n${project.description}`;
+        }
+        
+        const intake = parseJsonField(project.intakeAnswers);
+        if (intake && Object.keys(intake).length > 0) {
+          projectContext += `\n\n=== INTAKE SURVEY RESPONSES ===`;
+          
+          const intakeLabels: Record<string, string> = {
+            intent: "What they're building",
+            platform: "Platform/Type",
+            aiFeatures: "AI Features",
+            dataComplexity: "Data Complexity",
+            qualityPriority: "Quality Priority",
+            launchTimeline: "Launch Timeline",
+            teamSize: "Team Size",
+            budget: "Budget"
+          };
+          
+          for (const [key, value] of Object.entries(intake)) {
+            if (value) {
+              const label = intakeLabels[key] || key;
+              projectContext += `\n- ${label}: ${value}`;
+            }
+          }
+        }
+        
+        const details = parseJsonField(project.minimumDetails);
+        if (details && Object.keys(details).length > 0) {
+          projectContext += `\n\n=== MINIMUM PRODUCT DETAILS ===`;
+          
+          if (details.problemStatement) {
+            projectContext += `\nProblem Statement: ${details.problemStatement}`;
+          }
+          if (details.goals && Array.isArray(details.goals)) {
+            projectContext += `\nGoals: ${details.goals.join(", ")}`;
+          }
+          if (details.objects && Array.isArray(details.objects)) {
+            projectContext += `\nCore Objects/Entities: ${details.objects.join(", ")}`;
+          }
+          if (details.actions && Array.isArray(details.actions)) {
+            projectContext += `\nKey Actions: ${details.actions.join(", ")}`;
+          }
+          if (details.v1Definition) {
+            projectContext += `\nV1 Scope: ${details.v1Definition}`;
+          }
+        }
+        
+        // Log when context extraction succeeds or fails for debugging
+        if (projectContext.length > 0) {
+          console.log(`AI context enriched with project data (${projectContext.length} chars)`);
+        } else if (project.intakeAnswers || project.minimumDetails) {
+          console.warn("Project has intake/details but context extraction failed");
+        }
+        
+        // Append project context to system prompt if available
+        if (projectContext) {
+          systemPromptToUse += `\n\n${projectContext}\n\nUse this context to ask informed, specific follow-up questions. DO NOT re-ask for information already provided above.`;
+        }
         
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
