@@ -47,6 +47,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
   });
+
+  // Get user's in-progress draft project (for session persistence)
+  app.get("/api/user/draft", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      const draft = await storage.getUserDraft(userId);
+      res.json(draft || null);
+    } catch (error) {
+      console.error("Error fetching user draft:", error);
+      res.status(500).json({ message: "Failed to fetch draft" });
+    }
+  });
+
+  // Link a project to the current user
+  app.post("/api/projects/:id/claim", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      const project = await storage.getProject(req.params.id);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      const updatedProject = await storage.updateProject(req.params.id, { userId });
+      res.json(updatedProject);
+    } catch (error) {
+      console.error("Error claiming project:", error);
+      res.status(500).json({ message: "Failed to claim project" });
+    }
+  });
+
   // Projects
   app.get("/api/projects", async (req, res) => {
     try {
@@ -85,6 +120,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/projects/:id", async (req, res) => {
     try {
       const updates = z.object({
+        userId: z.string().optional(),
         name: z.string().optional(),
         description: z.string().optional(),
         mode: z.enum(["interview", "stage-based", "survey"]).optional(),
@@ -93,6 +129,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         surveyDefinition: z.any().optional(),
         surveyResponses: z.any().optional(),
         customPrompts: z.any().optional(),
+        intakeAnswers: z.any().optional(),
+        minimumDetails: z.any().optional(),
       }).parse(req.body);
       
       const project = await storage.getProject(req.params.id);

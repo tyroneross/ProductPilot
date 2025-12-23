@@ -32,6 +32,7 @@ export type AdminPrompt = typeof adminPrompts.$inferSelect;
 
 export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"), // Optional: linked user for session persistence
   name: text("name").notNull(),
   description: text("description").notNull(),
   mode: text("mode").notNull().default("survey"), // "survey" is the default and primary mode
@@ -72,6 +73,7 @@ export const messages = pgTable("messages", {
 });
 
 export const insertProjectSchema = createInsertSchema(projects).pick({
+  userId: true,
   name: true,
   description: true,
   mode: true,

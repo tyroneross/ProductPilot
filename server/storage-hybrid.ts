@@ -5,6 +5,7 @@ interface IStorage {
   createProject(project: InsertProject): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
   getAllProjects(): Promise<Project[]>;
+  getUserDraft(userId: string): Promise<Project | undefined>;
   updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
 
@@ -43,6 +44,7 @@ class MemStorage implements IStorage {
   async createProject(insertProject: InsertProject): Promise<Project> {
     const project: Project = {
       id: this.generateId(),
+      userId: insertProject.userId || null,
       name: insertProject.name,
       description: insertProject.description,
       mode: insertProject.mode || "survey",
@@ -51,6 +53,8 @@ class MemStorage implements IStorage {
       surveyDefinition: insertProject.surveyDefinition || null,
       surveyResponses: insertProject.surveyResponses || null,
       customPrompts: insertProject.customPrompts || null,
+      intakeAnswers: insertProject.intakeAnswers || null,
+      minimumDetails: insertProject.minimumDetails || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -194,6 +198,11 @@ QUESTION TOPICS (ask ONE per response):
 
   async getAllProjects(): Promise<Project[]> {
     return Array.from(this.projects.values());
+  }
+
+  async getUserDraft(userId: string): Promise<Project | undefined> {
+    const allProjects = Array.from(this.projects.values());
+    return allProjects.find(p => p.userId === userId && p.surveyPhase !== "complete");
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
@@ -408,6 +417,15 @@ class PostgresStorage implements IStorage {
     const { projects } = await import("@shared/schema");
     const { desc } = await import("drizzle-orm");
     return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+  }
+
+  async getUserDraft(userId: string): Promise<Project | undefined> {
+    const { projects } = await import("@shared/schema");
+    const { eq, and, ne } = await import("drizzle-orm");
+    const result = await this.db.select().from(projects)
+      .where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete")))
+      .limit(1);
+    return result[0];
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {

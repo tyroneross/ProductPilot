@@ -1,9 +1,30 @@
 import { useLocation } from "wouter";
-import { Sparkles, ArrowRight, FileText, Layout, Code, ListTodo } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Sparkles, ArrowRight, FileText, Layout, Code, ListTodo, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { Project } from "@shared/schema";
 
 export default function WelcomePage() {
   const [, setLocation] = useLocation();
+
+  const { data: draft, isLoading } = useQuery<Project | null>({
+    queryKey: ["/api/user/draft"],
+    retry: false,
+  });
+
+  const handleContinue = () => {
+    if (draft) {
+      sessionStorage.setItem("surveyProjectId", draft.id);
+      if (draft.intakeAnswers) {
+        sessionStorage.setItem("intakeAnswers", JSON.stringify(draft.intakeAnswers));
+      }
+      if (draft.minimumDetails) {
+        sessionStorage.setItem("minimumDetails", JSON.stringify(draft.minimumDetails));
+        sessionStorage.setItem("productIdea", (draft.minimumDetails as any).problemStatement || "");
+      }
+      setLocation("/session/survey");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-surface-secondary flex flex-col">
@@ -22,14 +43,34 @@ export default function WelcomePage() {
             architecture docs, and development guides — all tailored to your needs.
           </p>
 
-          <Button
-            onClick={() => setLocation("/intake")}
-            className="btn-primary min-h-[52px] px-10 text-body"
-            data-testid="button-get-started"
-          >
-            Get Started
-            <ArrowRight className="w-5 h-5 ml-2" />
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button
+              onClick={() => setLocation("/intake")}
+              className="btn-primary min-h-[52px] px-10 text-body"
+              data-testid="button-get-started"
+            >
+              Get Started
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </Button>
+
+            {!isLoading && draft && (
+              <Button
+                onClick={handleContinue}
+                variant="outline"
+                className="min-h-[52px] px-10 text-body border-accent text-accent hover:bg-accent/10"
+                data-testid="button-continue-draft"
+              >
+                <Play className="w-5 h-5 mr-2" />
+                Continue Draft
+              </Button>
+            )}
+          </div>
+
+          {!isLoading && draft && (
+            <p className="text-description text-contrast-medium mt-4">
+              You have an in-progress project: "{draft.name}"
+            </p>
+          )}
 
           <div className="mt-12 pt-8 border-t border-gray-200">
             <p className="text-metadata text-contrast-medium mb-6 uppercase tracking-wide">

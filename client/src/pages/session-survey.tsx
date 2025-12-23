@@ -232,12 +232,20 @@ export default function SessionSurveyPage() {
     mutationFn: async (name: string) => {
       if (projectId) {
         const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { name });
-        return res.json();
+        const project = await res.json();
+        
+        try {
+          await apiRequest("POST", `/api/projects/${projectId}/claim`, {});
+        } catch (e) {
+        }
+        
+        return project;
       }
       return null;
     },
     onSuccess: (updatedProject: Project | null) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user/draft"] });
       setShowSaveDialog(false);
       toast({
         title: "Project saved!",

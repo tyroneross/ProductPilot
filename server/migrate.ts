@@ -135,6 +135,37 @@ export async function runMigrations() {
       END $$;
     `);
     
+    // Add new columns to projects table for session persistence
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'user_id') THEN
+          ALTER TABLE "projects" ADD COLUMN "user_id" varchar;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'mode') THEN
+          ALTER TABLE "projects" ADD COLUMN "mode" text DEFAULT 'survey' NOT NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_phase') THEN
+          ALTER TABLE "projects" ADD COLUMN "survey_phase" text DEFAULT 'discovery';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_definition') THEN
+          ALTER TABLE "projects" ADD COLUMN "survey_definition" jsonb;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_responses') THEN
+          ALTER TABLE "projects" ADD COLUMN "survey_responses" jsonb;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'custom_prompts') THEN
+          ALTER TABLE "projects" ADD COLUMN "custom_prompts" jsonb;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'intake_answers') THEN
+          ALTER TABLE "projects" ADD COLUMN "intake_answers" jsonb;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'minimum_details') THEN
+          ALTER TABLE "projects" ADD COLUMN "minimum_details" jsonb;
+        END IF;
+      END $$;
+    `);
+    
     console.log("Database migrations completed successfully!");
     return true;
   } catch (error) {
