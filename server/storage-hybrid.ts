@@ -402,8 +402,24 @@ class PostgresStorage implements IStorage {
   }
 
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const { projects } = await import("@shared/schema");
+    const { projects, stages, DEFAULT_STAGES } = await import("@shared/schema");
     const [project] = await this.db.insert(projects).values(insertProject).returning();
+    
+    // Create default stages for the project
+    for (const defaultStage of DEFAULT_STAGES) {
+      await this.db.insert(stages).values({
+        projectId: project.id,
+        stageNumber: defaultStage.stageNumber,
+        title: defaultStage.title,
+        description: defaultStage.description,
+        systemPrompt: defaultStage.systemPrompt,
+        keyInsights: defaultStage.keyInsights || [],
+        completedInsights: [],
+        progress: 0,
+        isUnlocked: true,
+      });
+    }
+    
     return project;
   }
 

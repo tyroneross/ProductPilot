@@ -402,6 +402,11 @@ export default function SessionSurveyPage() {
 
   const userMessages = messages.filter((m) => m.role === "user");
   const canGenerateSurvey = userMessages.length >= 3;
+  
+  // Progress tracking for discovery phase
+  const TOTAL_DISCOVERY_QUESTIONS = 6;
+  const discoveryProgress = Math.min(userMessages.length, TOTAL_DISCOVERY_QUESTIONS);
+  const discoveryProgressPercent = Math.round((discoveryProgress / TOTAL_DISCOVERY_QUESTIONS) * 100);
 
   const currentSection = surveyDefinition?.sections?.[currentSectionIndex];
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
@@ -443,6 +448,24 @@ export default function SessionSurveyPage() {
 
   const renderDiscoveryPhase = () => (
     <div className="flex-1 flex flex-col">
+      {/* Progress indicator for discovery phase */}
+      <div className="px-6 pt-4 pb-2 bg-surface-secondary border-b border-gray-200">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-metadata text-contrast-medium" data-testid="discovery-progress-text">
+            Question {discoveryProgress} of ~{TOTAL_DISCOVERY_QUESTIONS}
+          </span>
+          <span className="text-metadata text-contrast-medium">
+            {canGenerateSurvey ? "Ready to generate specs" : `${TOTAL_DISCOVERY_QUESTIONS - discoveryProgress} more to go`}
+          </span>
+        </div>
+        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden" data-testid="discovery-progress-bar">
+          <div 
+            className="h-full bg-accent transition-all duration-300 rounded-full"
+            style={{ width: `${discoveryProgressPercent}%` }}
+          />
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="flex items-start space-x-3">
           <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center text-surface-primary text-description font-medium">
