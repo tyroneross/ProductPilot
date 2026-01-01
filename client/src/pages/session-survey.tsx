@@ -50,15 +50,38 @@ export default function SessionSurveyPage() {
   const minimumDetailsRaw = sessionStorage.getItem("minimumDetails");
   const minimumDetails = minimumDetailsRaw ? JSON.parse(minimumDetailsRaw) : null;
 
+  // Parse projectId from URL query params if present
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlProjectId = params.get("projectId");
+    if (urlProjectId && !projectId) {
+      setProjectId(urlProjectId);
+    }
+  }, []);
+
   const { data: project, refetch: refetchProject } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
     enabled: !!projectId,
   });
 
-  const { data: stages = [] } = useQuery<Stage[]>({
+  const { data: stages = [], isLoading: stagesLoading, refetch: refetchStages } = useQuery<Stage[]>({
     queryKey: ["/api/projects", projectId, "stages"],
     enabled: !!projectId,
   });
+
+  // Ensure stages exist for legacy projects that don't have them
+  const stagesEnsured = useRef(false);
+  useEffect(() => {
+    if (projectId && !stagesLoading && stages.length === 0 && !stagesEnsured.current) {
+      stagesEnsured.current = true;
+      apiRequest("POST", `/api/projects/${projectId}/ensure-stages`, {})
+        .then(() => {
+          refetchStages();
+          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
+        })
+        .catch(console.error);
+    }
+  }, [projectId, stagesLoading, stages.length, refetchStages, queryClient]);
 
   const prdStage = stages.find((s) => s.stageNumber === 2);
 

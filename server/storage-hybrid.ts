@@ -15,6 +15,7 @@ interface IStorage {
   getStage(id: string): Promise<Stage | undefined>;
   getStagesByProject(projectId: string): Promise<Stage[]>;
   updateStage(id: string, updates: Partial<Stage>): Promise<Stage>;
+  ensureStagesForProject(projectId: string): Promise<Stage[]>;
 
   // Messages
   getMessage(id: string): Promise<Message | undefined>;
@@ -276,7 +277,32 @@ QUESTION TOPICS (ask ONE per response):
     return updated;
   }
 
+  async ensureStagesForProject(projectId: string): Promise<Stage[]> {
+    const existing = await this.getStagesByProject(projectId);
+    if (existing.length > 0) return existing;
 
+    const DEFAULT_STAGES = [
+      { stageNumber: 1, title: "Requirements Definition", description: "Define core requirements and user needs", systemPrompt: "You are a product requirements expert.", keyInsights: [] },
+      { stageNumber: 2, title: "PRD Writing", description: "Create comprehensive PRD", systemPrompt: "You are a PRD expert.", keyInsights: [] },
+      { stageNumber: 3, title: "UI Design", description: "Create UI wireframes", systemPrompt: "You are a UI/UX expert.", keyInsights: [] },
+      { stageNumber: 4, title: "Architecture", description: "Technical architecture design", systemPrompt: "You are a software architect.", keyInsights: [] },
+      { stageNumber: 5, title: "Coding Prompts", description: "Generate coding prompts", systemPrompt: "You are an AI prompt engineer.", keyInsights: [] },
+      { stageNumber: 6, title: "Development Guide", description: "Create development guide", systemPrompt: "You are a development guide expert.", keyInsights: [] },
+    ];
+
+    const createdStages: Stage[] = [];
+    for (const defaultStage of DEFAULT_STAGES) {
+      const stage = await this.createStage({
+        projectId,
+        stageNumber: defaultStage.stageNumber,
+        title: defaultStage.title,
+        description: defaultStage.description,
+        systemPrompt: defaultStage.systemPrompt,
+      });
+      createdStages.push(stage);
+    }
+    return createdStages;
+  }
 
   async getMessage(id: string): Promise<Message | undefined> {
     return this.messages.get(id);
@@ -517,7 +543,32 @@ class PostgresStorage implements IStorage {
     return updatedStage;
   }
 
+  async ensureStagesForProject(projectId: string): Promise<Stage[]> {
+    const { stages, DEFAULT_STAGES } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    
+    // Check if stages already exist
+    const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+    if (existing.length > 0) return existing;
 
+    // Create default stages
+    const createdStages: Stage[] = [];
+    for (const defaultStage of DEFAULT_STAGES) {
+      const [stage] = await this.db.insert(stages).values({
+        projectId,
+        stageNumber: defaultStage.stageNumber,
+        title: defaultStage.title,
+        description: defaultStage.description,
+        systemPrompt: defaultStage.systemPrompt,
+        keyInsights: defaultStage.keyInsights || [],
+        completedInsights: [],
+        progress: 0,
+        isUnlocked: true,
+      }).returning();
+      createdStages.push(stage);
+    }
+    return createdStages;
+  }
 
   async getMessage(id: string): Promise<Message | undefined> {
     const { messages } = await import("@shared/schema");

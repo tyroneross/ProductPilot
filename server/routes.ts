@@ -170,6 +170,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create stages for a project that doesn't have them (for legacy projects)
+  app.post("/api/projects/:projectId/ensure-stages", async (req, res) => {
+    try {
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      
+      const existingStages = await storage.getStagesByProject(req.params.projectId);
+      if (existingStages.length > 0) {
+        return res.json(existingStages);
+      }
+      
+      // Create stages using the storage method
+      const stages = await storage.ensureStagesForProject(req.params.projectId);
+      res.status(201).json(stages);
+    } catch (error) {
+      console.error("Error ensuring stages:", error);
+      res.status(500).json({ message: "Failed to create stages" });
+    }
+  });
+
   app.get("/api/stages/:id", async (req, res) => {
     try {
       const stage = await storage.getStage(req.params.id);
