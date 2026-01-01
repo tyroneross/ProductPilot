@@ -104,12 +104,13 @@ export default function Dashboard() {
                     <FileText className="w-6 h-6 text-surface-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">View Documents</h3>
+                    <p className="text-metadata text-contrast-medium mb-1 line-clamp-1">{currentProject.name}</p>
+                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">View Generated Documents</h3>
                     <p className="text-description text-contrast-medium mb-3 line-clamp-2">
-                      See PRD, architecture, and all generated documentation
+                      See PRD, architecture, and all specs created for this project
                     </p>
                     <div className="flex items-center space-x-2 text-accent">
-                      <span className="text-description font-medium">View & Iterate</span>
+                      <span className="text-description font-medium">Open Documents</span>
                       <span>→</span>
                     </div>
                   </div>
@@ -118,7 +119,7 @@ export default function Dashboard() {
 
               <div
                 className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => setLocation(`/interview/${currentProject.id}`)}
+                onClick={() => setLocation(`/session/survey?projectId=${currentProject.id}`)}
                 data-testid="card-continue-building"
               >
                 <div className="flex items-start space-x-4">
@@ -126,12 +127,13 @@ export default function Dashboard() {
                     <MessageCircle className="w-6 h-6 text-contrast-high" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">Continue Building</h3>
+                    <p className="text-metadata text-contrast-medium mb-1 line-clamp-1">{currentProject.name}</p>
+                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">Continue Survey Mode</h3>
                     <p className="text-description text-contrast-medium mb-3 line-clamp-2">
-                      Add more details or refine your product through conversation
+                      Answer AI questions to refine and generate your product specs
                     </p>
                     <div className="flex items-center space-x-2 text-accent">
-                      <span className="text-description font-medium">Start Chat</span>
+                      <span className="text-description font-medium">Resume Q&A</span>
                       <span>→</span>
                     </div>
                   </div>
