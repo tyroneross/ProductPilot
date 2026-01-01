@@ -108,44 +108,52 @@ export default function DocumentsPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {documents.map((doc) => {
-            const Icon = doc.icon;
-            const hasContent = doc.stage && doc.stage.progress > 0;
+        {/* Only show documents that have been built (progress > 0) */}
+        {documents.filter(doc => doc.stage && doc.stage.progress > 0).length === 0 ? (
+          <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 text-center">
+            <p className="text-description text-contrast-medium">
+              No documents have been generated yet. Click "Continue Building" to start creating your product documentation.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {documents.filter(doc => doc.stage && doc.stage.progress > 0).map((doc) => {
+              const Icon = doc.icon;
 
-            return (
-              <div
-                key={doc.id}
-                className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => doc.stage && setLocation(`/stage/${doc.stage.id}`)}
-                data-testid={`document-${doc.id}`}
-              >
-                <div className="flex flex-col space-y-3">
-                  <div className={`p-3 rounded-lg self-start ${hasContent ? 'bg-accent' : 'bg-surface-secondary'}`}>
-                    <Icon className={`w-6 h-6 ${hasContent ? 'text-surface-primary' : 'text-contrast-medium'}`} />
-                  </div>
-                  <div>
-                    <h3 className="text-title text-contrast-high mb-1">{doc.title}</h3>
-                    <p className="text-description text-contrast-medium mb-3">{doc.description}</p>
-                    {doc.stage && (
-                      <div className="flex items-center space-x-3">
-                        <div className="flex-1 bg-surface-secondary rounded-full h-2">
-                          <div
-                            className="bg-accent h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${doc.stage.progress}%` }}
-                          />
+              return (
+                <div
+                  key={doc.id}
+                  className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                  onClick={() => doc.stage && setLocation(`/stage/${doc.stage.id}`)}
+                  data-testid={`document-${doc.id}`}
+                >
+                  <div className="flex flex-col space-y-3">
+                    <div className="p-3 rounded-lg self-start bg-accent">
+                      <Icon className="w-6 h-6 text-surface-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-title text-contrast-high mb-1">{doc.title}</h3>
+                      <p className="text-description text-contrast-medium mb-3">{doc.description}</p>
+                      {doc.stage && (
+                        <div className="flex items-center space-x-3">
+                          <div className="flex-1 bg-surface-secondary rounded-full h-2">
+                            <div
+                              className="bg-accent h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${doc.stage.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-metadata text-contrast-medium">
+                            {doc.stage.progress}%
+                          </span>
                         </div>
-                        <span className="text-metadata text-contrast-medium">
-                          {doc.stage.progress}%
-                        </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         <div className="mt-8 bg-surface-primary rounded-lg border border-gray-200 p-6">
           <h3 className="text-title text-contrast-high mb-2">Want a different approach?</h3>

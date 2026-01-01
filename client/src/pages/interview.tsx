@@ -19,12 +19,19 @@ export default function InterviewPage() {
     enabled: !!projectId,
   });
 
-  const { data: stages = [] } = useQuery<Stage[]>({
+  const { data: stages = [], isLoading: stagesLoading } = useQuery<Stage[]>({
     queryKey: ["/api/projects", projectId, "stages"],
     enabled: !!projectId,
   });
 
   const prdStage = stages.find((s) => s.stageNumber === 2);
+
+  // Redirect to session/survey if project exists but has no stages (after loading completes)
+  useEffect(() => {
+    if (project && !stagesLoading && stages.length === 0) {
+      setLocation(`/session/survey?projectId=${projectId}`);
+    }
+  }, [project, stages, stagesLoading, projectId, setLocation]);
 
   const { data: messages = [] } = useQuery<Message[]>({
     queryKey: ["/api/stages", prdStage?.id, "messages"],
