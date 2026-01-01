@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Sparkles, Plus, X, ArrowRight } from "lucide-react";
+import { Sparkles, Plus, X, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type MinimumDetails = {
   problemStatement: string;
@@ -20,6 +21,7 @@ type MinimumDetails = {
 
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
+  const [showOptional, setShowOptional] = useState(false);
   const [details, setDetails] = useState<MinimumDetails>({
     problemStatement: "",
     userGoals: ["", "", ""],
@@ -127,86 +129,6 @@ export default function DetailsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label className="text-title font-medium text-contrast-high mb-2 block">
-                Main objects (nouns)
-              </Label>
-              <p className="text-metadata text-contrast-medium mb-2">
-                What things exist in your app?
-              </p>
-              <div className="space-y-2">
-                {details.mainObjects.map((obj, index) => (
-                  <div key={index} className="flex gap-2">
-                    <Input
-                      value={obj}
-                      onChange={(e) => updateArrayItem("mainObjects", index, e.target.value)}
-                      placeholder="e.g., Project, Task, User"
-                      data-testid={`input-object-${index}`}
-                    />
-                    {details.mainObjects.length > 1 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeArrayItem("mainObjects", index)}
-                        className="shrink-0 w-11 h-11"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => addArrayItem("mainObjects")}
-                  className="text-accent"
-                >
-                  <Plus className="w-4 h-4 mr-1" /> Add object
-                </Button>
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-title font-medium text-contrast-high mb-2 block">
-                Main actions (verbs)
-              </Label>
-              <p className="text-metadata text-contrast-medium mb-2">
-                What can users do?
-              </p>
-              <div className="space-y-2">
-                {details.mainActions.map((action, index) => (
-                  <div key={index} className="flex gap-2">
-                    <Input
-                      value={action}
-                      onChange={(e) => updateArrayItem("mainActions", index, e.target.value)}
-                      placeholder="e.g., Create, Edit, Share"
-                      data-testid={`input-action-${index}`}
-                    />
-                    {details.mainActions.length > 1 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeArrayItem("mainActions", index)}
-                        className="shrink-0 w-11 h-11"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => addArrayItem("mainActions")}
-                  className="text-accent"
-                >
-                  <Plus className="w-4 h-4 mr-1" /> Add action
-                </Button>
-              </div>
-            </div>
-          </div>
-
           <div>
             <Label className="text-title font-medium text-contrast-high mb-2 block">
               V1 definition <span className="text-red-500">*</span>
@@ -223,42 +145,144 @@ export default function DetailsPage() {
             />
           </div>
 
-          <div>
-            <Label className="text-title font-medium text-contrast-high mb-2 block">
-              Inspiration link <span className="text-contrast-low">(optional)</span>
-            </Label>
-            <Input
-              value={details.inspirationLink}
-              onChange={(e) => updateField("inspirationLink", e.target.value)}
-              placeholder="https://example.com"
-              data-testid="input-inspiration-link"
-            />
-          </div>
+          <Collapsible open={showOptional} onOpenChange={setShowOptional}>
+            <CollapsibleTrigger asChild>
+              <button
+                className="flex items-center gap-2 text-description text-accent hover:underline w-full justify-center py-2"
+                data-testid="button-show-optional"
+              >
+                {showOptional ? (
+                  <>
+                    <ChevronUp className="w-4 h-4" />
+                    Hide optional fields
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4" />
+                    Add more details (optional)
+                  </>
+                )}
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-6 pt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <Label className="text-title font-medium text-contrast-high mb-2 block">
+                    Main objects (nouns)
+                  </Label>
+                  <p className="text-metadata text-contrast-medium mb-2">
+                    What things exist in your app?
+                  </p>
+                  <div className="space-y-2">
+                    {details.mainObjects.map((obj, index) => (
+                      <div key={index} className="flex gap-2">
+                        <Input
+                          value={obj}
+                          onChange={(e) => updateArrayItem("mainObjects", index, e.target.value)}
+                          placeholder="e.g., Project, Task, User"
+                          data-testid={`input-object-${index}`}
+                        />
+                        {details.mainObjects.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeArrayItem("mainObjects", index)}
+                            className="shrink-0 w-11 h-11"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addArrayItem("mainObjects")}
+                      className="text-accent"
+                    >
+                      <Plus className="w-4 h-4 mr-1" /> Add object
+                    </Button>
+                  </div>
+                </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-description font-medium text-contrast-high mb-2 block">
-                Must-use tools <span className="text-contrast-low">(optional)</span>
-              </Label>
-              <Input
-                value={details.mustUseTools}
-                onChange={(e) => updateField("mustUseTools", e.target.value)}
-                placeholder="e.g., Supabase, Stripe"
-                data-testid="input-must-use"
-              />
-            </div>
-            <div>
-              <Label className="text-description font-medium text-contrast-high mb-2 block">
-                Must-avoid tools <span className="text-contrast-low">(optional)</span>
-              </Label>
-              <Input
-                value={details.mustAvoidTools}
-                onChange={(e) => updateField("mustAvoidTools", e.target.value)}
-                placeholder="e.g., Firebase, MongoDB"
-                data-testid="input-must-avoid"
-              />
-            </div>
-          </div>
+                <div>
+                  <Label className="text-title font-medium text-contrast-high mb-2 block">
+                    Main actions (verbs)
+                  </Label>
+                  <p className="text-metadata text-contrast-medium mb-2">
+                    What can users do?
+                  </p>
+                  <div className="space-y-2">
+                    {details.mainActions.map((action, index) => (
+                      <div key={index} className="flex gap-2">
+                        <Input
+                          value={action}
+                          onChange={(e) => updateArrayItem("mainActions", index, e.target.value)}
+                          placeholder="e.g., Create, Edit, Share"
+                          data-testid={`input-action-${index}`}
+                        />
+                        {details.mainActions.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeArrayItem("mainActions", index)}
+                            className="shrink-0 w-11 h-11"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addArrayItem("mainActions")}
+                      className="text-accent"
+                    >
+                      <Plus className="w-4 h-4 mr-1" /> Add action
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-title font-medium text-contrast-high mb-2 block">
+                  Inspiration link
+                </Label>
+                <Input
+                  value={details.inspirationLink}
+                  onChange={(e) => updateField("inspirationLink", e.target.value)}
+                  placeholder="https://example.com"
+                  data-testid="input-inspiration-link"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-description font-medium text-contrast-high mb-2 block">
+                    Must-use tools
+                  </Label>
+                  <Input
+                    value={details.mustUseTools}
+                    onChange={(e) => updateField("mustUseTools", e.target.value)}
+                    placeholder="e.g., Supabase, Stripe"
+                    data-testid="input-must-use"
+                  />
+                </div>
+                <div>
+                  <Label className="text-description font-medium text-contrast-high mb-2 block">
+                    Must-avoid tools
+                  </Label>
+                  <Input
+                    value={details.mustAvoidTools}
+                    onChange={(e) => updateField("mustAvoidTools", e.target.value)}
+                    placeholder="e.g., Firebase, MongoDB"
+                    data-testid="input-must-avoid"
+                  />
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
 
         <div className="flex items-center justify-between mt-6">

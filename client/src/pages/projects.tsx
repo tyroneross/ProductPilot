@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { MessageCircle } from "lucide-react";
-import NewProjectForm from "@/components/new-project-form";
+import { MessageCircle, Plus, FileText } from "lucide-react";
 import ContextFlow from "@/components/context-flow";
 import StageCard from "@/components/stage-card";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Project, Stage } from "@shared/schema";
 
 export default function Dashboard() {
@@ -21,7 +21,6 @@ export default function Dashboard() {
     enabled: !!currentProjectId,
   });
 
-  // Auto-select first project if none selected
   const currentProject = currentProjectId ? 
     projects.find((p) => p.id === currentProjectId) : 
     projects[0];
@@ -36,28 +35,40 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-h2 font-medium text-contrast-high">Product Development Assistant</h1>
+              <h1 className="text-h2 font-medium text-contrast-high line-clamp-1">Product Development Assistant</h1>
               <p className="text-description text-contrast-medium mt-1">
-                Guided 5-stage workflow for systematic product development
+                Guided workflow for systematic product development
               </p>
             </div>
+            <Button
+              onClick={() => setLocation("/")}
+              className="btn-primary min-h-[44px]"
+              data-testid="button-new-project"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Product
+            </Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Top Priority: New Project and Context Flow */}
-        <div className="mb-6">
-          <NewProjectForm onProjectCreated={(project) => setCurrentProjectId(project.id)} />
-        </div>
-        
+        {projectsLoading && (
+          <div className="space-y-4">
+            <Skeleton className="h-24 w-full" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Skeleton className="h-40" />
+              <Skeleton className="h-40" />
+            </div>
+          </div>
+        )}
+
         {currentProject && (
           <div className="mb-6">
             <ContextFlow stages={stages} />
           </div>
         )}
 
-        {/* Existing Projects */}
         {currentProject && (
           <section>
             <div className="flex items-center justify-between mb-6">
@@ -69,7 +80,7 @@ export default function Dashboard() {
                   <select
                     value={currentProjectId || ""}
                     onChange={(e) => setCurrentProjectId(e.target.value)}
-                    className="text-description font-medium text-contrast-high bg-transparent border-none"
+                    className="text-description font-medium text-contrast-high bg-transparent border-none max-w-[200px] truncate"
                     data-testid="select-current-project"
                   >
                     {projects.map((project) => (
@@ -90,11 +101,11 @@ export default function Dashboard() {
               >
                 <div className="flex items-start space-x-4">
                   <div className="p-3 bg-accent rounded-lg">
-                    <MessageCircle className="w-6 h-6 text-surface-primary" />
+                    <FileText className="w-6 h-6 text-surface-primary" />
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-title text-contrast-high mb-1">View Documents</h3>
-                    <p className="text-description text-contrast-medium mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">View Documents</h3>
+                    <p className="text-description text-contrast-medium mb-3 line-clamp-2">
                       See PRD, architecture, and all generated documentation
                     </p>
                     <div className="flex items-center space-x-2 text-accent">
@@ -114,9 +125,9 @@ export default function Dashboard() {
                   <div className="p-3 bg-surface-secondary rounded-lg">
                     <MessageCircle className="w-6 h-6 text-contrast-high" />
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-title text-contrast-high mb-1">Continue Building</h3>
-                    <p className="text-description text-contrast-medium mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">Continue Building</h3>
+                    <p className="text-description text-contrast-medium mb-3 line-clamp-2">
                       Add more details or refine your product through conversation
                     </p>
                     <div className="flex items-center space-x-2 text-accent">
@@ -143,8 +154,21 @@ export default function Dashboard() {
 
         {!currentProject && !projectsLoading && projects.length === 0 && (
           <div className="text-center py-12">
-            <h3 className="text-h4 font-medium text-contrast-medium mb-2">Welcome to Product Development Assistant</h3>
-            <p className="text-body text-contrast-low mb-6">Create your first project to get started with the guided 5-stage development workflow.</p>
+            <div className="inline-flex items-center justify-center p-4 bg-surface-tertiary rounded-full mb-4">
+              <FileText className="w-8 h-8 text-contrast-medium" />
+            </div>
+            <h3 className="text-h4 font-medium text-contrast-high mb-2">No products yet</h3>
+            <p className="text-description text-contrast-medium mb-6 max-w-md mx-auto">
+              Start by describing what you want to build. We'll guide you through creating comprehensive documentation.
+            </p>
+            <Button
+              onClick={() => setLocation("/")}
+              className="btn-primary min-h-[44px] px-8"
+              data-testid="button-start-first-project"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Your First Product
+            </Button>
           </div>
         )}
       </main>

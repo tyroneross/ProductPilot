@@ -288,17 +288,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (details.problemStatement) {
             projectContext += `\nProblem Statement: ${details.problemStatement}`;
           }
+          if (details.userGoals && Array.isArray(details.userGoals)) {
+            const goals = details.userGoals.filter((g: string) => g.trim());
+            if (goals.length > 0) {
+              projectContext += `\nUser Goals: ${goals.join(", ")}`;
+            }
+          }
           if (details.goals && Array.isArray(details.goals)) {
             projectContext += `\nGoals: ${details.goals.join(", ")}`;
           }
+          if (details.mainObjects && Array.isArray(details.mainObjects)) {
+            const objects = details.mainObjects.filter((o: string) => o.trim());
+            if (objects.length > 0) {
+              projectContext += `\nCore Objects/Entities: ${objects.join(", ")}`;
+            }
+          }
           if (details.objects && Array.isArray(details.objects)) {
             projectContext += `\nCore Objects/Entities: ${details.objects.join(", ")}`;
+          }
+          if (details.mainActions && Array.isArray(details.mainActions)) {
+            const actions = details.mainActions.filter((a: string) => a.trim());
+            if (actions.length > 0) {
+              projectContext += `\nKey Actions: ${actions.join(", ")}`;
+            }
           }
           if (details.actions && Array.isArray(details.actions)) {
             projectContext += `\nKey Actions: ${details.actions.join(", ")}`;
           }
           if (details.v1Definition) {
             projectContext += `\nV1 Scope: ${details.v1Definition}`;
+          }
+          if (details.inspirationLink) {
+            projectContext += `\nInspiration/Reference: ${details.inspirationLink}`;
+          }
+          if (details.mustUseTools) {
+            projectContext += `\nMUST use these tools/technologies: ${details.mustUseTools}`;
+          }
+          if (details.mustAvoidTools) {
+            projectContext += `\nMUST AVOID these tools/technologies: ${details.mustAvoidTools}`;
           }
         }
         
