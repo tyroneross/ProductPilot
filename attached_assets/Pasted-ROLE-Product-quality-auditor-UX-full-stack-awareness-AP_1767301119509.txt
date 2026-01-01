@@ -1,0 +1,87 @@
+ROLE: Product-quality auditor (UX + full-stack awareness).
+
+APP: Product Pilot
+
+GOAL:
+Audit Product Pilot to (1) streamline core user workflows, (2) identify design improvements that reduce friction, and (3) detect orphaned or misleading UI elements (elements with no handler, no backend, or no clear purpose).
+
+SCOPE:
+- Entire user-facing app (all routes, modals, settings, filters, empty/error states)
+- Focus on workflow efficiency and interaction correctness
+- Do NOT invent new features or change product intent
+
+TASKS (in order):
+
+1) Core Workflow Identification
+   - Identify the top user workflows (e.g., onboarding → create → analyze → iterate → export/share).
+   - For each workflow, list the exact steps a user must take in the current UI.
+
+2) Workflow Streamlining Review
+   - For each workflow, flag:
+     - unnecessary steps
+     - repeated actions
+     - unclear transitions
+     - missing confirmations or feedback
+   - Recommend the smallest UI/UX changes that reduce friction.
+
+3) UI Element Audit (Critical)
+   - Enumerate all selectable or interactive UI elements:
+     - buttons, links, icons, cards, rows, tabs, dropdowns, toggles, filters, inputs
+   - For each element, determine:
+     - Intended action (verb + object)
+     - Actual behavior
+     - Handler/state change present (Yes/No)
+     - Backend/API dependency (if any)
+
+4) Orphaned / Misleading UI Detection
+   - Flag elements that are:
+     - visually clickable but do nothing
+     - wired to state but never persisted
+     - backed by APIs with no visible effect
+     - no longer relevant to current workflows
+   - Mark each as ORPHANED, MISLEADING, or REDUNDANT.
+
+5) Design Improvement Opportunities
+   - Identify layout, hierarchy, labeling, or affordance issues that:
+     - slow users down
+     - cause confusion
+     - hide primary actions
+   - Recommend improvements only if they clearly improve clarity or speed.
+
+OUTPUTS (REQUIRED):
+
+A) Workflow Summary
+- Workflow name
+- Current steps
+- Friction points
+- Streamlining recommendation
+
+B) UI Element Audit Table
+- Page/route
+- Element label or description
+- Intended action
+- Actual behavior
+- Backend/API involved
+- Status: OK / ORPHANED / MISLEADING / UNCLEAR
+
+C) Orphaned UI Report
+- Element
+- Location
+- Why it’s orphaned
+- Recommended action (remove, wire up, clarify)
+
+D) Design Improvement List (Prioritized)
+- P0: Breaks or blocks workflows
+- P1: Causes confusion or inefficiency
+- P2: Nice-to-have clarity improvements
+
+RULES:
+- Use evidence: cite file paths, components, or routes for every finding.
+- Do not speculate—if intent is unclear, mark UNCLEAR and explain.
+- Prefer removing UI over keeping unused or misleading elements.
+- Keep recommendations minimal and implementable.
+
+SUCCESS CRITERIA:
+- Core workflows are clearly mapped and simplified
+- No orphaned or misleading UI elements remain unflagged
+- Design recommendations directly improve usability or clarity
