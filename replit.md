@@ -4,7 +4,7 @@
 
 A full-stack React application that helps users build comprehensive product documentation through AI-powered conversation. Users describe what they want to build, and the AI guides them through creating a complete PRD, architecture design, coding prompts, and development guide. Built with React/TypeScript frontend, Express.js backend, and PostgreSQL database using Drizzle ORM.
 
-**Design System:** Implements Calm Precision 6.1 design principles for cognitive predictability and information-first structure.
+**Design System:** Implements Calm Precision 6.2 design principles for cognitive predictability and information-first structure.
 
 **Core Features:**
 - Conversational product definition through AI interview
@@ -55,7 +55,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Design System
 
-**Calm Precision 6.1 Implementation:**
+**Calm Precision 6.2 Implementation:**
 
 - **Philosophy**: Cognitive predictability through information-first structure
 - **Core Principles**:
@@ -110,7 +110,10 @@ Preferred communication style: Simple, everyday language.
 
 5. **Existing Projects** (/projects)
    - View all saved projects
+   - "New Product" button in header for unified entry point
    - Access documents, continue building, or work stage-by-stage
+   - Loading skeletons during data fetch
+   - Mobile-friendly truncation (line-clamp) for long names
 
 **6 Stages:**
 1. Requirements & Discussion Goals
