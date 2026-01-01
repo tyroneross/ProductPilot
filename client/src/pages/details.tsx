@@ -149,7 +149,7 @@ export default function DetailsPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => removeArrayItem("mainObjects", index)}
-                        className="shrink-0"
+                        className="shrink-0 w-11 h-11"
                       >
                         <X className="w-4 h-4" />
                       </Button>
@@ -188,7 +188,7 @@ export default function DetailsPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => removeArrayItem("mainActions", index)}
-                        className="shrink-0"
+                        className="shrink-0 w-11 h-11"
                       >
                         <X className="w-4 h-4" />
                       </Button>

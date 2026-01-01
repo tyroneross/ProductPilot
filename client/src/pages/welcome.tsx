@@ -83,7 +83,7 @@ export default function WelcomePage() {
                 { icon: Layout, label: "Architecture" },
                 { icon: Code, label: "Dev Guide" },
               ].map(({ icon: Icon, label }) => (
-                <div key={label} className="flex flex-col items-center gap-2 p-4 bg-surface-primary rounded-lg border border-gray-200">
+                <div key={label} className="flex flex-col items-center gap-2 p-4 bg-surface-primary rounded-lg border border-gray-200 cursor-default select-none">
                   <Icon className="w-6 h-6 text-accent" />
                   <span className="text-description font-medium text-contrast-high">{label}</span>
                 </div>
