@@ -1,0 +1,82 @@
+ROLE: Senior full-stack debugger + workflow auditor.
+
+APP CONTEXT:
+Replit-hosted web app. In /session/survey, sending a chat message sometimes fails with UI toast: “Failed to send message. Please try again.”
+The UI shows a chat composer with a send button; the user typed text and hit send.
+
+GOAL:
+Reactively trace the user workflow that produces this error, identify the true root cause (client, network, server, DB, auth, rate limit, etc.), and implement a robust fix with regression tests. Do NOT guess—prove.
+
+SCOPE:
+- Only the workflow around sending a chat message in /session/survey (and any shared chat utilities it uses).
+- Include frontend, backend route(s), DB/persistence, and any LLM/queue calls triggered by send.
+
+DO THIS IN ORDER (NO SKIPS):
+
+1) Reproduce + Capture Evidence
+   - Reproduce the failure locally in Replit preview.
+   - Add temporary diagnostics (remove after fix if noisy):
+     Frontend:
+       - log the outgoing request: URL, method, headers (redact secrets), payload size, conversation/session ids
+       - log response: status, body, timing
+       - log the UI error path (where the toast is triggered)
+     Backend:
+       - log request received, validated params, auth/session resolution, downstream calls, and final response
+       - ensure all errors return structured JSON with error_code + message
+   - Use DevTools Network panel to identify the failing request and status code.
+
+2) Trace the End-to-End Flow (UI → API → persistence → UI)
+   - Identify the exact frontend function invoked on send (component + handler).
+   - Identify the API endpoint called (method + path) and server handler file.
+   - Identify any downstream dependencies:
+     - database writes
+     - LLM call(s)
+     - queue/job worker(s)
+     - third-party APIs
+   - For each hop, list: inputs, outputs, failure modes, and current error handling.
+
+3) Root Cause Analysis (Evidence-based)
+   - Determine which category it is (choose one, cite evidence):
+     A) frontend bug (state, debounce, stale ids, double-submit, JSON parse, fetch abort)
+     B) network/CORS/mixed-content
+     C) backend error (500/4xx validation/auth/session not found)
+     D) DB/persistence issue (timeouts, constraints, missing migrations)
+     E) LLM/async worker failure (timeouts, invalid key, rate limit)
+     F) deployment/env mismatch (missing env vars in Replit, wrong base URL)
+   - Output the minimal reproduction steps and the exact failing stack trace or response body.
+
+4) Implement the Fix (Smallest Durable Change)
+   - Fix the underlying bug, not just the toast.
+   - Strengthen reliability:
+     Frontend:
+       - disable send while in-flight; prevent double submits
+       - show actionable error message from server error_code
+       - retry strategy only for safe transient errors (e.g., 429/503) with backoff
+     Backend:
+       - validate inputs; return 4xx for client errors with error_code
+       - wrap downstream calls with timeouts
+       - ensure idempotency where needed (avoid duplicate inserts on retries)
+   - Ensure error messages are not swallowed; propagate error_code end-to-end.
+
+5) Add Regression Coverage
+   - Add at least one automated test:
+     - integration test for the send endpoint (happy path + failure path)
+     - if Playwright exists, add an E2E “send message” test that asserts:
+       - request sent, response ok, message appears, and persists after reload
+   - If no test framework exists, add a minimal one (do not over-engineer).
+
+DELIVERABLES (REQUIRED OUTPUT):
+1) “Workflow Trace” (bulleted): UI handler → API route → persistence/LLM → UI update
+2) “Root Cause” (1 paragraph) with concrete evidence (status code, logs, stack trace)
+3) “Fix Summary” (what changed + where: file paths)
+4) “Verification Steps” (exact steps to confirm fixed) + tests added
+
+ACCEPTANCE CRITERIA:
+- No “Failed to send message” in the reproduced scenario
+- Send action is idempotent (no duplicates on refresh/retry)
+- Server returns structured errors (error_code) and UI displays meaningful feedback
+- Tests pass in Replit (headless if applicable)
+
+START NOW:
+- Locate the toast trigger in the frontend and identify the request it corresponds to.
+- Then trace to the server handler and reproduce the failure with logs enabled.

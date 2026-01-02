@@ -94,18 +94,47 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")
     `);
     
-    // Create admin_prompts table
+    // Create admin_prompts table (matching shared/schema.ts)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS "admin_prompts" (
-        "id" serial PRIMARY KEY,
-        "key" text UNIQUE NOT NULL,
-        "name" text NOT NULL,
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "scope" text NOT NULL,
+        "target_key" text NOT NULL,
+        "label" text NOT NULL,
         "description" text,
         "content" text NOT NULL,
-        "category" text DEFAULT 'general' NOT NULL,
+        "is_default" boolean DEFAULT false NOT NULL,
+        "stage_number" integer,
+        "updated_by" varchar,
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
       )
+    `);
+    
+    // Migrate old admin_prompts table if it has old schema
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        -- Check if old schema exists (has 'key' column but not 'scope')
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'admin_prompts' AND column_name = 'key')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'admin_prompts' AND column_name = 'scope') THEN
+          -- Drop old table and recreate with new schema
+          DROP TABLE "admin_prompts";
+          CREATE TABLE "admin_prompts" (
+            "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+            "scope" text NOT NULL,
+            "target_key" text NOT NULL,
+            "label" text NOT NULL,
+            "description" text,
+            "content" text NOT NULL,
+            "is_default" boolean DEFAULT false NOT NULL,
+            "stage_number" integer,
+            "updated_by" varchar,
+            "created_at" timestamp DEFAULT now() NOT NULL,
+            "updated_at" timestamp DEFAULT now() NOT NULL
+          );
+        END IF;
+      END $$;
     `);
     
     // Add foreign key constraints if they don't exist

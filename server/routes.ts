@@ -453,10 +453,11 @@ Include a complete HTML document with basic styling. Keep it simple but function
         res.status(201).json({ userMessage: message });
       }
     } catch (error) {
+      console.error("Message creation error:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create message" });
+      res.status(500).json({ message: "Failed to create message", error: String(error) });
     }
   });
 
