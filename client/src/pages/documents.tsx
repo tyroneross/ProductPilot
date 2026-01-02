@@ -124,7 +124,7 @@ export default function DocumentsPage() {
                 <div
                   key={doc.id}
                   className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => doc.stage && setLocation(`/stage/${doc.stage.id}`)}
+                  onClick={() => doc.stage && setLocation(`/document/${projectId}/${doc.stage.id}`)}
                   data-testid={`document-${doc.id}`}
                 >
                   <div className="flex flex-col space-y-3">

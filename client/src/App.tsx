@@ -10,6 +10,7 @@ import ProjectsPage from "@/pages/projects";
 import StagePage from "@/pages/stage";
 import InterviewPage from "@/pages/interview";
 import DocumentsPage from "@/pages/documents";
+import DocumentViewPage from "@/pages/document-view";
 import SessionSectionsPage from "@/pages/session-sections";
 import SessionSurveyPage from "@/pages/session-survey";
 import AdminPage from "@/pages/admin";
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/stage/:stageId" component={StagePage} />
       <Route path="/interview/:projectId" component={InterviewPage} />
       <Route path="/documents/:projectId" component={DocumentsPage} />
+      <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
       <Route path="/session/interview">{() => <Redirect to="/session/survey" />}</Route>
       <Route path="/session/sections" component={SessionSectionsPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
