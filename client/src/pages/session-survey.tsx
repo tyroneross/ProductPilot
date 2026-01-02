@@ -302,6 +302,56 @@ export default function SessionSurveyPage() {
     }));
   };
 
+  const handleFreeformNoteChange = (questionId: string, note: string) => {
+    setSurveyResponses((prev) => ({
+      ...prev,
+      [`${questionId}_note`]: note,
+    }));
+  };
+
+  const handleMarkNA = (questionId: string) => {
+    setSurveyResponses((prev) => ({
+      ...prev,
+      [questionId]: "N/A",
+    }));
+  };
+
+  const autoSaveSurveyMutation = useMutation({
+    mutationFn: async (responsesToSave: SurveyResponse) => {
+      if (!projectId) return null;
+      const res = await apiRequest("PATCH", `/api/projects/${projectId}`, {
+        surveyResponses: responsesToSave,
+      });
+      return res.json();
+    },
+    onError: () => {
+      toast({
+        title: "Failed to save progress",
+        description: "Your responses may not be saved.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleNextSection = () => {
+    autoSaveSurveyMutation.mutate(surveyResponses);
+    setCurrentSectionIndex((prev) => prev + 1);
+  };
+
+  const handleSkipSection = () => {
+    let updatedResponses = { ...surveyResponses };
+    if (currentSection) {
+      currentSection.questions.forEach((q) => {
+        if (!updatedResponses[q.id]) {
+          updatedResponses[q.id] = "N/A";
+        }
+      });
+    }
+    setSurveyResponses(updatedResponses);
+    autoSaveSurveyMutation.mutate(updatedResponses);
+    setCurrentSectionIndex((prev) => prev + 1);
+  };
+
   const handleSubmitSurvey = async () => {
     setIsGeneratingDocs(true);
     try {
@@ -659,75 +709,118 @@ export default function SessionSurveyPage() {
                   {question.required && <span className="text-red-500 ml-1">*</span>}
                 </Label>
 
-                {question.type === "slider" && (
-                  <div className="space-y-4">
-                    <Slider
-                      value={[typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] as number : (question.min || 1)]}
-                      onValueChange={([value]) => handleSurveyResponseChange(question.id, value)}
-                      min={question.min || 1}
-                      max={question.max || 5}
-                      step={1}
-                      className="w-full"
-                      data-testid={`slider-${question.id}`}
-                    />
-                    <div className="flex justify-between text-metadata text-contrast-medium">
-                      <span>{question.minLabel || question.min}</span>
-                      <span className="text-accent font-medium">
-                        {typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] : "-"}
-                      </span>
-                      <span>{question.maxLabel || question.max}</span>
-                    </div>
+                {surveyResponses[question.id] === "N/A" ? (
+                  <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
+                    <span className="text-contrast-medium">Marked as N/A</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSurveyResponseChange(question.id, "")}
+                      data-testid={`button-undo-na-${question.id}`}
+                    >
+                      Undo
+                    </Button>
                   </div>
-                )}
-
-                {question.type === "single-select" && question.options && (
-                  <RadioGroup
-                    value={surveyResponses[question.id] as string || ""}
-                    onValueChange={(value) => handleSurveyResponseChange(question.id, value)}
-                    className="space-y-2"
-                    data-testid={`radio-${question.id}`}
-                  >
-                    {question.options.map((option) => (
-                      <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                        <RadioGroupItem value={option} id={`${question.id}-${option}`} />
-                        <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                          {option}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                )}
-
-                {question.type === "multi-select" && question.options && (
-                  <div className="space-y-2" data-testid={`checkbox-${question.id}`}>
-                    {question.options.map((option) => {
-                      const currentValues = (surveyResponses[question.id] as string[]) || [];
-                      return (
-                        <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                          <Checkbox
-                            id={`${question.id}-${option}`}
-                            checked={currentValues.includes(option)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                handleSurveyResponseChange(question.id, [...currentValues, option]);
-                              } else {
-                                handleSurveyResponseChange(question.id, currentValues.filter((v) => v !== option));
-                              }
-                            }}
-                          />
-                          <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                            {option}
-                          </Label>
+                ) : (
+                  <>
+                    {question.type === "slider" && (
+                      <div className="space-y-4">
+                        <Slider
+                          value={[typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] as number : (question.min || 1)]}
+                          onValueChange={([value]) => handleSurveyResponseChange(question.id, value)}
+                          min={question.min || 1}
+                          max={question.max || 5}
+                          step={1}
+                          className="w-full"
+                          data-testid={`slider-${question.id}`}
+                        />
+                        <div className="flex justify-between text-metadata text-contrast-medium">
+                          <span>{question.minLabel || question.min}</span>
+                          <span className="text-accent font-medium">
+                            {typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] : "-"}
+                          </span>
+                          <span>{question.maxLabel || question.max}</span>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    )}
+
+                    {question.type === "single-select" && question.options && (
+                      <RadioGroup
+                        value={surveyResponses[question.id] as string || ""}
+                        onValueChange={(value) => handleSurveyResponseChange(question.id, value)}
+                        className="space-y-2"
+                        data-testid={`radio-${question.id}`}
+                      >
+                        {question.options.map((option) => (
+                          <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
+                            <RadioGroupItem value={option} id={`${question.id}-${option}`} />
+                            <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
+                              {option}
+                            </Label>
+                          </div>
+                        ))}
+                      </RadioGroup>
+                    )}
+
+                    {question.type === "multi-select" && question.options && (
+                      <div className="space-y-2" data-testid={`checkbox-${question.id}`}>
+                        {question.options.map((option) => {
+                          const currentValues = (surveyResponses[question.id] as string[]) || [];
+                          return (
+                            <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
+                              <Checkbox
+                                id={`${question.id}-${option}`}
+                                checked={currentValues.includes(option)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    handleSurveyResponseChange(question.id, [...currentValues, option]);
+                                  } else {
+                                    handleSurveyResponseChange(question.id, currentValues.filter((v) => v !== option));
+                                  }
+                                }}
+                              />
+                              <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
+                                {option}
+                              </Label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleMarkNA(question.id)}
+                          className="text-contrast-medium hover:text-contrast-high"
+                          data-testid={`button-na-${question.id}`}
+                        >
+                          Mark N/A
+                        </Button>
+                      </div>
+                      <div>
+                        <Label className="text-metadata text-contrast-medium mb-1 block">
+                          Additional notes (optional)
+                        </Label>
+                        <textarea
+                          value={(surveyResponses[`${question.id}_note`] as string) || ""}
+                          onChange={(e) => handleFreeformNoteChange(question.id, e.target.value)}
+                          placeholder="Add any clarifications or context..."
+                          className="w-full p-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-accent/20"
+                          rows={2}
+                          data-testid={`input-note-${question.id}`}
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             ))}
           </div>
 
-          <div className="flex justify-between mt-8 pt-6 border-t border-gray-200">
+          <div className="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
             <Button
               variant="outline"
               onClick={() => setCurrentSectionIndex((prev) => Math.max(0, prev - 1))}
@@ -737,32 +830,55 @@ export default function SessionSurveyPage() {
               Previous
             </Button>
             
-            {isLastSection ? (
-              <Button
-                onClick={handleSubmitSurvey}
-                disabled={submitSurveyMutation.isPending || isGeneratingDocs}
-                className="btn-primary"
-                data-testid="button-submit-survey"
-              >
-                {isGeneratingDocs ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Generating Docs...
-                  </>
-                ) : (
-                  "Generate Documentation"
-                )}
-              </Button>
-            ) : (
-              <Button
-                onClick={() => setCurrentSectionIndex((prev) => prev + 1)}
-                className="btn-primary"
-                data-testid="button-next-section"
-              >
-                Next Section
-                <ChevronRight className="w-4 h-4 ml-2" />
-              </Button>
-            )}
+            <div className="flex items-center gap-3">
+              {!isLastSection && (
+                <Button
+                  variant="ghost"
+                  onClick={handleSkipSection}
+                  className="text-contrast-medium"
+                  data-testid="button-skip-section"
+                >
+                  Skip Section
+                </Button>
+              )}
+              
+              {isLastSection ? (
+                <Button
+                  onClick={handleSubmitSurvey}
+                  disabled={submitSurveyMutation.isPending || isGeneratingDocs}
+                  className="btn-primary"
+                  data-testid="button-submit-survey"
+                >
+                  {isGeneratingDocs ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating Docs...
+                    </>
+                  ) : (
+                    "Generate Documentation"
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleNextSection}
+                  disabled={autoSaveSurveyMutation.isPending}
+                  className="btn-primary"
+                  data-testid="button-next-section"
+                >
+                  {autoSaveSurveyMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      Next Section
+                      <ChevronRight className="w-4 h-4 ml-2" />
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
