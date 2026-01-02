@@ -578,8 +578,24 @@ Respond with ONLY valid JSON in this exact format:
         return res.status(400).json({ message: "Survey not completed" });
       }
 
+      // Parse document preferences from request body
+      const documentPreferences = (req.body.documentPreferences || []) as Array<{
+        stageId: string;
+        detailLevel: "detailed" | "summary";
+      }>;
+      
+      // Create a map for quick lookup
+      const preferencesMap = new Map(
+        documentPreferences.map(p => [p.stageId, p.detailLevel])
+      );
+
       // Get stages to update with generated content
-      const stages = await storage.getStagesByProject(req.params.projectId);
+      const allStages = await storage.getStagesByProject(req.params.projectId);
+      
+      // Filter stages based on preferences (if provided), otherwise generate all
+      const stages = documentPreferences.length > 0
+        ? allStages.filter(s => preferencesMap.has(s.id))
+        : allStages;
       
       // Get active custom prompts organized by category
       const customPrompts = (project.customPrompts || []) as { id: string; name: string; prompt: string; category: string; isActive: boolean; }[];
@@ -609,6 +625,9 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
       };
 
       for (const stage of stages) {
+        // Get detail level for this stage (default to detailed)
+        const detailLevel = preferencesMap.get(stage.id) || "detailed";
+        
         // Use stage number for deterministic category mapping, fallback to title-based matching
         const stageCategory = stageCategoryMap[stage.stageNumber] || (() => {
           const titleLower = stage.title.toLowerCase();
@@ -625,11 +644,18 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
           ? `\n\nRelevant custom prompts for this section:\n${relevantPrompts.map(p => `- ${p.name}: ${p.prompt}`).join('\n')}`
           : '';
         
-        const docPrompt = `Based on this survey data, generate comprehensive content for the "${stage.title}" section.
+        // Adjust prompt based on detail level
+        const detailInstruction = detailLevel === "summary"
+          ? "Generate a CONCISE SUMMARY version - focus on key points, main decisions, and essential information only. Keep it brief but actionable (roughly 1/3 the length of a full document)."
+          : "Generate DETAILED, COMPREHENSIVE documentation with thorough explanations, examples, and specific recommendations.";
+        
+        const docPrompt = `Based on this survey data, generate content for the "${stage.title}" section.
 
 ${surveyContext}${stagePromptsContext}
 
-Generate detailed, professional documentation appropriate for this section. Be thorough and specific based on the survey answers provided.`;
+${detailInstruction}
+
+Be thorough and specific based on the survey answers provided.`;
 
         try {
           // Try to get admin prompt from database, fallback to stage's default systemPrompt

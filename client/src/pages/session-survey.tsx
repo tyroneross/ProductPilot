@@ -24,6 +24,9 @@ export default function SessionSurveyPage() {
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse>({});
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [isGeneratingDocs, setIsGeneratingDocs] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0, stageName: "" });
+  const [showDocumentSelection, setShowDocumentSelection] = useState(false);
+  const [documentSelections, setDocumentSelections] = useState<Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }>>({});
   const [showPromptsSection, setShowPromptsSection] = useState(false);
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
   const [showAddPromptDialog, setShowAddPromptDialog] = useState(false);
@@ -105,6 +108,17 @@ export default function SessionSurveyPage() {
       setCustomPrompts(project.customPrompts as CustomPrompt[]);
     }
   }, [project?.customPrompts]);
+
+  // Initialize document selections when stages load
+  useEffect(() => {
+    if (stages.length > 0 && Object.keys(documentSelections).length === 0) {
+      const initialSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
+      stages.forEach(stage => {
+        initialSelections[stage.id] = { selected: true, detailLevel: "detailed" };
+      });
+      setDocumentSelections(initialSelections);
+    }
+  }, [stages]);
 
   const getPlatformLabel = (platform: string) => {
     const labels: Record<string, string> = {
@@ -352,14 +366,81 @@ export default function SessionSurveyPage() {
     setCurrentSectionIndex((prev) => prev + 1);
   };
 
-  const handleSubmitSurvey = async () => {
+  const handleReadyToGenerate = async () => {
+    // Save survey responses first
+    autoSaveSurveyMutation.mutate(surveyResponses);
+    // Show document selection dialog
+    setShowDocumentSelection(true);
+  };
+
+  const handleConfirmGenerate = async () => {
+    setShowDocumentSelection(false);
     setIsGeneratingDocs(true);
+    
+    const selectedStages = stages.filter(s => documentSelections[s.id]?.selected);
+    setGenerationProgress({ current: 0, total: selectedStages.length, stageName: "Starting..." });
+    
+    // Start polling for stage progress
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/stages`);
+        if (res.ok) {
+          const updatedStages: Stage[] = await res.json();
+          const completedStages = updatedStages.filter(s => 
+            documentSelections[s.id]?.selected && s.progress === 100
+          );
+          const inProgressStage = updatedStages.find(s => 
+            documentSelections[s.id]?.selected && s.progress > 0 && s.progress < 100
+          );
+          const nextStage = updatedStages.find(s => 
+            documentSelections[s.id]?.selected && s.progress === 0
+          );
+          
+          setGenerationProgress({
+            current: completedStages.length,
+            total: selectedStages.length,
+            stageName: inProgressStage?.title || nextStage?.title || "Finishing up...",
+          });
+        }
+      } catch (e) {
+        // Ignore polling errors
+      }
+    }, 2000);
+    
     try {
-      await submitSurveyMutation.mutateAsync();
+      // Submit survey and generate docs with preferences
+      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
+        responses: surveyResponses,
+      });
+      
+      // Generate with document preferences
+      const preferences = Object.entries(documentSelections)
+        .filter(([_, pref]) => pref.selected)
+        .map(([stageId, pref]) => ({
+          stageId,
+          detailLevel: pref.detailLevel,
+        }));
+      
+      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
+        documentPreferences: preferences,
+      });
+      
+      refetchProject();
+      toast({
+        title: "Documentation generated!",
+        description: "Your complete product documentation is ready.",
+      });
+      setLocation(`/documents/${projectId}`);
     } catch (error) {
-      // Error is already handled by mutation's onError
+      toast({
+        title: "Failed to generate documentation",
+        description: "Please try again.",
+        variant: "destructive",
+      });
     } finally {
+      clearInterval(pollInterval);
       setIsGeneratingDocs(false);
+      setGenerationProgress({ current: 0, total: 0, stageName: "" });
     }
   };
 
@@ -844,8 +925,8 @@ export default function SessionSurveyPage() {
               
               {isLastSection ? (
                 <Button
-                  onClick={handleSubmitSurvey}
-                  disabled={submitSurveyMutation.isPending || isGeneratingDocs}
+                  onClick={handleReadyToGenerate}
+                  disabled={isGeneratingDocs}
                   className="btn-primary"
                   data-testid="button-submit-survey"
                 >
@@ -855,7 +936,7 @@ export default function SessionSurveyPage() {
                       Generating Docs...
                     </>
                   ) : (
-                    "Generate Documentation"
+                    "Review & Generate"
                   )}
                 </Button>
               ) : (
@@ -884,6 +965,11 @@ export default function SessionSurveyPage() {
       </div>
     );
   };
+
+  const selectedCount = Object.values(documentSelections).filter(s => s.selected).length;
+  const progressPercent = generationProgress.total > 0 
+    ? Math.round((generationProgress.current / generationProgress.total) * 100) 
+    : 0;
 
   return (
     <div className="min-h-screen bg-surface-secondary flex flex-col">
@@ -936,6 +1022,45 @@ export default function SessionSurveyPage() {
           </div>
         </div>
       </header>
+
+      {/* Project name bar - persistent context */}
+      {project && (
+        <div className="bg-surface-tertiary border-b border-gray-100 px-6 py-2">
+          <div className="max-w-4xl mx-auto">
+            <p className="text-metadata text-contrast-medium" data-testid="text-project-name">
+              Working on: <span className="font-medium text-contrast-high">{project.name || "Untitled Project"}</span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Generation progress overlay */}
+      {isGeneratingDocs && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="generation-overlay">
+          <div className="bg-surface-primary rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <div className="text-center mb-6">
+              <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-accent" />
+              <h3 className="text-h4 font-medium text-contrast-high mb-2">Generating Documentation</h3>
+              <p className="text-description text-contrast-medium">{generationProgress.stageName}</p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-metadata text-contrast-medium">
+                <span>Progress</span>
+                <span>{generationProgress.current} of {generationProgress.total} documents</span>
+              </div>
+              <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-accent transition-all duration-500 rounded-full"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p className="text-metadata text-contrast-medium text-center mt-4">
+                This may take a minute...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 flex flex-col max-w-4xl w-full mx-auto">
         {surveyPhase === "discovery" ? renderDiscoveryPhase() : renderSurveyPhase()}
@@ -1131,6 +1256,164 @@ export default function SessionSurveyPage() {
                 data-testid="button-save-prompt"
               >
                 {editingPromptId ? "Save Changes" : "Add Prompt"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Document Selection Dialog */}
+      <Dialog open={showDocumentSelection} onOpenChange={setShowDocumentSelection}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Ready to Generate Documentation</DialogTitle>
+            <DialogDescription>
+              Select which documents you want to generate and choose the detail level for each.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex justify-between items-center pb-2 border-b border-gray-200">
+              <span className="text-description text-contrast-medium">
+                {selectedCount} of {stages.length} documents selected
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
+                    stages.forEach(stage => {
+                      newSelections[stage.id] = { 
+                        selected: true, 
+                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
+                      };
+                    });
+                    setDocumentSelections(newSelections);
+                  }}
+                  data-testid="button-select-all"
+                >
+                  Select All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
+                    stages.forEach(stage => {
+                      newSelections[stage.id] = { 
+                        selected: false, 
+                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
+                      };
+                    });
+                    setDocumentSelections(newSelections);
+                  }}
+                  data-testid="button-deselect-all"
+                >
+                  Deselect All
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {stages
+                .sort((a, b) => a.stageNumber - b.stageNumber)
+                .map((stage) => (
+                  <div
+                    key={stage.id}
+                    className={`bg-surface-secondary rounded-lg p-4 border transition-colors ${
+                      documentSelections[stage.id]?.selected 
+                        ? "border-accent bg-accent/5" 
+                        : "border-gray-200"
+                    }`}
+                    data-testid={`doc-selection-${stage.id}`}
+                  >
+                    <div className="flex items-start gap-4">
+                      <Checkbox
+                        id={`doc-${stage.id}`}
+                        checked={documentSelections[stage.id]?.selected || false}
+                        onCheckedChange={(checked) => {
+                          setDocumentSelections(prev => ({
+                            ...prev,
+                            [stage.id]: { 
+                              selected: !!checked, 
+                              detailLevel: prev[stage.id]?.detailLevel || "detailed" 
+                            }
+                          }));
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="flex-1">
+                        <Label 
+                          htmlFor={`doc-${stage.id}`} 
+                          className="text-description font-medium text-contrast-high cursor-pointer"
+                        >
+                          {stage.title}
+                        </Label>
+                        <p className="text-metadata text-contrast-medium mt-1">
+                          {stage.description}
+                        </p>
+                        
+                        {documentSelections[stage.id]?.selected && (
+                          <div className="mt-3 flex items-center gap-2">
+                            <span className="text-metadata text-contrast-medium">Detail level:</span>
+                            <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                              <button
+                                type="button"
+                                onClick={() => setDocumentSelections(prev => ({
+                                  ...prev,
+                                  [stage.id]: { 
+                                    selected: prev[stage.id]?.selected ?? true, 
+                                    detailLevel: "summary" 
+                                  }
+                                }))}
+                                className={`px-3 py-1.5 text-sm transition-colors ${
+                                  documentSelections[stage.id]?.detailLevel === "summary"
+                                    ? "bg-accent text-white"
+                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
+                                }`}
+                                data-testid={`button-summary-${stage.id}`}
+                              >
+                                Summary
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDocumentSelections(prev => ({
+                                  ...prev,
+                                  [stage.id]: { 
+                                    selected: prev[stage.id]?.selected ?? true, 
+                                    detailLevel: "detailed" 
+                                  }
+                                }))}
+                                className={`px-3 py-1.5 text-sm transition-colors ${
+                                  documentSelections[stage.id]?.detailLevel === "detailed"
+                                    ? "bg-accent text-white"
+                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
+                                }`}
+                                data-testid={`button-detailed-${stage.id}`}
+                              >
+                                Detailed
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+              <Button variant="ghost" onClick={() => setShowDocumentSelection(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleConfirmGenerate}
+                disabled={selectedCount === 0}
+                className="btn-primary"
+                data-testid="button-confirm-generate"
+              >
+                Generate {selectedCount} Document{selectedCount !== 1 ? "s" : ""}
               </Button>
             </div>
           </div>
