@@ -2,12 +2,16 @@ import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage } from "./services/ai";
-import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema } from "@shared/schema";
+import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema, INTERCEPTOR_PROMPTS } from "@shared/schema";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 
 // Admin usernames allowed to access the admin panel (can be expanded)
 const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
+
+// Helper to get interceptor prompt by targetKey
+const getInterceptorPrompt = (targetKey: string) => 
+  INTERCEPTOR_PROMPTS.find(p => p.targetKey === targetKey);
 
 // Middleware to check if user is an admin
 const isAdmin: RequestHandler = (req: any, res, next) => {
@@ -387,22 +391,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
                                          aiResponse.content.match(/\n\n.*:\n-/); // bullet lists with headers
               
               if (hasDocumentStructure || aiResponse.content.length > 800) {
-                // Override with simple questions instead
-                const overridePrompt = `The user said: "${messageData.content}". 
-
-You MUST respond with ONLY 2-3 simple questions to learn more. Do NOT generate any document, sections, or headers.
-
-Just ask questions like:
-1. [Question about who will use this]
-2. [Question about key features]
-3. [Question about constraints]
-
-Keep it conversational and brief.`;
-                
-                aiResponse = await aiService.chat([
-                  { role: "system", content: "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions." },
-                  { role: "user", content: overridePrompt }
-                ], modelToUse);
+                // Use interceptor prompt from schema.ts with fallback
+                const prdInterceptor = getInterceptorPrompt("prd_early_document_prevention");
+                const isEnabled = prdInterceptor?.isEnabled ?? true; // Default to enabled if not found
+                if (isEnabled) {
+                  const systemPrompt = prdInterceptor?.systemPrompt || "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions.";
+                  const userTemplate = prdInterceptor?.userPromptTemplate || `The user said: "{{USER_MESSAGE}}". You MUST respond with ONLY 2-3 simple questions. No documents.`;
+                  const overridePrompt = userTemplate.replace("{{USER_MESSAGE}}", messageData.content);
+                  aiResponse = await aiService.chat([
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: overridePrompt }
+                  ], modelToUse);
+                }
               }
             }
           }
@@ -414,17 +414,18 @@ Keep it conversational and brief.`;
                            aiResponse.content.includes("```html");
             
             if (!hasHTML) {
-              // Force HTML wireframe generation
-              const overridePrompt = `Create a simple HTML wireframe for: "${messageData.content}". 
-
-You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme (#FF6B35 for primary elements, #FFA500 for accents).
-
-Include a complete HTML document with basic styling. Keep it simple but functional.`;
-              
-              aiResponse = await aiService.chat([
-                { role: "system", content: "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks." },
-                { role: "user", content: overridePrompt }
-              ], modelToUse);
+              // Use interceptor prompt from schema.ts with fallback
+              const uiInterceptor = getInterceptorPrompt("ui_wireframe_html_enforcement");
+              const isEnabled = uiInterceptor?.isEnabled ?? true; // Default to enabled if not found
+              if (isEnabled) {
+                const systemPrompt = uiInterceptor?.systemPrompt || "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks.";
+                const userTemplate = uiInterceptor?.userPromptTemplate || `Create a simple HTML wireframe for: "{{USER_MESSAGE}}". You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme.`;
+                const overridePrompt = userTemplate.replace("{{USER_MESSAGE}}", messageData.content);
+                aiResponse = await aiService.chat([
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: overridePrompt }
+                ], modelToUse);
+              }
             }
           }
           
@@ -528,8 +529,14 @@ Respond with ONLY valid JSON in this exact format:
   ]
 }`;
 
+      // Use interceptor prompt from schema.ts for survey generation
+      const surveyInterceptor = getInterceptorPrompt("survey_generation_system");
+      const systemPrompt = surveyInterceptor?.isEnabled 
+        ? surveyInterceptor.systemPrompt 
+        : "You are a product requirements expert. Generate surveys that efficiently capture high-value information using sliders and select inputs. Always return valid JSON.";
+      
       const response = await aiService.generateStructuredOutput([
-        { role: "system", content: "You are a product requirements expert. Generate surveys that efficiently capture high-value information using sliders and select inputs. Always return valid JSON." },
+        { role: "system", content: systemPrompt },
         { role: "user", content: surveyPrompt }
       ], "claude-sonnet");
 
@@ -809,6 +816,15 @@ Be thorough and specific based on the survey answers provided.`;
       res.json(DEFAULT_STAGES);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch default stages" });
+    }
+  });
+
+  app.get("/api/admin/interceptor-prompts", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const { INTERCEPTOR_PROMPTS } = await import("@shared/schema");
+      res.json(INTERCEPTOR_PROMPTS);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch interceptor prompts" });
     }
   });
 

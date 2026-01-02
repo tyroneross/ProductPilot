@@ -353,3 +353,54 @@ Provide actionable steps with clear success criteria.`,
     ],
   },
 ];
+
+// Interceptor prompts - behavior modifiers that override or enhance AI responses
+// These are separate from stage prompts as they modify runtime behavior
+export const INTERCEPTOR_PROMPTS = [
+  {
+    id: "interceptor_prd_early_doc",
+    scope: "interceptor",
+    targetKey: "prd_early_document_prevention",
+    label: "PRD Early Document Prevention",
+    description: "Forces the AI to ask questions instead of generating a PRD document when user hasn't provided enough context (fewer than 6 messages)",
+    systemPrompt: "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions.",
+    userPromptTemplate: `The user said: "{{USER_MESSAGE}}". 
+
+You MUST respond with ONLY 2-3 simple questions to learn more. Do NOT generate any document, sections, or headers.
+
+Just ask questions like:
+1. [Question about who will use this]
+2. [Question about key features]
+3. [Question about constraints]
+
+Keep it conversational and brief.`,
+    triggerCondition: "stage === 2 && userMessageCount < 6 && (responseHasDocumentStructure || responseLength > 800)",
+    isEnabled: true,
+  },
+  {
+    id: "interceptor_ui_wireframe_enforce",
+    scope: "interceptor",
+    targetKey: "ui_wireframe_html_enforcement",
+    label: "UI Wireframe HTML Enforcement",
+    description: "Ensures the UI Design stage generates actual HTML wireframes with orange color scheme when the response doesn't contain HTML",
+    systemPrompt: "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks.",
+    userPromptTemplate: `Create a simple HTML wireframe for: "{{USER_MESSAGE}}". 
+
+You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme (#FF6B35 for primary elements, #FFA500 for accents).
+
+Include a complete HTML document with basic styling. Keep it simple but functional.`,
+    triggerCondition: "stage === 3 && !responseHasHTML",
+    isEnabled: true,
+  },
+  {
+    id: "interceptor_survey_generation",
+    scope: "interceptor",
+    targetKey: "survey_generation_system",
+    label: "Survey Generation System Prompt",
+    description: "System prompt used when generating dynamic survey questions based on product description",
+    systemPrompt: "You are a product requirements expert. Generate surveys that efficiently capture high-value information using sliders and select inputs. Always return valid JSON.",
+    userPromptTemplate: null, // Complex template defined in routes.ts
+    triggerCondition: "endpoint === '/api/projects/:projectId/generate-survey'",
+    isEnabled: true,
+  },
+];
