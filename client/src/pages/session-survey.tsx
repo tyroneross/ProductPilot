@@ -377,35 +377,59 @@ export default function SessionSurveyPage() {
     setShowDocumentSelection(false);
     setIsGeneratingDocs(true);
     
-    const selectedStages = stages.filter(s => documentSelections[s.id]?.selected);
-    setGenerationProgress({ current: 0, total: selectedStages.length, stageName: "Starting..." });
+    const selectedStageIds = new Set(
+      stages.filter(s => documentSelections[s.id]?.selected).map(s => s.id)
+    );
+    const totalSelected = selectedStageIds.size;
+    setGenerationProgress({ current: 0, total: totalSelected, stageName: "Starting..." });
     
-    // Start polling for stage progress
-    const pollInterval = setInterval(async () => {
+    let generationComplete = false;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    
+    // Function to check completion and navigate
+    const checkAndNavigate = async () => {
+      if (generationComplete) return;
       try {
         const res = await fetch(`/api/projects/${projectId}/stages`);
         if (res.ok) {
           const updatedStages: Stage[] = await res.json();
-          const completedStages = updatedStages.filter(s => 
-            documentSelections[s.id]?.selected && s.progress === 100
-          );
+          const completedCount = updatedStages.filter(s => 
+            selectedStageIds.has(s.id) && s.progress === 100
+          ).length;
           const inProgressStage = updatedStages.find(s => 
-            documentSelections[s.id]?.selected && s.progress > 0 && s.progress < 100
+            selectedStageIds.has(s.id) && s.progress > 0 && s.progress < 100
           );
           const nextStage = updatedStages.find(s => 
-            documentSelections[s.id]?.selected && s.progress === 0
+            selectedStageIds.has(s.id) && s.progress === 0
           );
           
           setGenerationProgress({
-            current: completedStages.length,
-            total: selectedStages.length,
+            current: completedCount,
+            total: totalSelected,
             stageName: inProgressStage?.title || nextStage?.title || "Finishing up...",
           });
+          
+          // If all selected stages are complete, navigate immediately
+          if (completedCount === totalSelected && totalSelected > 0) {
+            generationComplete = true;
+            if (pollInterval) clearInterval(pollInterval);
+            setIsGeneratingDocs(false);
+            setGenerationProgress({ current: 0, total: 0, stageName: "" });
+            refetchProject();
+            toast({
+              title: "Documentation generated!",
+              description: "Your complete product documentation is ready.",
+            });
+            setLocation(`/documents/${projectId}`);
+          }
         }
       } catch (e) {
         // Ignore polling errors
       }
-    }, 2000);
+    };
+    
+    // Start polling for stage progress
+    pollInterval = setInterval(checkAndNavigate, 2000);
     
     try {
       // Submit survey and generate docs with preferences
@@ -425,22 +449,34 @@ export default function SessionSurveyPage() {
         documentPreferences: preferences,
       });
       
-      refetchProject();
-      toast({
-        title: "Documentation generated!",
-        description: "Your complete product documentation is ready.",
-      });
-      setLocation(`/documents/${projectId}`);
+      // API returned - check one more time and navigate if not already done
+      if (!generationComplete) {
+        await checkAndNavigate();
+        // If still not complete (edge case), force navigate
+        if (!generationComplete) {
+          generationComplete = true;
+          refetchProject();
+          toast({
+            title: "Documentation generated!",
+            description: "Your complete product documentation is ready.",
+          });
+          setLocation(`/documents/${projectId}`);
+        }
+      }
     } catch (error) {
-      toast({
-        title: "Failed to generate documentation",
-        description: "Please try again.",
-        variant: "destructive",
-      });
+      if (!generationComplete) {
+        toast({
+          title: "Failed to generate documentation",
+          description: "Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
-      clearInterval(pollInterval);
-      setIsGeneratingDocs(false);
-      setGenerationProgress({ current: 0, total: 0, stageName: "" });
+      if (pollInterval) clearInterval(pollInterval);
+      if (!generationComplete) {
+        setIsGeneratingDocs(false);
+        setGenerationProgress({ current: 0, total: 0, stageName: "" });
+      }
     }
   };
 
