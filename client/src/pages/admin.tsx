@@ -24,6 +24,11 @@ export default function AdminPage() {
     enabled: isAuthenticated,
   });
 
+  const { data: defaultStages = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/default-stages"],
+    enabled: isAuthenticated,
+  });
+
   const seedMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/prompts/seed"),
     onSuccess: () => {
@@ -106,9 +111,23 @@ export default function AdminPage() {
     );
   }
 
-  const filteredPrompts = prompts?.filter(p => 
+  const filteredPrompts = [
+    ...(prompts || []),
+    ...defaultStages.map(s => ({
+      id: `default-${s.stageNumber}`,
+      scope: "stage",
+      targetKey: `stage_${s.stageNumber}`,
+      label: s.title,
+      description: s.description,
+      content: s.systemPrompt,
+      isDefault: true,
+      stageNumber: s.stageNumber,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as AdminPrompt))
+  ].filter(p => 
     filterScope === "all" || p.scope === filterScope
-  ) || [];
+  );
 
   return (
     <div className="min-h-screen bg-surface-secondary">

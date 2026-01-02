@@ -803,6 +803,15 @@ Be thorough and specific based on the survey answers provided.`;
     }
   });
 
+  app.get("/api/admin/default-stages", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const { DEFAULT_STAGES } = await import("@shared/schema");
+      res.json(DEFAULT_STAGES);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch default stages" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
