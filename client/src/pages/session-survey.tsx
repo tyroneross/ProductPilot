@@ -109,6 +109,41 @@ export default function SessionSurveyPage() {
     }
   }, [project?.customPrompts]);
 
+  // Restore saved survey responses and calculate current section when project loads
+  const surveyRestored = useRef(false);
+  useEffect(() => {
+    if (project && surveyDefinition && !surveyRestored.current) {
+      // Restore saved responses
+      const savedResponses = project.surveyResponses as SurveyResponse | null;
+      if (savedResponses && Object.keys(savedResponses).length > 0) {
+        surveyRestored.current = true;
+        setSurveyResponses(savedResponses);
+        
+        // Calculate which section to start on based on answered questions
+        const sections = surveyDefinition.sections || [];
+        let lastCompletedSection = -1;
+        
+        for (let i = 0; i < sections.length; i++) {
+          const section = sections[i];
+          const allQuestionsAnswered = section.questions.every(
+            (q: { id: string }) => savedResponses[q.id] !== undefined && savedResponses[q.id] !== ""
+          );
+          if (allQuestionsAnswered) {
+            lastCompletedSection = i;
+          } else {
+            break;
+          }
+        }
+        
+        // Start at the next incomplete section, or last section if all complete
+        const targetSection = Math.min(lastCompletedSection + 1, sections.length - 1);
+        if (targetSection > 0) {
+          setCurrentSectionIndex(targetSection);
+        }
+      }
+    }
+  }, [project, surveyDefinition]);
+
   // Initialize document selections when stages load
   useEffect(() => {
     if (stages.length > 0 && Object.keys(documentSelections).length === 0) {
