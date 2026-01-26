@@ -33,20 +33,20 @@ export default function Dashboard() {
     <div className="min-h-screen bg-surface-secondary">
       <header className="border-b border-gray-200 bg-surface-primary">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
               <h1 className="text-h2 font-medium text-contrast-high line-clamp-1">Product Development Assistant</h1>
-              <p className="text-description text-contrast-medium mt-1">
+              <p className="text-description text-contrast-medium mt-1 hidden sm:block">
                 Guided workflow for systematic product development
               </p>
             </div>
             <Button
               onClick={() => setLocation("/")}
-              className="btn-primary min-h-[44px]"
+              className="btn-primary min-h-[44px] shrink-0"
               data-testid="button-new-project"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              New Product
+              <Plus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Product</span>
             </Button>
           </div>
         </div>

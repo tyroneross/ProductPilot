@@ -1069,17 +1069,17 @@ export default function SessionSurveyPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 shrink-0">
             <Button
               variant="outline"
               onClick={() => setShowPromptsSection(true)}
-              className="min-h-[44px]"
+              className="min-h-[44px] shrink-0"
               data-testid="button-manage-prompts"
             >
-              <Sparkles className="w-4 h-4 mr-2" />
-              Prompts
+              <Sparkles className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Prompts</span>
               {customPrompts.length > 0 && (
-                <span className="ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
+                <span className="ml-1 sm:ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
                   {customPrompts.length}
                 </span>
               )}
@@ -1087,11 +1087,11 @@ export default function SessionSurveyPage() {
             <Button
               variant="outline"
               onClick={handleSave}
-              className="min-h-[44px]"
+              className="min-h-[44px] shrink-0"
               data-testid="button-save-project"
             >
-              <Save className="w-4 h-4 mr-2" />
-              Save Project
+              <Save className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Save Project</span>
             </Button>
           </div>
         </div>

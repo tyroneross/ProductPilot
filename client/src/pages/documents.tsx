@@ -124,28 +124,29 @@ export default function DocumentsPage() {
   return (
     <div className="min-h-screen bg-surface-secondary">
       <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center space-x-4 min-w-0">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setLocation("/projects")}
-              className="min-h-[44px] min-w-[44px]"
+              className="min-h-[44px] min-w-[44px] shrink-0"
               data-testid="button-back-projects"
             >
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div>
-              <h1 className="text-h3 font-medium text-contrast-high">{project.name}</h1>
-              <p className="text-description text-contrast-medium">Product documentation and iteration</p>
+            <div className="min-w-0">
+              <h1 className="text-h3 font-medium text-contrast-high truncate">{project.name}</h1>
+              <p className="text-description text-contrast-medium hidden sm:block">Product documentation and iteration</p>
             </div>
           </div>
           <Button
             onClick={() => setLocation(`/session/survey?projectId=${project.id}`)}
-            className="btn-primary min-h-[44px]"
+            className="btn-primary min-h-[44px] shrink-0"
             data-testid="button-continue-building"
           >
-            Continue Building
+            <span className="hidden sm:inline">Continue Building</span>
+            <span className="sm:hidden">Continue</span>
           </Button>
         </div>
       </header>

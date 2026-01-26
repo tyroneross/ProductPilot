@@ -167,13 +167,13 @@ export default function AdminPage() {
             <Shield className="w-6 h-6 text-accent" />
             <h1 className="text-title font-semibold">Admin Panel</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-description text-contrast-medium" data-testid="text-admin-user">
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-description text-contrast-medium hidden sm:inline" data-testid="text-admin-user">
               {user?.email || user?.firstName || "Admin"}
             </span>
-            <Button variant="outline" size="sm" onClick={() => logout()} data-testid="button-admin-logout">
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
+            <Button variant="outline" size="sm" onClick={() => logout()} className="shrink-0" data-testid="button-admin-logout">
+              <LogOut className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Sign Out</span>
             </Button>
           </div>
         </div>
@@ -192,7 +192,7 @@ export default function AdminPage() {
           </TabsList>
 
           <TabsContent value="stage">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-semibold">Stage Prompts</h2>
                 <Select value={filterScope} onValueChange={setFilterScope}>
@@ -207,7 +207,7 @@ export default function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 {(!prompts || prompts.length === 0) && (
                   <Button
                     variant="outline"
