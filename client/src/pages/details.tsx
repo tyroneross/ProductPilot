@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Sparkles, Plus, X, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Sparkles, Plus, X, ArrowRight, ChevronDown, ChevronUp, Loader2, FileText, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 type MinimumDetails = {
   problemStatement: string;
@@ -22,6 +24,8 @@ type MinimumDetails = {
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
   const [showOptional, setShowOptional] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const { toast } = useToast();
   const [details, setDetails] = useState<MinimumDetails>({
     problemStatement: "",
     userGoals: ["", "", ""],
@@ -57,38 +61,70 @@ export default function DetailsPage() {
     details.userGoals.some(g => g.trim()) && 
     details.v1Definition.trim();
 
-  const handleContinue = () => {
-    const cleanedDetails = {
-      ...details,
-      userGoals: details.userGoals.filter(g => g.trim()),
-      mainObjects: details.mainObjects.filter(o => o.trim()),
-      mainActions: details.mainActions.filter(a => a.trim()),
-    };
+  const getCleanedDetails = () => ({
+    ...details,
+    userGoals: details.userGoals.filter(g => g.trim()),
+    mainObjects: details.mainObjects.filter(o => o.trim()),
+    mainActions: details.mainActions.filter(a => a.trim()),
+  });
+
+  const handleAddMoreDetails = () => {
+    const cleanedDetails = getCleanedDetails();
     sessionStorage.setItem("minimumDetails", JSON.stringify(cleanedDetails));
     sessionStorage.setItem("productIdea", details.problemStatement);
     setLocation("/session/survey");
   };
 
+  const handleBuildDocsNow = async () => {
+    setIsGenerating(true);
+    const cleanedDetails = getCleanedDetails();
+    
+    try {
+      // Create project with minimum details
+      const response = await apiRequest("POST", "/api/projects", {
+        name: cleanedDetails.problemStatement.substring(0, 50) + (cleanedDetails.problemStatement.length > 50 ? "..." : ""),
+        description: cleanedDetails.v1Definition,
+        mode: "survey",
+        minimumDetails: cleanedDetails,
+      });
+      
+      const project = await response.json();
+      
+      // Generate docs directly from minimum details
+      await apiRequest("POST", `/api/projects/${project.id}/generate-docs-from-minimum`, {
+        minimumDetails: cleanedDetails,
+      });
+      
+      toast({
+        title: "Documents generated!",
+        description: "Your product docs are ready to view.",
+      });
+      
+      setLocation(`/documents/${project.id}`);
+    } catch (error) {
+      console.error("Failed to generate docs:", error);
+      toast({
+        title: "Generation failed",
+        description: "Please try again or add more details.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <div className="w-full max-w-2xl mx-auto px-6 pt-6">
-        <Progress value={100} className="h-2" />
-        <div className="flex justify-between mt-2 text-metadata text-contrast-medium">
-          <span>Details</span>
-          <span>Final step</span>
-        </div>
-      </div>
-
       <div className="max-w-2xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center p-3 bg-accent rounded-full mb-4">
             <Sparkles className="w-6 h-6 text-surface-primary" />
           </div>
           <h1 className="text-h3 font-medium text-contrast-high mb-2">
-            A few more details
+            Tell us about your idea
           </h1>
           <p className="text-description text-contrast-medium">
-            This helps generate better specs and documentation
+            Just 3 things needed to generate your product docs
           </p>
         </div>
 
@@ -285,23 +321,57 @@ export default function DetailsPage() {
           </Collapsible>
         </div>
 
-        <div className="flex items-center justify-between mt-6">
+        <div className="flex flex-col gap-4 mt-8">
           <Button
-            variant="ghost"
-            onClick={() => setLocation("/intake")}
-            data-testid="button-back"
+            onClick={handleBuildDocsNow}
+            disabled={!canContinue || isGenerating}
+            className="btn-primary min-h-[52px] w-full text-body"
+            data-testid="button-build-docs-now"
           >
-            ← Back
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Generating docs...
+              </>
+            ) : (
+              <>
+                <FileText className="w-5 h-5 mr-2" />
+                Build Docs Now
+              </>
+            )}
           </Button>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex-1 border-t border-gray-200" />
+            <span className="text-metadata text-contrast-medium">or</span>
+            <div className="flex-1 border-t border-gray-200" />
+          </div>
+          
           <Button
-            onClick={handleContinue}
-            disabled={!canContinue}
-            className="btn-primary min-h-[44px] px-8"
-            data-testid="button-generate"
+            variant="outline"
+            onClick={handleAddMoreDetails}
+            disabled={!canContinue || isGenerating}
+            className="min-h-[44px] w-full"
+            data-testid="button-add-more-details"
           >
-            Generate Specs
+            <MessageCircle className="w-4 h-4 mr-2" />
+            Add More Details First
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
+          
+          <p className="text-metadata text-contrast-medium text-center">
+            Adding more details helps generate more accurate documentation
+          </p>
+        </div>
+
+        <div className="mt-8 text-center">
+          <button
+            onClick={() => setLocation("/")}
+            className="text-description text-contrast-medium hover:text-accent"
+            data-testid="button-back-home"
+          >
+            ← Back to home
+          </button>
         </div>
       </div>
     </div>

@@ -695,6 +695,105 @@ Be thorough and specific based on the survey answers provided.`;
     }
   });
 
+  // Generate docs from minimum details only (faster path for quick start)
+  app.post("/api/projects/:projectId/generate-docs-from-minimum", async (req, res) => {
+    try {
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const minimumDetails = req.body.minimumDetails || project.minimumDetails;
+      if (!minimumDetails) {
+        return res.status(400).json({ message: "Minimum details not provided" });
+      }
+
+      // Ensure project has stages
+      let stages = await storage.getStagesByProject(req.params.projectId);
+      if (stages.length === 0) {
+        // Create default stages
+        const defaultStages = [
+          { stageNumber: 1, title: "Requirements Definition", description: "User personas, use cases, and MVP scope", progress: 0, systemPrompt: "You are a product manager helping define requirements." },
+          { stageNumber: 2, title: "Product Requirements Document", description: "User stories, features, and success metrics", progress: 0, systemPrompt: "You are a product manager writing a detailed PRD." },
+          { stageNumber: 3, title: "UI Design & Wireframes", description: "Simple wireframe mockups", progress: 0, systemPrompt: "You are a UI designer creating wireframes." },
+          { stageNumber: 4, title: "System Architecture", description: "Technical design and architecture", progress: 0, systemPrompt: "You are a software architect designing the system." },
+          { stageNumber: 5, title: "Coding Prompts", description: "AI-optimized implementation instructions", progress: 0, systemPrompt: "You are a senior developer creating coding prompts." },
+          { stageNumber: 6, title: "Development Guide", description: "Implementation roadmap and milestones", progress: 0, systemPrompt: "You are a tech lead writing a development guide." },
+        ];
+        
+        for (const stageData of defaultStages) {
+          await storage.createStage({
+            projectId: req.params.projectId,
+            ...stageData,
+          });
+        }
+        stages = await storage.getStagesByProject(req.params.projectId);
+      }
+
+      // Build context from minimum details
+      const md = minimumDetails as {
+        problemStatement: string;
+        userGoals: string[];
+        v1Definition: string;
+        mainObjects?: string[];
+        mainActions?: string[];
+        inspirationLink?: string;
+        mustUseTools?: string;
+        mustAvoidTools?: string;
+      };
+
+      const contextParts = [
+        `PROBLEM: ${md.problemStatement}`,
+        `USER GOALS: ${md.userGoals.join(", ")}`,
+        `V1 DEFINITION: ${md.v1Definition}`,
+      ];
+
+      if (md.mainObjects?.length) contextParts.push(`MAIN OBJECTS: ${md.mainObjects.join(", ")}`);
+      if (md.mainActions?.length) contextParts.push(`MAIN ACTIONS: ${md.mainActions.join(", ")}`);
+      if (md.inspirationLink) contextParts.push(`INSPIRATION: ${md.inspirationLink}`);
+      if (md.mustUseTools) contextParts.push(`MUST USE: ${md.mustUseTools}`);
+      if (md.mustAvoidTools) contextParts.push(`MUST AVOID: ${md.mustAvoidTools}`);
+
+      const minimalContext = contextParts.join("\n");
+
+      // Generate documentation for first 4 stages (core docs)
+      const coreStagesToGenerate = stages.filter(s => s.stageNumber <= 4);
+
+      for (const stage of coreStagesToGenerate) {
+        const docPrompt = `Based on this minimal product context, generate content for the "${stage.title}" section.
+
+${minimalContext}
+
+Generate practical, actionable documentation based on the information provided. Be specific but acknowledge where more detail would be helpful. Focus on the core requirements and make reasonable assumptions where needed.`;
+
+        try {
+          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
+          
+          const response = await aiService.chat([
+            { role: "system", content: systemPromptToUse },
+            { role: "user", content: docPrompt }
+          ], "claude-sonnet");
+
+          await storage.createMessage({
+            stageId: stage.id,
+            role: "assistant",
+            content: response.content,
+          });
+
+          await storage.updateStage(stage.id, { progress: 100 });
+        } catch (stageError) {
+          console.error(`Error generating docs for stage ${stage.title}:`, stageError);
+        }
+      }
+
+      res.json({ message: "Documentation generated from minimum details" });
+    } catch (error) {
+      console.error("Min doc generation error:", error);
+      res.status(500).json({ message: "Failed to generate documentation" });
+    }
+  });
+
   // Export functionality
   app.get("/api/projects/:projectId/export", async (req, res) => {
     try {

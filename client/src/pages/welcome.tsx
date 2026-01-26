@@ -45,7 +45,7 @@ export default function WelcomePage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
-              onClick={() => setLocation("/intake")}
+              onClick={() => setLocation("/details")}
               className="btn-primary min-h-[52px] px-10 text-body"
               data-testid="button-get-started"
             >

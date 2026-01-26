@@ -83,43 +83,42 @@ Preferred communication style: Simple, everyday language.
 
 ### User Workflow
 
-**Survey Mode (Default):**
+**Simplified Quick Start Flow (Default):**
 
 1. **Landing Page** (/)
-   - Simple "What do you want to build?" textarea
-   - No project creation required upfront
-   - User describes product idea in plain language
-   - Clicking "Continue" goes directly to survey mode
+   - Welcome screen with "Get Started" CTA
+   - Shows what you'll get (Requirements, Product Spec, Architecture, Dev Guide)
+   - Option to continue draft or view existing projects
 
-2. **Survey Session** (/session/survey)
-   - AI automatically asks questions to gather requirements
-   - Discovery phase: conversational Q&A to understand the product
-   - Survey phase: structured questions with sliders and selects
-   - Project created lazily on first interaction
-   - Save button always visible for naming/saving project
+2. **Quick Start** (/details)
+   - **Minimum viable context**: 3 required fields only
+     - Problem statement: "Users need to ___ because ___"
+     - Top 3 user goals: What should users accomplish?
+     - V1 definition: What makes v1 "done"?
+   - **"Build Docs Now"** button: Generate docs immediately with minimal info
+   - **"Add More Details First"** button: Go to survey for richer context
+   - Expandable optional fields (objects, actions, tools, inspiration)
 
-3. **Save Functionality**
-   - Save button visible throughout workflow
-   - Opens dialog to name/rename project
-   - Can save at any time during process
+3. **Survey Mode** (/session/survey) - Optional Expansion
+   - AI-powered discovery chat to gather more requirements
+   - Structured survey with sliders and selects
+   - For users who want more detailed/accurate documentation
+   - Save button always visible
 
-4. **Section-by-Section Mode** (/session/sections)
-   - Alternative workflow for working on specific stages
-   - View all 6 stages as cards
-   - Skip sections not needed
-
-5. **Existing Projects** (/projects)
+4. **Existing Projects** (/projects)
    - View all saved projects
-   - "New Product" button in header for unified entry point
    - Access documents, continue building, or work stage-by-stage
-   - Loading skeletons during data fetch
-   - Mobile-friendly truncation (line-clamp) for long names
+   - Mobile-friendly with responsive buttons
+
+**Deprecated Routes (redirect to new flow):**
+- /intake → /details
+- /interview/:id → /session/survey
 
 **6 Stages:**
-1. Requirements & Discussion Goals
-2. Product Requirements (PRD) - Conversational with Claude Sonnet
-3. UI Design & Wireframes - HTML mockups with Claude Haiku
-4. Architecture Design
+1. Requirements Definition
+2. Product Requirements (PRD)
+3. UI Design & Wireframes
+4. System Architecture
 5. Coding Prompts
 6. Development Guide
 
