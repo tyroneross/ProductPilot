@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { MessageCircle } from "lucide-react";
 import NewProjectForm from "@/components/new-project-form";
@@ -21,14 +21,16 @@ export default function Dashboard() {
     enabled: !!currentProjectId,
   });
 
-  // Auto-select first project if none selected
-  const currentProject = currentProjectId ? 
-    projects.find((p) => p.id === currentProjectId) : 
+  const currentProject = currentProjectId ?
+    projects.find((p) => p.id === currentProjectId) :
     projects[0];
 
-  if (!currentProjectId && projects.length > 0) {
-    setCurrentProjectId(projects[0].id);
-  }
+  // Auto-select first project if none selected (useEffect avoids state update during render)
+  useEffect(() => {
+    if (!currentProjectId && projects.length > 0) {
+      setCurrentProjectId(projects[0].id);
+    }
+  }, [currentProjectId, projects]);
 
   return (
     <div className="min-h-screen bg-surface-secondary">

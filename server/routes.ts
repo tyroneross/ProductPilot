@@ -386,19 +386,19 @@ Include a complete HTML document with basic styling. Keep it simple but function
             content: aiResponse.content,
           });
 
-          // Update stage progress
-          const allMessages = await storage.getMessagesByStage(req.params.stageId);
-          const progress = await aiService.calculateProgress(
-            allMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-            [stage.description] // In production, define more specific goals
-          );
-          
+          // Update stage progress using existing messages + the new AI message (avoids redundant DB query)
+          const allMessages = [
+            ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+            { role: "assistant" as const, content: aiResponse.content }
+          ];
+          const progress = await aiService.calculateProgress(allMessages, [stage.description]);
+
           await storage.updateStage(req.params.stageId, { progress });
 
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
           console.error("AI service error:", aiError);
-          res.status(201).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
+          res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
         }
       } else {
         res.status(201).json({ userMessage: message });
@@ -558,8 +558,12 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
         5: 'testing',
       };
 
-      for (const stage of stages) {
-        // Use stage number for deterministic category mapping, fallback to title-based matching
+      // Batch-fetch all admin prompts once instead of querying per-stage
+      const allAdminPrompts = await storage.getAllAdminPrompts();
+      const adminPromptMap = new Map(allAdminPrompts.map(p => [p.targetKey, p]));
+
+      // Generate docs for all stages in parallel (significant speed improvement)
+      await Promise.allSettled(stages.map(async (stage) => {
         const stageCategory = stageCategoryMap[stage.stageNumber] || (() => {
           const titleLower = stage.title.toLowerCase();
           if (titleLower.includes('requirement') || titleLower.includes('prd') || titleLower.includes('goal') || titleLower.includes('scope')) return 'requirements';
@@ -569,12 +573,12 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
           if (titleLower.includes('test') || titleLower.includes('qa') || titleLower.includes('quality') || titleLower.includes('guide') || titleLower.includes('deploy') || titleLower.includes('release')) return 'testing';
           return 'general';
         })();
-        
+
         const relevantPrompts = activePrompts.filter(p => p.category === stageCategory || p.category === 'general');
         const stagePromptsContext = relevantPrompts.length > 0
           ? `\n\nRelevant custom prompts for this section:\n${relevantPrompts.map(p => `- ${p.name}: ${p.prompt}`).join('\n')}`
           : '';
-        
+
         const docPrompt = `Based on this survey data, generate comprehensive content for the "${stage.title}" section.
 
 ${surveyContext}${stagePromptsContext}
@@ -582,28 +586,25 @@ ${surveyContext}${stagePromptsContext}
 Generate detailed, professional documentation appropriate for this section. Be thorough and specific based on the survey answers provided.`;
 
         try {
-          // Try to get admin prompt from database, fallback to stage's default systemPrompt
-          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          const adminPrompt = adminPromptMap.get(`stage_${stage.stageNumber}`);
           const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
-          
+
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
           ], "claude-sonnet");
 
-          // Create a message in the stage with the generated content
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
             content: response.content,
           });
 
-          // Update stage progress to 100%
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
           console.error(`Error generating docs for stage ${stage.title}:`, stageError);
         }
-      }
+      }));
 
       res.json({ message: "Documentation generated successfully" });
     } catch (error) {

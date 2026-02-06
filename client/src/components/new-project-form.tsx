@@ -27,7 +27,7 @@ export default function NewProjectForm({ onProjectCreated }: NewProjectFormProps
       name: "",
       description: "A new product development project",
       mode: "interview",
-      aiModel: "gpt-4o",
+      aiModel: "claude-sonnet",
     },
   });
 

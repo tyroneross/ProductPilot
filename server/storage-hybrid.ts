@@ -489,7 +489,7 @@ class PostgresStorage implements IStorage {
       if (Array.isArray(keyInsights) && keyInsights.length > 0) {
         const completedCount = Array.isArray(completedInsights) ? completedInsights.length : 0;
         const totalCount = keyInsights.length;
-        finalUpdates.progress = Math.round((completedCount / totalCount) * 100);
+        finalUpdates.progress = Math.max(0, Math.min(100, Math.round((completedCount / totalCount) * 100)));
       }
     }
     
