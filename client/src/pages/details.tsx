@@ -26,6 +26,14 @@ export default function DetailsPage() {
   const [showOptional, setShowOptional] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
+
+  const savedStyle = (() => {
+    try {
+      const raw = sessionStorage.getItem("appStyle");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
   const [details, setDetails] = useState<MinimumDetails>({
     problemStatement: "",
     userGoals: ["", "", ""],
@@ -80,13 +88,16 @@ export default function DetailsPage() {
     const cleanedDetails = getCleanedDetails();
     
     try {
-      // Create project with minimum details
-      const response = await apiRequest("POST", "/api/projects", {
+      const projectPayload: Record<string, unknown> = {
         name: cleanedDetails.problemStatement.substring(0, 50) + (cleanedDetails.problemStatement.length > 50 ? "..." : ""),
         description: cleanedDetails.v1Definition,
         mode: "survey",
         minimumDetails: cleanedDetails,
-      });
+      };
+      if (savedStyle) {
+        projectPayload.appStyle = savedStyle;
+      }
+      const response = await apiRequest("POST", "/api/projects", projectPayload);
       
       const project = await response.json();
       
@@ -364,13 +375,20 @@ export default function DetailsPage() {
           </p>
         </div>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 flex items-center justify-between">
           <button
             onClick={() => setLocation("/")}
             className="text-description text-contrast-medium hover:text-accent"
             data-testid="button-back-home"
           >
             ← Back to home
+          </button>
+          <button
+            onClick={() => setLocation("/style")}
+            className="text-description text-contrast-medium hover:text-accent"
+            data-testid="button-change-style"
+          >
+            {savedStyle ? `Style: ${savedStyle.name}` : "Pick a style"} →
           </button>
         </div>
       </div>

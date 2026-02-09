@@ -135,6 +135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customPrompts: z.any().optional(),
         intakeAnswers: z.any().optional(),
         minimumDetails: z.any().optional(),
+        appStyle: z.any().optional(),
       }).parse(req.body);
       
       const project = await storage.getProject(req.params.id);
@@ -754,9 +755,18 @@ Be thorough and specific based on the survey answers provided.`;
       if (md.mustUseTools) contextParts.push(`MUST USE: ${md.mustUseTools}`);
       if (md.mustAvoidTools) contextParts.push(`MUST AVOID: ${md.mustAvoidTools}`);
 
+      const appStyle = project.appStyle as { id: string; name: string; description?: string; tagline?: string; vibe?: string; bestFor?: string; brands?: string } | null;
+      if (appStyle) {
+        const styleParts = [`UI/UX STYLE: ${appStyle.name}`];
+        if (appStyle.tagline) styleParts.push(`Style approach: ${appStyle.tagline}`);
+        if (appStyle.vibe) styleParts.push(`Vibe: ${appStyle.vibe}`);
+        if (appStyle.description) styleParts.push(`Custom description: ${appStyle.description}`);
+        if (appStyle.brands) styleParts.push(`Reference brands: ${appStyle.brands}`);
+        contextParts.push(styleParts.join(". "));
+      }
+
       const minimalContext = contextParts.join("\n");
 
-      // Generate documentation for first 4 stages (core docs)
       const coreStagesToGenerate = stages.filter(s => s.stageNumber <= 4);
 
       for (const stage of coreStagesToGenerate) {
@@ -764,7 +774,7 @@ Be thorough and specific based on the survey answers provided.`;
 
 ${minimalContext}
 
-Generate practical, actionable documentation based on the information provided. Be specific but acknowledge where more detail would be helpful. Focus on the core requirements and make reasonable assumptions where needed.`;
+Generate practical, actionable documentation based on the information provided. Be specific but acknowledge where more detail would be helpful. Focus on the core requirements and make reasonable assumptions where needed.${appStyle ? ` The UI/UX should follow a "${appStyle.name}" style direction.` : ''}`;
 
         try {
           const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);

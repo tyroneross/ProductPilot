@@ -90,7 +90,13 @@ Preferred communication style: Simple, everyday language.
    - Shows what you'll get (Requirements, Product Spec, Architecture, Dev Guide)
    - Option to continue draft or view existing projects
 
-2. **Quick Start** (/details)
+2. **Style Picker** (/style)
+   - 10 preset UI/UX styles with mini app previews (Clean Minimal, Soft & Rounded, Bold Editorial, Glassmorphic, Neubrutalist, Dark Luxury, Material/Elevated, Vibrant & Playful, Organic/Natural, Retro/Y2K)
+   - Custom style option with name and description fields
+   - Selection stored in sessionStorage and persisted to project's appStyle field
+   - Skip option available to go directly to details
+
+3. **Quick Start** (/details)
    - **Minimum viable context**: 3 required fields only
      - Problem statement: "Users need to ___ because ___"
      - Top 3 user goals: What should users accomplish?

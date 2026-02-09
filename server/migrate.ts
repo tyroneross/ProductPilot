@@ -192,6 +192,9 @@ export async function runMigrations() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'minimum_details') THEN
           ALTER TABLE "projects" ADD COLUMN "minimum_details" jsonb;
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'app_style') THEN
+          ALTER TABLE "projects" ADD COLUMN "app_style" jsonb;
+        END IF;
       END $$;
     `);
     

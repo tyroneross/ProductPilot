@@ -22,6 +22,9 @@ export default function WelcomePage() {
         sessionStorage.setItem("minimumDetails", JSON.stringify(draft.minimumDetails));
         sessionStorage.setItem("productIdea", (draft.minimumDetails as any).problemStatement || "");
       }
+      if (draft.appStyle) {
+        sessionStorage.setItem("appStyle", JSON.stringify(draft.appStyle));
+      }
       setLocation("/session/survey");
     }
   };
@@ -45,7 +48,7 @@ export default function WelcomePage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
-              onClick={() => setLocation("/details")}
+              onClick={() => setLocation("/style")}
               className="btn-primary min-h-[52px] px-10 text-body"
               data-testid="button-get-started"
             >
