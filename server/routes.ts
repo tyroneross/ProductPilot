@@ -1,61 +1,24 @@
-import type { Express, RequestHandler } from "express";
+import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage } from "./services/ai";
 import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema } from "@shared/schema";
 import { z } from "zod";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
-
-// Admin usernames allowed to access the admin panel (can be expanded)
-const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
-
-// Middleware to check if user is an admin
-const isAdmin: RequestHandler = (req: any, res, next) => {
-  const user = req.user;
-  if (!user || !user.claims) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  
-  // Check if user email or ID matches admin list
-  const userEmail = user.claims.email || "";
-  const userId = user.claims.sub || "";
-  
-  // Check against allowlist - user ID or email must match
-  const isAllowed = ADMIN_USERS.includes(userId) || ADMIN_USERS.includes(userEmail);
-  
-  if (!isAllowed) {
-    return res.status(403).json({ message: "Forbidden: Admin access required" });
-  }
-  
-  next();
-};
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup authentication BEFORE other routes
-  await setupAuth(app);
-  registerAuthRoutes(app);
-
-  // Admin check endpoint
-  app.get("/api/admin/check", isAuthenticated, (req: any, res) => {
-    const user = req.user?.claims;
-    res.json({ 
-      isAdmin: true, // All authenticated users are admins for now
-      user: {
-        id: user?.sub,
-        email: user?.email,
-        name: `${user?.first_name || ""} ${user?.last_name || ""}`.trim(),
-      }
+  // Admin check endpoint (no auth on Vercel - open access)
+  app.get("/api/admin/check", (req: any, res) => {
+    res.json({
+      isAdmin: true,
+      user: { id: "vercel-user", email: "", name: "Admin" }
     });
   });
 
-  // Get user's in-progress draft project (for session persistence)
-  app.get("/api/user/draft", isAuthenticated, async (req: any, res) => {
+  // Get user's in-progress draft project
+  app.get("/api/user/draft", async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      const draft = await storage.getUserDraft(userId);
+      // Without auth, use a default user ID
+      const draft = await storage.getUserDraft("vercel-user");
       res.json(draft || null);
     } catch (error) {
       console.error("Error fetching user draft:", error);
@@ -64,17 +27,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Link a project to the current user
-  app.post("/api/projects/:id/claim", isAuthenticated, async (req: any, res) => {
+  app.post("/api/projects/:id/claim", async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
-      if (!userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
       const project = await storage.getProject(req.params.id);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
-      const updatedProject = await storage.updateProject(req.params.id, { userId });
+      const updatedProject = await storage.updateProject(req.params.id, { userId: "vercel-user" });
       res.json(updatedProject);
     } catch (error) {
       console.error("Error claiming project:", error);
@@ -595,7 +554,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
   });
 
   // Admin Prompts CRUD (protected by isAdmin middleware)
-  app.get("/api/admin/prompts", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/prompts", async (req, res) => {
     try {
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
@@ -605,7 +564,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.get("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/prompts/:id", async (req, res) => {
     try {
       const prompt = await storage.getAdminPrompt(req.params.id);
       if (!prompt) {
@@ -617,10 +576,10 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.post("/api/admin/prompts", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.post("/api/admin/prompts", async (req: any, res) => {
     try {
       const promptData = insertAdminPromptSchema.parse(req.body);
-      const userId = req.user?.claims?.sub || "unknown";
+      const userId = "vercel-admin";
       const prompt = await storage.createAdminPrompt({
         ...promptData,
         updatedBy: userId,
@@ -635,10 +594,10 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.put("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.put("/api/admin/prompts/:id", async (req: any, res) => {
     try {
       const updates = insertAdminPromptSchema.partial().parse(req.body);
-      const userId = req.user?.claims?.sub || "unknown";
+      const userId = "vercel-admin";
       const prompt = await storage.updateAdminPrompt(req.params.id, {
         ...updates,
         updatedBy: userId,
@@ -655,7 +614,7 @@ Generate detailed, professional documentation appropriate for this section. Be t
     }
   });
 
-  app.delete("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
+  app.delete("/api/admin/prompts/:id", async (req, res) => {
     try {
       const deleted = await storage.deleteAdminPrompt(req.params.id);
       if (!deleted) {
@@ -668,14 +627,14 @@ Generate detailed, professional documentation appropriate for this section. Be t
   });
 
   // Seed default prompts if none exist
-  app.post("/api/admin/prompts/seed", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.post("/api/admin/prompts/seed", async (req: any, res) => {
     try {
       const existingPrompts = await storage.getAllAdminPrompts();
       if (existingPrompts.length > 0) {
         return res.json({ message: "Prompts already exist", count: existingPrompts.length });
       }
       
-      const userId = req.user?.claims?.sub || "system";
+      const userId = "vercel-admin";
       await storage.seedDefaultPrompts(userId);
       const prompts = await storage.getAllAdminPrompts();
       res.json({ message: "Default prompts seeded", count: prompts.length });
