@@ -247,7 +247,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (typeof field === 'string') {
             try {
               return JSON.parse(field);
-            } catch {
+            } catch (e) {
+              console.warn("Failed to parse JSON field:", e instanceof Error ? e.message : e);
               return null;
             }
           }
@@ -314,6 +315,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           systemPromptToUse += `\n\n${projectContext}\n\nUse this context to ask informed, specific follow-up questions. DO NOT re-ask for information already provided above.`;
         }
         
+        // Inject dynamic context into system prompt to avoid wasteful retry AI calls
+        const userMessageCount = existingMessages.filter(m => m.role === "user").length;
+
+        if (stage.stageNumber === 2 && userMessageCount < 6) {
+          systemPromptToUse += `\n\n<ENFORCEMENT>You have received ${userMessageCount} user messages so far. Since this is less than 6, you MUST ONLY ask 1-2 brief follow-up questions. Do NOT generate any document sections, headers (##), PRD content, or formatted output. Keep your response under 300 characters.</ENFORCEMENT>`;
+        }
+
+        if (stage.stageNumber === 3) {
+          systemPromptToUse += `\n\n<ENFORCEMENT>You MUST include HTML wireframe code in \`\`\`html code blocks in every response. Use orange color scheme (#FF6B35 primary, #FFA500 accents). If the user hasn't specified what to wireframe yet, ask them, but still include a simple placeholder HTML wireframe.</ENFORCEMENT>`;
+        }
+
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
           { role: "system", content: systemPromptToUse },
@@ -322,62 +334,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
-          let aiResponse = await aiService.chat(aiMessages, modelToUse);
-          
-          // Special handling for PRD stage (stage 2) to prevent premature document generation
-          if (stage.stageNumber === 2) {
-            // Count user messages (including the one we just created)
-            const userMessageCount = existingMessages.filter(m => m.role === "user").length;
-            
-            // If we have fewer than 6 user messages and the AI generated a document, force it to ask questions instead
-            if (userMessageCount < 6) {
-              const hasDocumentStructure = aiResponse.content.includes("##") || 
-                                         aiResponse.content.includes("# Product") ||
-                                         aiResponse.content.includes("# PRD") ||
-                                         aiResponse.content.includes("Executive Summary") ||
-                                         aiResponse.content.match(/\n\n.*:\n-/); // bullet lists with headers
-              
-              if (hasDocumentStructure || aiResponse.content.length > 800) {
-                // Override with simple questions instead
-                const overridePrompt = `The user said: "${messageData.content}". 
-
-You MUST respond with ONLY 2-3 simple questions to learn more. Do NOT generate any document, sections, or headers.
-
-Just ask questions like:
-1. [Question about who will use this]
-2. [Question about key features]
-3. [Question about constraints]
-
-Keep it conversational and brief.`;
-                
-                aiResponse = await aiService.chat([
-                  { role: "system", content: "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions." },
-                  { role: "user", content: overridePrompt }
-                ], modelToUse);
-              }
-            }
-          }
-          
-          // Special handling for UI Design stage (stage 3) to ensure HTML wireframes
-          if (stage.stageNumber === 3) {
-            const hasHTML = aiResponse.content.includes("<!DOCTYPE") || 
-                           aiResponse.content.includes("<html") ||
-                           aiResponse.content.includes("```html");
-            
-            if (!hasHTML) {
-              // Force HTML wireframe generation
-              const overridePrompt = `Create a simple HTML wireframe for: "${messageData.content}". 
-
-You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme (#FF6B35 for primary elements, #FFA500 for accents).
-
-Include a complete HTML document with basic styling. Keep it simple but functional.`;
-              
-              aiResponse = await aiService.chat([
-                { role: "system", content: "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks." },
-                { role: "user", content: overridePrompt }
-              ], modelToUse);
-            }
-          }
+          const aiResponse = await aiService.chat(aiMessages, modelToUse);
           
           // Create AI response message
           const aiMessage = await storage.createMessage({

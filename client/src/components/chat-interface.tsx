@@ -28,11 +28,34 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (content: string) => {
+      // Optimistic update: show user message immediately
+      await queryClient.cancelQueries({ queryKey: ["/api/stages", stage.id, "messages"] });
+      const previous = queryClient.getQueryData<Message[]>(["/api/stages", stage.id, "messages"]);
+      const optimisticMessage: Message = {
+        id: `temp-${Date.now()}`,
+        stageId: stage.id,
+        role: "user",
+        content,
+        createdAt: new Date(),
+      };
+      queryClient.setQueryData<Message[]>(
+        ["/api/stages", stage.id, "messages"],
+        (old = []) => [...old, optimisticMessage]
+      );
+      setInputValue("");
+      return { previous };
+    },
+    onError: (_err, _content, context) => {
+      // Rollback on error
+      if (context?.previous) {
+        queryClient.setQueryData(["/api/stages", stage.id, "messages"], context.previous);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stages", stage.id, "messages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stages", stage.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", stage.projectId, "stages"] });
-      setInputValue("");
     },
   });
 

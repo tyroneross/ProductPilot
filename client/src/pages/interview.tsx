@@ -40,12 +40,27 @@ export default function InterviewPage() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (content: string) => {
+      if (!prdStage) return;
+      await queryClient.cancelQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
+      const previous = queryClient.getQueryData<Message[]>(["/api/stages", prdStage.id, "messages"]);
+      queryClient.setQueryData<Message[]>(
+        ["/api/stages", prdStage.id, "messages"],
+        (old = []) => [...old, { id: `temp-${Date.now()}`, stageId: prdStage.id, role: "user" as const, content, createdAt: new Date() }]
+      );
+      setInputValue("");
+      return { previous };
+    },
+    onError: (_err, _content, context) => {
+      if (context?.previous && prdStage) {
+        queryClient.setQueryData(["/api/stages", prdStage.id, "messages"], context.previous);
+      }
+    },
+    onSettled: () => {
       if (!prdStage) return;
       queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
-      setInputValue("");
     },
   });
 

@@ -32,7 +32,7 @@ export default function WireframePreview({ htmlContent }: WireframePreviewProps)
               srcDoc={htmlContent}
               title="Wireframe Preview"
               className="w-full h-full"
-              sandbox="allow-same-origin"
+              sandbox=""
               data-testid="iframe-wireframe-preview"
             />
           </div>

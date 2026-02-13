@@ -59,7 +59,7 @@ export default function StageCard({ stage }: StageCardProps) {
       <div className="flex items-center justify-between">
         <span className="text-small text-contrast-medium">
           <MessageSquare className="w-3 h-3 mr-1 inline" />
-          {Math.floor(stage.progress / 10)} interactions
+          {stage.progress}% complete
         </span>
         <div className="flex space-x-2">
           <button 
