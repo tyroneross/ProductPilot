@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
+import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check, Settings, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Project, Stage, Message } from "@shared/schema";
@@ -46,8 +47,44 @@ export default function DocumentViewPage() {
       4: Layout,
       5: Code,
       6: ListTodo,
+      7: Settings,
     };
     return icons[stageNumber] || FileText;
+  };
+
+  // Stage 7: Parse multi-format sections for download
+  const parseRulesFiles = (content: string) => {
+    const files: { name: string; filename: string; content: string }[] = [];
+    const sections = [
+      { header: "## CLAUDE.md", filename: "CLAUDE.md", name: "Claude Code" },
+      { header: "## CURSORRULES", filename: ".cursorrules", name: "Cursor" },
+      { header: "## WINDSURFRULES", filename: ".windsurfrules", name: "Windsurf" },
+      { header: "## AGENTS.md", filename: "AGENTS.md", name: "OpenAI Codex" },
+      { header: "## PROJECT_RULES.md", filename: "PROJECT_RULES.md", name: "Generic" },
+    ];
+
+    for (let i = 0; i < sections.length; i++) {
+      const start = content.indexOf(sections[i].header);
+      if (start === -1) continue;
+      const contentStart = start + sections[i].header.length;
+      const nextSection = sections.slice(i + 1).find(s => content.indexOf(s.header, contentStart) !== -1);
+      const end = nextSection ? content.indexOf(nextSection.header, contentStart) : content.length;
+      const sectionContent = content.slice(contentStart, end).trim();
+      if (sectionContent) {
+        files.push({ name: sections[i].name, filename: sections[i].filename, content: sectionContent });
+      }
+    }
+    return files;
+  };
+
+  const downloadFile = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleCopy = async () => {
@@ -99,8 +136,19 @@ export default function DocumentViewPage() {
 
   if (!project || !stage) {
     return (
-      <div className="min-h-screen bg-surface-secondary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+      <div className="min-h-screen bg-surface-secondary">
+        <div className="border-b border-gray-200 bg-surface-primary px-4 sm:px-6 py-4">
+          <div className="max-w-4xl mx-auto flex items-center gap-4">
+            <Skeleton className="h-10 w-10 rounded" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          </div>
+        </div>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+          <Skeleton className="h-[400px] rounded-lg" />
+        </div>
       </div>
     );
   }
@@ -109,9 +157,9 @@ export default function DocumentViewPage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+      <header className="border-b border-gray-200 bg-surface-primary px-4 sm:px-6 py-4 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
             <Button
               variant="ghost"
               size="sm"
@@ -167,6 +215,31 @@ export default function DocumentViewPage() {
           </div>
         ) : documentContent ? (
           <div className="bg-surface-primary rounded-lg border border-gray-200 p-8">
+            {stage.stageNumber === 7 && (() => {
+              const rulesFiles = parseRulesFiles(documentContent);
+              if (rulesFiles.length === 0) return null;
+              return (
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <h2 className="text-title font-medium text-contrast-high mb-1">Download Individual Files</h2>
+                  <p className="text-description text-contrast-medium mb-4">Each file is formatted for its target tool.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {rulesFiles.map((file) => (
+                      <button
+                        key={file.filename}
+                        onClick={() => downloadFile(file.filename, file.content)}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:bg-surface-secondary transition-colors text-left min-h-[44px]"
+                      >
+                        <Download className="w-4 h-4 text-accent shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-description font-medium text-contrast-high block truncate">{file.filename}</span>
+                          <span className="text-metadata text-contrast-medium">{file.name}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="prose prose-lg max-w-none">
               <div className="whitespace-pre-wrap text-contrast-high leading-relaxed">
                 {documentContent}

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, FileText, Code, Layout, ListTodo, Palette, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, FileText, Code, Layout, ListTodo, Palette, Plus, RefreshCw, Settings, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Project, Stage } from "@shared/schema";
@@ -67,8 +68,24 @@ export default function DocumentsPage() {
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-surface-secondary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+      <div className="min-h-screen bg-surface-secondary">
+        <div className="border-b border-gray-200 bg-surface-primary px-4 sm:px-6 py-4">
+          <div className="max-w-6xl mx-auto flex items-center gap-4">
+            <Skeleton className="h-10 w-10 rounded" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+          <Skeleton className="h-5 w-40 mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-40 rounded-lg" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -116,6 +133,13 @@ export default function DocumentsPage() {
       stage: stages.find((s) => s.stageNumber === 6),
       description: "Implementation roadmap and milestones",
     },
+    {
+      id: "rules",
+      title: "Project Rules File",
+      icon: Settings,
+      stage: stages.find((s) => s.stageNumber === 7),
+      description: "CLAUDE.md, .cursorrules, and other LLM config files",
+    },
   ];
 
   const generatedDocs = documents.filter(doc => doc.stage && doc.stage.progress === 100);
@@ -123,7 +147,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
+      <header className="border-b border-gray-200 bg-surface-primary px-4 sm:px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center space-x-4 min-w-0">
             <Button
@@ -258,10 +282,18 @@ export default function DocumentsPage() {
 
         {/* Empty state */}
         {generatedDocs.length === 0 && pendingDocs.length === 0 && (
-          <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 text-center">
-            <p className="text-description text-contrast-medium">
-              No documents available. Click "Continue Building" to complete your survey first.
+          <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 sm:p-12 text-center">
+            <FileText className="w-10 h-10 text-contrast-low mx-auto mb-4" />
+            <h3 className="text-title font-medium text-contrast-high mb-2">No documents yet</h3>
+            <p className="text-description text-contrast-medium mb-6 max-w-sm mx-auto">
+              Complete the product survey to generate your requirements, architecture, and development docs.
             </p>
+            <Button
+              onClick={() => setLocation(`/session/survey?projectId=${project.id}`)}
+              className="btn-primary min-h-[44px]"
+            >
+              Continue Building
+            </Button>
           </div>
         )}
       </main>

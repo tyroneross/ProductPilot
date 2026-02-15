@@ -7,11 +7,20 @@ import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 
 // Admin usernames allowed to access the admin panel (can be expanded)
-const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
+const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com", "local-dev"]; // Add user ID or email here
 
 // Helper to get interceptor prompt by targetKey
-const getInterceptorPrompt = (targetKey: string) => 
+const getInterceptorPrompt = (targetKey: string) =>
   INTERCEPTOR_PROMPTS.find(p => p.targetKey === targetKey);
+
+// Helper to extract a user-friendly error message from AI errors
+function aiErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("ANTHROPIC_API_KEY")) {
+    return "ANTHROPIC_API_KEY is not configured. Add it to your .env file to enable AI features.";
+  }
+  return msg;
+}
 
 // Middleware to check if user is an admin
 const isAdmin: RequestHandler = (req: any, res, next) => {
@@ -550,7 +559,7 @@ Respond with ONLY valid JSON in this exact format:
       res.json({ surveyDefinition: response });
     } catch (error) {
       console.error("Survey generation error:", error);
-      res.status(500).json({ message: "Failed to generate survey" });
+      res.status(500).json({ message: aiErrorMessage(error) });
     }
   });
 
@@ -692,7 +701,7 @@ Be thorough and specific based on the survey answers provided.`;
       res.json({ message: "Documentation generated successfully" });
     } catch (error) {
       console.error("Doc generation error:", error);
-      res.status(500).json({ message: "Failed to generate documentation" });
+      res.status(500).json({ message: aiErrorMessage(error) });
     }
   });
 
@@ -800,7 +809,7 @@ Generate practical, actionable documentation based on the information provided. 
       res.json({ message: "Documentation generated from minimum details" });
     } catch (error) {
       console.error("Min doc generation error:", error);
-      res.status(500).json({ message: "Failed to generate documentation" });
+      res.status(500).json({ message: aiErrorMessage(error) });
     }
   });
 
@@ -825,6 +834,300 @@ Generate practical, actionable documentation based on the information provided. 
       res.json(exportData);
     } catch (error) {
       res.status(500).json({ message: "Failed to export project" });
+    }
+  });
+
+  // ============================================
+  // CAT (Computerized Adaptive Testing) Endpoints
+  // ============================================
+
+  // Generate CAT survey based on seed answers (Q1-Q3)
+  app.post("/api/projects/:projectId/generate-cat-survey", async (req, res) => {
+    try {
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const { pitch, v1Scope, platform } = req.body;
+      if (!pitch || !v1Scope || !platform) {
+        return res.status(400).json({ message: "pitch, v1Scope, and platform are required" });
+      }
+
+      // Include uploaded docs as context if available
+      const uploadedDocs = project.uploadedDocs as Array<{ name: string; content: string }> | null;
+      const docsContext = uploadedDocs?.map(d => `[${d.name}]:\n${d.content}`).join("\n\n") || undefined;
+
+      const catSurvey = await aiService.generateCATSurvey(pitch, v1Scope, platform, docsContext);
+
+      // Save the CAT survey to the project
+      await storage.updateProject(req.params.projectId, {
+        catSurvey: catSurvey,
+        minimumDetails: { pitch, v1Scope, platform },
+      } as any);
+
+      res.json(catSurvey);
+    } catch (error) {
+      console.error("CAT survey generation error:", error);
+      res.status(500).json({ message: aiErrorMessage(error) });
+    }
+  });
+
+  // Generate confirmation question after CAT survey is answered
+  app.post("/api/projects/:projectId/cat-confirm", async (req, res) => {
+    try {
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const { catResponses } = req.body;
+      const md = project.minimumDetails as { pitch: string; v1Scope: string; platform: string } | null;
+      if (!md) {
+        return res.status(400).json({ message: "Seed answers not found on project" });
+      }
+
+      // Save CAT responses
+      await storage.updateProject(req.params.projectId, {
+        catResponses: catResponses,
+      } as any);
+
+      const confirmation = await aiService.generateCATConfirmation(
+        md.pitch,
+        md.v1Scope,
+        md.platform,
+        catResponses,
+      );
+
+      res.json(confirmation);
+    } catch (error) {
+      console.error("CAT confirmation error:", error);
+      res.status(500).json({ message: aiErrorMessage(error) });
+    }
+  });
+
+  // Entry B: Propose solution approaches for a problem
+  app.post("/api/projects/:projectId/propose-solutions", async (req, res) => {
+    try {
+      const { problemDescription } = req.body;
+      if (!problemDescription) {
+        return res.status(400).json({ message: "problemDescription is required" });
+      }
+
+      const proposal = await aiService.proposeSolutions(problemDescription);
+
+      // Save the selected approach context
+      await storage.updateProject(req.params.projectId, {
+        entryMode: "problem",
+        solutionApproach: proposal,
+      } as any);
+
+      res.json(proposal);
+    } catch (error) {
+      console.error("Solution proposal error:", error);
+      res.status(500).json({ message: aiErrorMessage(error) });
+    }
+  });
+
+  // Entry C: Extract seed answers from uploaded document
+  app.post("/api/projects/:projectId/extract-from-doc", async (req, res) => {
+    try {
+      const { documentContent, fileName } = req.body;
+      if (!documentContent) {
+        return res.status(400).json({ message: "documentContent is required" });
+      }
+
+      const extracted = await aiService.extractFromDocument(documentContent);
+
+      // Save uploaded doc
+      const project = await storage.getProject(req.params.projectId);
+      const existingDocs = (project?.uploadedDocs as Array<{ name: string; content: string }>) || [];
+      await storage.updateProject(req.params.projectId, {
+        entryMode: "upload",
+        uploadedDocs: [...existingDocs, { name: fileName || "uploaded-doc.txt", content: documentContent }],
+      } as any);
+
+      res.json(extracted);
+    } catch (error) {
+      console.error("Document extraction error:", error);
+      res.status(500).json({ message: aiErrorMessage(error) });
+    }
+  });
+
+  // Upload supplementary document to project
+  app.post("/api/projects/:projectId/upload", async (req, res) => {
+    try {
+      const { content, fileName } = req.body;
+      if (!content) {
+        return res.status(400).json({ message: "content is required" });
+      }
+      if (content.length > 50000) {
+        return res.status(400).json({ message: "File too large (max 50KB)" });
+      }
+
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const existingDocs = (project.uploadedDocs as Array<{ name: string; content: string }>) || [];
+      await storage.updateProject(req.params.projectId, {
+        uploadedDocs: [...existingDocs, { name: fileName || "document.txt", content }],
+      } as any);
+
+      res.json({ message: "Document uploaded", count: existingDocs.length + 1 });
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({ message: "Failed to upload document" });
+    }
+  });
+
+  // Generate all 7 docs from CAT flow (seed + CAT survey + confirmation)
+  app.post("/api/projects/:projectId/generate-docs-from-cat", async (req, res) => {
+    try {
+      const project = await storage.getProject(req.params.projectId);
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const md = project.minimumDetails as { pitch: string; v1Scope: string; platform: string } | null;
+      if (!md) {
+        return res.status(400).json({ message: "Seed answers not found" });
+      }
+
+      const catResponses = (req.body.catResponses || project.catResponses) as Record<string, any> || {};
+      const confirmationAnswer = req.body.confirmationAnswer || "";
+      const detailLevel = req.body.detailLevel || "detailed";
+
+      // Save final state
+      await storage.updateProject(req.params.projectId, {
+        catResponses: catResponses,
+        surveyPhase: "complete",
+      } as any);
+
+      // Ensure stages exist (including stage 7)
+      const { DEFAULT_STAGES } = await import("@shared/schema");
+      let projectStages = await storage.getStagesByProject(req.params.projectId);
+      if (projectStages.length === 0) {
+        for (const defaultStage of DEFAULT_STAGES) {
+          await storage.createStage({
+            projectId: req.params.projectId,
+            stageNumber: defaultStage.stageNumber,
+            title: defaultStage.title,
+            description: defaultStage.description,
+            systemPrompt: defaultStage.systemPrompt,
+          });
+        }
+        projectStages = await storage.getStagesByProject(req.params.projectId);
+      }
+
+      // Build comprehensive context from all user inputs
+      const contextParts = [
+        `PRODUCT PITCH: ${md.pitch}`,
+        `V1 SCOPE: ${md.v1Scope}`,
+        `PLATFORM: ${md.platform}`,
+      ];
+
+      // Add CAT survey responses (filter out __NA__ values — user marked as not applicable)
+      if (Object.keys(catResponses).length > 0) {
+        const meaningful = Object.fromEntries(
+          Object.entries(catResponses).filter(([, v]) => v !== "__NA__")
+        );
+        if (Object.keys(meaningful).length > 0) {
+          contextParts.push(`\nADAPTIVE SURVEY RESPONSES:\n${JSON.stringify(meaningful, null, 2)}`);
+        }
+      }
+
+      // Add confirmation answer
+      if (confirmationAnswer) {
+        contextParts.push(`\nFINAL CLARIFICATION: ${confirmationAnswer}`);
+      }
+
+      // Add style info
+      const appStyle = project.appStyle as { name: string; description?: string } | null;
+      if (appStyle) {
+        contextParts.push(`\nUI STYLE: ${appStyle.name}${appStyle.description ? ` — ${appStyle.description}` : ''}`);
+      }
+
+      // Add uploaded docs
+      const uploadedDocs = project.uploadedDocs as Array<{ name: string; content: string }> | null;
+      if (uploadedDocs?.length) {
+        contextParts.push(`\nUSER-PROVIDED DOCUMENTS:\n${uploadedDocs.map(d => `[${d.name}]:\n${d.content}`).join("\n\n")}`);
+      }
+
+      // Add solution approach context (Entry B: "I have a problem" flow)
+      const solutionApproach = project.solutionApproach as { title?: string; summary?: string; keyFeatures?: string[] } | null;
+      if (solutionApproach?.title) {
+        contextParts.push(`\nSELECTED SOLUTION APPROACH:\nTitle: ${solutionApproach.title}\nSummary: ${solutionApproach.summary || ''}\nKey Features: ${(solutionApproach.keyFeatures || []).join(", ")}`);
+      }
+
+      const fullContext = contextParts.join("\n");
+      const detailInstruction = detailLevel === "summary"
+        ? "Generate a concise summary version (~1/3 the length of a detailed version). Focus on key points only."
+        : "Generate thorough, detailed documentation with examples and specific recommendations.";
+
+      // Generate all stages (collect previous stage outputs for context)
+      const stageOutputs: Record<number, string> = {};
+
+      for (const stage of projectStages) {
+        const previousOutputsContext = Object.entries(stageOutputs)
+          .map(([num, output]) => `--- Stage ${num} Output ---\n${output}`)
+          .join("\n\n");
+
+        // Stage-specific context enrichment
+        let stageSpecificContext = "";
+        if (stage.stageNumber === 3 && appStyle) {
+          const styleGuides: Record<string, string> = {
+            "clean": "Design Direction: Clean & Professional. Colors: navy/slate blues, minimal accent color. Inspiration: Linear, Notion, Stripe. Lots of whitespace, sharp or subtly rounded corners, system fonts.",
+            "warm": "Design Direction: Warm & Friendly. Colors: earth tones, soft oranges, cream backgrounds. Inspiration: Mailchimp, Slack. Rounded corners, friendly illustrations, approachable feel.",
+            "bold": "Design Direction: Bold & Expressive. Colors: vibrant primaries, high contrast. Inspiration: Figma, Spotify. Strong typography, dynamic layouts, confident visual hierarchy.",
+            "dark": "Design Direction: Dark & Premium. Colors: dark backgrounds (#1a1a2e), gold/silver accents. Inspiration: Linear dark mode, GitHub dark. Subtle gradients, elegant spacing.",
+            "bright": "Design Direction: Bright & Playful. Colors: pastels or vivid hues, fun accents. Inspiration: Duolingo, Notion templates. Rounded shapes, emoji-friendly, energetic.",
+          };
+          const styleName = (appStyle.name || "").toLowerCase();
+          stageSpecificContext = styleGuides[styleName] || `Design Direction: ${appStyle.name}. ${appStyle.description || ""}`;
+        }
+
+        const docPrompt = `${detailInstruction}
+
+Product Context:
+${fullContext}
+${stageSpecificContext ? `\n${stageSpecificContext}` : ''}
+
+${previousOutputsContext ? `\nPREVIOUS STAGE OUTPUTS (for reference):\n${previousOutputsContext}` : ''}
+
+Generate the "${stage.title}" documentation now.`;
+
+        try {
+          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          // Use docGenPrompt for single-shot generation (admin override takes priority)
+          const defaultStage = DEFAULT_STAGES.find(s => s.stageNumber === stage.stageNumber);
+          const docGenPrompt = (defaultStage as any)?.docGenPrompt as string | undefined;
+          const systemPromptToUse = adminPrompt?.content || docGenPrompt || stage.systemPrompt;
+
+          const response = await aiService.chat([
+            { role: "system", content: systemPromptToUse },
+            { role: "user", content: docPrompt }
+          ], "claude-sonnet");
+
+          stageOutputs[stage.stageNumber] = response.content;
+
+          await storage.createMessage({
+            stageId: stage.id,
+            role: "assistant",
+            content: response.content,
+          });
+
+          await storage.updateStage(stage.id, { progress: 100 });
+        } catch (stageError) {
+          console.error(`Error generating stage ${stage.stageNumber} (${stage.title}):`, stageError);
+        }
+      }
+
+      res.json({ message: "All documentation generated from CAT flow", stagesCompleted: Object.keys(stageOutputs).length });
+    } catch (error) {
+      console.error("CAT doc generation error:", error);
+      res.status(500).json({ message: aiErrorMessage(error) });
     }
   });
 

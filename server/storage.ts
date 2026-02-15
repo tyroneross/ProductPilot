@@ -1,5 +1,8 @@
 import { eq, desc, asc } from "drizzle-orm";
-import { db } from "./db";
+import { db as _db } from "./db";
+
+// This storage is only used when a database connection exists
+const db = _db!;
 import { projects, stages, messages, type Project, type InsertProject, type Stage, type InsertStage, type Message, type InsertMessage, type UpdateStage, DEFAULT_STAGES } from "@shared/schema";
 
 export interface IStorage {

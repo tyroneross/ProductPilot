@@ -1,1498 +1,587 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
-import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { ArrowLeft, Loader2, ChevronRight, Check, Palette, Users, Zap, Shield, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Project, Stage, Message, SurveyDefinition, SurveyResponse, CustomPrompt } from "@shared/schema";
+
+/** Extract the human-readable error message from an API error */
+function getErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const jsonMatch = raw.match(/\d+:\s*(\{.*\})/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (parsed.message) return parsed.message;
+    } catch { /* fall through */ }
+  }
+  return raw;
+}
+
+// CAT question types from the backend
+interface CATOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+interface CATQuestion {
+  id: string;
+  dimension: string;
+  type: "slider" | "single-select" | "multi-select" | "free-text" | "visual-select";
+  label: string;
+  description?: string;
+  options?: CATOption[];
+  min?: number;
+  max?: number;
+  minLabel?: string;
+  maxLabel?: string;
+}
+
+interface CATSurvey {
+  dimensionScores: Record<string, number>;
+  questions: CATQuestion[];
+  reasoning: string;
+}
+
+interface ConfirmationQuestion {
+  question: string;
+  dimension: string;
+  reason: string;
+  options?: string[];
+}
+
+// Visual style families with icons
+const STYLE_ICONS: Record<string, React.ReactNode> = {
+  clean: <Shield className="w-6 h-6" />,
+  warm: <Sun className="w-6 h-6" />,
+  bold: <Zap className="w-6 h-6" />,
+  dark: <Palette className="w-6 h-6" />,
+  bright: <Users className="w-6 h-6" />,
+};
+
+type Phase = "loading" | "survey" | "confirming" | "confirmation" | "generating";
 
 export default function SessionSurveyPage() {
   const [, setLocation] = useLocation();
-  const [inputValue, setInputValue] = useState("");
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [projectName, setProjectName] = useState("");
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse>({});
-  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
-  const [isGeneratingDocs, setIsGeneratingDocs] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0, stageName: "" });
-  const [showDocumentSelection, setShowDocumentSelection] = useState(false);
-  const [documentSelections, setDocumentSelections] = useState<Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }>>({});
-  const [showPromptsSection, setShowPromptsSection] = useState(false);
-  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
-  const [showAddPromptDialog, setShowAddPromptDialog] = useState(false);
-  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
-  const [newPrompt, setNewPrompt] = useState<Partial<CustomPrompt>>({
-    name: "",
-    description: "",
-    prompt: "",
-    category: "general",
-    isActive: true,
-  });
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const draftCreated = useRef(false);
-  const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const productIdea = sessionStorage.getItem("productIdea") || "";
-  const projectType = sessionStorage.getItem("projectType") || "not-sure";
-  const projectPurpose = sessionStorage.getItem("projectPurpose") || "";
-  
-  const intakeAnswersRaw = sessionStorage.getItem("intakeAnswers");
-  const intakeAnswers = intakeAnswersRaw ? JSON.parse(intakeAnswersRaw) : null;
-  
-  const minimumDetailsRaw = sessionStorage.getItem("minimumDetails");
-  const minimumDetails = minimumDetailsRaw ? JSON.parse(minimumDetailsRaw) : null;
+  // Core state
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [catSurvey, setCatSurvey] = useState<CATSurvey | null>(null);
+  const [responses, setResponses] = useState<Record<string, any>>({});
+  const [confirmation, setConfirmation] = useState<ConfirmationQuestion | null>(null);
+  const [confirmationAnswer, setConfirmationAnswer] = useState("");
 
-  // Parse projectId from URL query params if present
+  // Generation progress
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 7, stageName: "Starting..." });
+
+  // Prevent double-initialization
+  const initialized = useRef(false);
+
+  // Parse projectId from URL on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlProjectId = params.get("projectId");
-    if (urlProjectId && !projectId) {
+    if (urlProjectId) {
       setProjectId(urlProjectId);
     }
   }, []);
 
-  const { data: project, refetch: refetchProject } = useQuery<Project>({
-    queryKey: ["/api/projects", projectId],
-    enabled: !!projectId,
-  });
-
-  const { data: stages = [], isLoading: stagesLoading, refetch: refetchStages } = useQuery<Stage[]>({
-    queryKey: ["/api/projects", projectId, "stages"],
-    enabled: !!projectId,
-  });
-
-  // Ensure stages exist for legacy projects that don't have them
-  const stagesEnsured = useRef(false);
+  // Generate CAT survey once projectId is ready
   useEffect(() => {
-    if (projectId && !stagesLoading && stages.length === 0 && !stagesEnsured.current) {
-      stagesEnsured.current = true;
-      apiRequest("POST", `/api/projects/${projectId}/ensure-stages`, {})
-        .then(() => {
-          refetchStages();
-          queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
-        })
-        .catch(console.error);
-    }
-  }, [projectId, stagesLoading, stages.length, refetchStages, queryClient]);
+    if (!projectId || initialized.current) return;
+    initialized.current = true;
 
-  const prdStage = stages.find((s) => s.stageNumber === 2);
-
-  const { data: messages = [] } = useQuery<Message[]>({
-    queryKey: ["/api/stages", prdStage?.id, "messages"],
-    enabled: !!prdStage?.id,
-  });
-
-  const surveyDefinition = project?.surveyDefinition as SurveyDefinition | null;
-  const surveyPhase = project?.surveyPhase || "discovery";
-
-  useEffect(() => {
-    if (!projectId && productIdea && !draftCreated.current) {
-      draftCreated.current = true;
-      createDraftProject();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (project?.customPrompts) {
-      setCustomPrompts(project.customPrompts as CustomPrompt[]);
-    }
-  }, [project?.customPrompts]);
-
-  // Restore saved survey responses and calculate current section when project loads
-  const surveyRestored = useRef(false);
-  useEffect(() => {
-    // Wait for both project and surveyDefinition with sections to be available
-    const sections = surveyDefinition?.sections;
-    if (!project || !sections || sections.length === 0 || surveyRestored.current) {
+    const seedRaw = sessionStorage.getItem("seedAnswers");
+    if (!seedRaw) {
+      toast({ title: "Missing seed answers", description: "Please start from the details page.", variant: "destructive" });
+      setLocation("/details");
       return;
     }
-    
-    // Restore saved responses
-    const savedResponses = project.surveyResponses as SurveyResponse | null;
-    if (savedResponses && Object.keys(savedResponses).length > 0) {
-      setSurveyResponses(savedResponses);
-      
-      // Calculate which section to start on based on answered questions
-      let lastCompletedSection = -1;
-      
-      for (let i = 0; i < sections.length; i++) {
-        const section = sections[i];
-        const allQuestionsAnswered = section.questions.every(
-          (q: { id: string }) => savedResponses[q.id] !== undefined && savedResponses[q.id] !== ""
-        );
-        if (allQuestionsAnswered) {
-          lastCompletedSection = i;
-        } else {
-          break;
-        }
-      }
-      
-      // Start at the next incomplete section, or last section if all complete
-      const targetSection = Math.min(lastCompletedSection + 1, sections.length - 1);
-      setCurrentSectionIndex(targetSection);
-      
-      // Mark as restored AFTER state updates
-      surveyRestored.current = true;
-    }
-  }, [project, surveyDefinition]);
 
-  // Initialize document selections when stages load
-  useEffect(() => {
-    if (stages.length > 0 && Object.keys(documentSelections).length === 0) {
-      const initialSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
-      stages.forEach(stage => {
-        initialSelections[stage.id] = { selected: true, detailLevel: "detailed" };
-      });
-      setDocumentSelections(initialSelections);
-    }
-  }, [stages]);
+    const seed = JSON.parse(seedRaw);
+    generateCATSurvey(seed.pitch, seed.v1Scope, seed.platform);
+  }, [projectId]);
 
-  const getPlatformLabel = (platform: string) => {
-    const labels: Record<string, string> = {
-      "desktop": "Desktop Website",
-      "mobile-web": "Mobile Website",
-      "mobile-app": "Mobile App",
-      "backend": "Backend/API",
-    };
-    return labels[platform] || platform;
-  };
-
-  const getBuildingTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      "prototype": "Prototype/Demo",
-      "internal": "Internal Tool",
-      "product": "User Product",
-      "scale": "Scalable Product",
-    };
-    return labels[type] || type;
-  };
-
-  const getCoreBehaviorLabel = (behavior: string) => {
-    const labels: Record<string, string> = {
-      "data": "Data Management",
-      "content": "Content Display",
-      "search": "Search/Discovery",
-      "automate": "Automation",
-      "ai-assist": "AI-Assisted",
-    };
-    return labels[behavior] || behavior;
-  };
-
-  const getIntakeContext = () => {
-    if (!intakeAnswers) return "";
-    const parts = [];
-    if (intakeAnswers.buildingType) parts.push(getBuildingTypeLabel(intakeAnswers.buildingType));
-    if (intakeAnswers.platform) parts.push(getPlatformLabel(intakeAnswers.platform));
-    if (intakeAnswers.coreBehavior) parts.push(getCoreBehaviorLabel(intakeAnswers.coreBehavior));
-    return parts.join(" • ");
-  };
-
-  const createDraftProject = async () => {
+  const generateCATSurvey = useCallback(async (pitch: string, v1Scope: string, platform: string) => {
     try {
-      const contextLabel = getIntakeContext() || getPlatformLabel(projectType);
-      const problemStatement = minimumDetails?.problemStatement || productIdea;
-      const res = await apiRequest("POST", "/api/projects", {
-        name: `Survey Draft - ${new Date().toLocaleTimeString()}`,
-        description: `[${contextLabel}] ${problemStatement.slice(0, 200)}`,
-        mode: "survey",
-        aiModel: "claude-sonnet",
-        surveyPhase: "discovery",
-        intakeAnswers: intakeAnswers,
-        minimumDetails: minimumDetails,
+      const res = await apiRequest("POST", `/api/projects/${projectId}/generate-cat-survey`, {
+        pitch, v1Scope, platform,
       });
-      const newProject = await res.json();
-      setProjectId(newProject.id);
-      sessionStorage.setItem("surveyProjectId", newProject.id);
-      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      const survey: CATSurvey = await res.json();
+      setCatSurvey(survey);
+      setPhase("survey");
     } catch (error) {
-      toast({
-        title: "Failed to create project",
-        description: "Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: "Failed to generate survey", description: getErrorMessage(error), variant: "destructive" });
     }
-  };
+  }, [projectId, toast]);
 
-  const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
-      if (!prdStage) return null;
-      const res = await apiRequest("POST", `/api/stages/${prdStage.id}/messages`, {
-        role: "user",
-        content,
-      });
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      if (projectId && prdStage) {
-        queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
-      }
-      
-      if (data && data.userMessage && !data.aiMessage) {
-        toast({
-          title: "AI service error",
-          description: data.error || "AI is temporarily unavailable. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      setInputValue("");
-    },
-    onError: () => {
-      toast({
-        title: "Failed to send message",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
+  // Update a response value
+  const handleResponseChange = useCallback((questionId: string, value: any) => {
+    setResponses(prev => ({ ...prev, [questionId]: value }));
+  }, []);
 
-  const generateSurveyMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/generate-survey`, {});
-      return res.json();
-    },
-    onSuccess: () => {
-      refetchProject();
-      toast({
-        title: "Survey generated!",
-        description: "Now complete the survey to generate your documentation.",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Failed to generate survey",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
+  // Mark a question as N/A
+  const handleMarkNA = useCallback((questionId: string) => {
+    setResponses(prev => ({ ...prev, [questionId]: "__NA__" }));
+  }, []);
 
-  const submitSurveyMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
-        responses: surveyResponses,
-      });
-      return apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {});
-    },
-    onSuccess: () => {
-      refetchProject();
-      toast({
-        title: "Documentation generated!",
-        description: "Your complete product documentation is ready.",
-      });
-      setLocation(`/documents/${projectId}`);
-    },
-    onError: () => {
-      toast({
-        title: "Failed to generate documentation",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
+  // Undo N/A
+  const handleUndoNA = useCallback((questionId: string) => {
+    setResponses(prev => {
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+  }, []);
 
-  const saveProjectMutation = useMutation({
-    mutationFn: async (name: string) => {
-      if (projectId) {
-        const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { name });
-        const project = await res.json();
-        
-        try {
-          await apiRequest("POST", `/api/projects/${projectId}/claim`, {});
-        } catch (e) {
-        }
-        
-        return project;
-      }
-      return null;
-    },
-    onSuccess: (updatedProject: Project | null) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/user/draft"] });
-      setShowSaveDialog(false);
-      toast({
-        title: "Project saved!",
-        description: `"${updatedProject?.name}" has been saved successfully.`,
+  // Submit CAT survey → get confirmation question
+  const handleSubmitSurvey = useCallback(async () => {
+    setPhase("confirming");
+    try {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/cat-confirm`, {
+        catResponses: responses,
       });
-    },
-    onError: () => {
-      toast({
-        title: "Failed to save project",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (inputValue.trim() && !sendMessageMutation.isPending) {
-      sendMessageMutation.mutate(inputValue.trim());
+      const confirmQ: ConfirmationQuestion = await res.json();
+      setConfirmation(confirmQ);
+      setPhase("confirmation");
+    } catch (error) {
+      toast({ title: "Failed to generate confirmation", description: getErrorMessage(error), variant: "destructive" });
+      // Skip confirmation and go straight to generation
+      handleGenerate("");
     }
-  };
+  }, [projectId, responses, toast]);
 
-  const handleGenerateSurvey = () => {
-    generateSurveyMutation.mutate();
-  };
+  // Generate all documents
+  const handleGenerate = useCallback(async (answer: string) => {
+    setPhase("generating");
+    setGenerationProgress({ current: 0, total: 7, stageName: "Starting..." });
 
-  const handleSurveyResponseChange = (questionId: string, value: number | string | string[]) => {
-    setSurveyResponses((prev) => ({
-      ...prev,
-      [questionId]: value,
-    }));
-  };
-
-  const handleFreeformNoteChange = (questionId: string, note: string) => {
-    setSurveyResponses((prev) => ({
-      ...prev,
-      [`${questionId}_note`]: note,
-    }));
-  };
-
-  const handleMarkNA = (questionId: string) => {
-    setSurveyResponses((prev) => ({
-      ...prev,
-      [questionId]: "N/A",
-    }));
-  };
-
-  const autoSaveSurveyMutation = useMutation({
-    mutationFn: async (responsesToSave: SurveyResponse) => {
-      if (!projectId) return null;
-      const res = await apiRequest("PATCH", `/api/projects/${projectId}`, {
-        surveyResponses: responsesToSave,
-      });
-      return res.json();
-    },
-    onError: () => {
-      toast({
-        title: "Failed to save progress",
-        description: "Your responses may not be saved.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleNextSection = () => {
-    autoSaveSurveyMutation.mutate(surveyResponses);
-    setCurrentSectionIndex((prev) => prev + 1);
-  };
-
-  const handleSkipSection = () => {
-    let updatedResponses = { ...surveyResponses };
-    if (currentSection) {
-      currentSection.questions.forEach((q) => {
-        if (!updatedResponses[q.id]) {
-          updatedResponses[q.id] = "N/A";
-        }
-      });
-    }
-    setSurveyResponses(updatedResponses);
-    autoSaveSurveyMutation.mutate(updatedResponses);
-    setCurrentSectionIndex((prev) => prev + 1);
-  };
-
-  const handleReadyToGenerate = async () => {
-    // Save survey responses first
-    autoSaveSurveyMutation.mutate(surveyResponses);
-    // Show document selection dialog
-    setShowDocumentSelection(true);
-  };
-
-  const handleConfirmGenerate = async () => {
-    setShowDocumentSelection(false);
-    setIsGeneratingDocs(true);
-    
-    const selectedStageIds = new Set(
-      stages.filter(s => documentSelections[s.id]?.selected).map(s => s.id)
-    );
-    const totalSelected = selectedStageIds.size;
-    setGenerationProgress({ current: 0, total: totalSelected, stageName: "Starting..." });
-    
-    let generationComplete = false;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    
-    // Function to check completion and navigate
-    const checkAndNavigate = async () => {
-      if (generationComplete) return;
+    // Poll for stage progress
+    let complete = false;
+    const pollInterval = setInterval(async () => {
+      if (complete) return;
       try {
         const res = await fetch(`/api/projects/${projectId}/stages`);
         if (res.ok) {
-          const updatedStages: Stage[] = await res.json();
-          const completedCount = updatedStages.filter(s => 
-            selectedStageIds.has(s.id) && s.progress === 100
-          ).length;
-          const inProgressStage = updatedStages.find(s => 
-            selectedStageIds.has(s.id) && s.progress > 0 && s.progress < 100
-          );
-          const nextStage = updatedStages.find(s => 
-            selectedStageIds.has(s.id) && s.progress === 0
-          );
-          
+          const stages = await res.json();
+          const completedCount = stages.filter((s: any) => s.progress === 100).length;
+          const inProgress = stages.find((s: any) => s.progress > 0 && s.progress < 100);
+          const next = stages.find((s: any) => s.progress === 0);
           setGenerationProgress({
             current: completedCount,
-            total: totalSelected,
-            stageName: inProgressStage?.title || nextStage?.title || "Finishing up...",
+            total: stages.length,
+            stageName: inProgress?.title || next?.title || "Finishing up...",
           });
-          
-          // If all selected stages are complete, navigate immediately
-          if (completedCount === totalSelected && totalSelected > 0) {
-            generationComplete = true;
-            if (pollInterval) clearInterval(pollInterval);
-            setIsGeneratingDocs(false);
-            setGenerationProgress({ current: 0, total: 0, stageName: "" });
-            refetchProject();
-            toast({
-              title: "Documentation generated!",
-              description: "Your complete product documentation is ready.",
-            });
+
+          if (completedCount === stages.length && stages.length > 0) {
+            complete = true;
+            clearInterval(pollInterval);
+            toast({ title: "Documentation generated!", description: "Your complete product documentation is ready." });
             setLocation(`/documents/${projectId}`);
           }
         }
-      } catch (e) {
-        // Ignore polling errors
-      }
-    };
-    
-    // Start polling for stage progress
-    pollInterval = setInterval(checkAndNavigate, 2000);
-    
+      } catch { /* ignore polling errors */ }
+    }, 2000);
+
     try {
-      // Submit survey and generate docs with preferences
-      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
-        responses: surveyResponses,
+      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-cat`, {
+        catResponses: responses,
+        confirmationAnswer: answer,
       });
-      
-      // Generate with document preferences
-      const preferences = Object.entries(documentSelections)
-        .filter(([_, pref]) => pref.selected)
-        .map(([stageId, pref]) => ({
-          stageId,
-          detailLevel: pref.detailLevel,
-        }));
-      
-      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
-        documentPreferences: preferences,
-      });
-      
-      // API returned - check one more time and navigate if not already done
-      if (!generationComplete) {
-        await checkAndNavigate();
-        // If still not complete (edge case), force navigate
-        if (!generationComplete) {
-          generationComplete = true;
-          refetchProject();
-          toast({
-            title: "Documentation generated!",
-            description: "Your complete product documentation is ready.",
-          });
-          setLocation(`/documents/${projectId}`);
-        }
+
+      // API returned — check one more time
+      if (!complete) {
+        complete = true;
+        clearInterval(pollInterval);
+        toast({ title: "Documentation generated!", description: "Your complete product documentation is ready." });
+        setLocation(`/documents/${projectId}`);
       }
     } catch (error) {
-      if (!generationComplete) {
-        toast({
-          title: "Failed to generate documentation",
-          description: "Please try again.",
-          variant: "destructive",
-        });
-      }
-    } finally {
-      if (pollInterval) clearInterval(pollInterval);
-      if (!generationComplete) {
-        setIsGeneratingDocs(false);
-        setGenerationProgress({ current: 0, total: 0, stageName: "" });
+      clearInterval(pollInterval);
+      if (!complete) {
+        setPhase("survey");
+        toast({ title: "Generation failed", description: getErrorMessage(error), variant: "destructive" });
       }
     }
-  };
+  }, [projectId, responses, toast, setLocation]);
 
-  const handleSave = () => {
-    setShowSaveDialog(true);
-    if (project) {
-      setProjectName(project.name);
-    }
-  };
+  // Count how many questions have been answered
+  const answeredCount = catSurvey
+    ? catSurvey.questions.filter(q => responses[q.id] !== undefined).length
+    : 0;
+  const totalQuestions = catSurvey?.questions.length || 0;
 
-  const handleSaveWithName = () => {
-    if (projectName.trim()) {
-      saveProjectMutation.mutate(projectName);
-    }
-  };
+  const progressPercent = generationProgress.total > 0
+    ? Math.round((generationProgress.current / generationProgress.total) * 100)
+    : 0;
 
-  const savePromptsMutation = useMutation({
-    mutationFn: async (prompts: CustomPrompt[]) => {
-      if (projectId) {
-        const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { customPrompts: prompts });
-        return res.json();
-      }
-      return null;
-    },
-    onSuccess: () => {
-      refetchProject();
-      toast({
-        title: "Prompts saved!",
-        description: "Your custom prompts have been saved.",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Failed to save prompts",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleAddPrompt = () => {
-    if (newPrompt.name && newPrompt.prompt) {
-      let updatedPrompts: CustomPrompt[];
-      
-      if (editingPromptId) {
-        updatedPrompts = customPrompts.map((p) =>
-          p.id === editingPromptId
-            ? {
-                ...p,
-                name: newPrompt.name!,
-                description: newPrompt.description || "",
-                prompt: newPrompt.prompt!,
-                category: newPrompt.category as CustomPrompt["category"] || "general",
-                isActive: p.isActive,
-              }
-            : p
-        );
-      } else {
-        const prompt: CustomPrompt = {
-          id: `prompt_${Date.now()}`,
-          name: newPrompt.name,
-          description: newPrompt.description || "",
-          prompt: newPrompt.prompt,
-          category: newPrompt.category as CustomPrompt["category"] || "general",
-          isActive: true,
-        };
-        updatedPrompts = [...customPrompts, prompt];
-      }
-      
-      setCustomPrompts(updatedPrompts);
-      savePromptsMutation.mutate(updatedPrompts);
-      setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
-      setEditingPromptId(null);
-      setShowAddPromptDialog(false);
-    }
-  };
-
-  const handleEditPrompt = (prompt: CustomPrompt) => {
-    setNewPrompt({
-      name: prompt.name,
-      description: prompt.description,
-      prompt: prompt.prompt,
-      category: prompt.category,
-      isActive: prompt.isActive,
-    });
-    setEditingPromptId(prompt.id);
-    setShowAddPromptDialog(true);
-  };
-
-  const handleOpenAddDialog = () => {
-    setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
-    setEditingPromptId(null);
-    setShowAddPromptDialog(true);
-  };
-
-  const handleDeletePrompt = (id: string) => {
-    const updatedPrompts = customPrompts.filter((p) => p.id !== id);
-    setCustomPrompts(updatedPrompts);
-    savePromptsMutation.mutate(updatedPrompts);
-  };
-
-  const handleTogglePrompt = (id: string) => {
-    const updatedPrompts = customPrompts.map((p) =>
-      p.id === id ? { ...p, isActive: !p.isActive } : p
-    );
-    setCustomPrompts(updatedPrompts);
-    savePromptsMutation.mutate(updatedPrompts);
-  };
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const userMessages = messages.filter((m) => m.role === "user");
-  const canGenerateSurvey = userMessages.length >= 3;
-  
-  // Progress tracking for discovery phase
-  const TOTAL_DISCOVERY_QUESTIONS = 6;
-  const discoveryProgress = Math.min(userMessages.length, TOTAL_DISCOVERY_QUESTIONS);
-  const discoveryProgressPercent = Math.round((discoveryProgress / TOTAL_DISCOVERY_QUESTIONS) * 100);
-
-  const currentSection = surveyDefinition?.sections?.[currentSectionIndex];
-  const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
-
-  const getFirstQuestion = () => {
-    if (minimumDetails) {
-      const goals = minimumDetails.userGoals?.filter((g: string) => g.trim()).join(", ");
-      if (goals) {
-        return `I see your top goals are: ${goals}. Let's dive deeper — which of these is the absolute must-have for v1?`;
-      }
-      if (minimumDetails.v1Definition) {
-        return `Your v1 definition is clear. What's the biggest risk or unknown that could prevent you from shipping this?`;
-      }
-    }
-    if (intakeAnswers) {
-      const { buildingType, coreBehavior, aiUsage } = intakeAnswers;
-      
-      if (coreBehavior === "ai-assist" || aiUsage === "generate" || aiUsage === "automate") {
-        return "Tell me about the AI features you envision. What will the AI help users do, and what inputs will it need?";
-      }
-      if (coreBehavior === "data") {
-        return "What data will users be managing? Walk me through the main actions they'll take.";
-      }
-      if (coreBehavior === "automate") {
-        return "What tasks or workflows will this automate? What triggers them and what's the output?";
-      }
-      if (coreBehavior === "search") {
-        return "What will users be searching for or discovering? How should results be organized?";
-      }
-      if (buildingType === "prototype") {
-        return "What's the core concept you want to validate? What's the minimum to prove the idea works?";
-      }
-      if (buildingType === "internal") {
-        return "What internal problem does this solve? Who on your team will use it and how often?";
-      }
-    }
-    return "Tell me more about your idea. What problem does it solve, and who are the main users?";
-  };
-
-  const renderDiscoveryPhase = () => (
-    <div className="flex-1 flex flex-col">
-      {/* Progress indicator for discovery phase */}
-      <div className="px-6 pt-4 pb-2 bg-surface-secondary border-b border-gray-200">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-metadata text-contrast-medium" data-testid="discovery-progress-text">
-            Question {discoveryProgress} of ~{TOTAL_DISCOVERY_QUESTIONS}
-          </span>
-          <span className="text-metadata text-contrast-medium">
-            {canGenerateSurvey ? "Ready to generate specs" : `${TOTAL_DISCOVERY_QUESTIONS - discoveryProgress} more to go`}
-          </span>
-        </div>
-        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden" data-testid="discovery-progress-bar">
-          <div 
-            className="h-full bg-accent transition-all duration-300 rounded-full"
-            style={{ width: `${discoveryProgressPercent}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="flex items-start space-x-3">
-          <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center text-surface-primary text-description font-medium">
-            AI
-          </div>
-          <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
-            <p className="text-description text-contrast-high leading-relaxed">
-              I've got your project details. Let me ask a few follow-up questions to generate comprehensive specs.
-            </p>
-            {(getIntakeContext() || minimumDetails?.problemStatement) && (
-              <div className="mt-3 p-3 bg-surface-secondary rounded-lg">
-                {minimumDetails?.problemStatement && (
-                  <p className="text-description text-contrast-high mb-2">
-                    <strong>Problem:</strong> {minimumDetails.problemStatement}
-                  </p>
-                )}
-                {getIntakeContext() && (
-                  <p className="text-metadata text-contrast-medium">
-                    {getIntakeContext()}
-                  </p>
-                )}
-              </div>
-            )}
-            <p className="text-description text-contrast-high leading-relaxed mt-3">
-              <strong>{getFirstQuestion()}</strong>
-            </p>
-          </div>
-        </div>
-
-        {messages.map((message: Message) => (
-          <div
-            key={message.id}
-            className={`flex items-start space-x-3 ${
-              message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
-            }`}
-            data-testid={`message-${message.role}-${message.id}`}
-          >
-            <div
-              className={`w-10 h-10 rounded-full flex items-center justify-center text-description font-medium ${
-                message.role === "user"
-                  ? "bg-contrast-high text-surface-primary"
-                  : "bg-accent text-surface-primary"
-              }`}
-            >
-              {message.role === "user" ? "You" : "AI"}
-            </div>
-            <div
-              className={`flex-1 rounded-lg p-4 ${
-                message.role === "user"
-                  ? "bg-accent text-surface-primary"
-                  : "bg-surface-primary border border-gray-200 text-contrast-high"
-              }`}
-            >
-              <p className="text-description whitespace-pre-wrap leading-relaxed">
-                {message.content}
-              </p>
-            </div>
-          </div>
-        ))}
-
-        {sendMessageMutation.isPending && (
-          <div className="flex items-start space-x-3" data-testid="ai-loading-skeleton">
-            <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center text-surface-primary text-description font-medium">
-              AI
-            </div>
-            <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200 space-y-3">
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-3/4"></div>
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-full"></div>
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-5/6"></div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="border-t border-gray-200 p-4 md:p-6 bg-surface-primary sticky bottom-0 z-10">
-        {canGenerateSurvey && (
-          <div className="mb-4 p-4 bg-surface-secondary rounded-lg border border-accent">
-            <p className="text-description text-contrast-high mb-3">
-              Great progress! You've answered enough questions. Ready to generate your personalized survey?
-            </p>
-            <Button
-              onClick={handleGenerateSurvey}
-              disabled={generateSurveyMutation.isPending}
-              className="btn-primary"
-              data-testid="button-generate-survey"
-            >
-              {generateSurveyMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating Survey...
-                </>
-              ) : (
-                <>
-                  Generate Survey
-                  <ChevronRight className="w-4 h-4 ml-2" />
-                </>
-              )}
-            </Button>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex space-x-2 md:space-x-3">
-          <Input
-            type="text"
-            placeholder="Type your answer..."
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            className="flex-1 min-h-[44px] text-base"
-            disabled={sendMessageMutation.isPending || !prdStage}
-            data-testid="input-discovery-message"
-            autoComplete="off"
-          />
-          <Button
-            type="submit"
-            className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
-            disabled={!inputValue.trim() || sendMessageMutation.isPending || !prdStage}
-            data-testid="button-send-discovery-message"
-          >
-            <Send className="w-4 h-4" />
-          </Button>
-        </form>
-      </div>
-    </div>
-  );
-
-  const renderSurveyPhase = () => {
-    if (!surveyDefinition || !currentSection) {
-      return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-accent" />
-            <p className="text-description text-contrast-medium">Loading survey...</p>
-          </div>
-        </div>
-      );
-    }
+  // Render a single question based on its type
+  const renderQuestion = (question: CATQuestion) => {
+    const value = responses[question.id];
+    const isNA = value === "__NA__";
 
     return (
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-2xl mx-auto">
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-metadata text-contrast-medium">
-                Section {currentSectionIndex + 1} of {surveyDefinition.sections.length}
-              </span>
-              <div className="flex space-x-1">
-                {surveyDefinition.sections.map((_, idx) => (
-                  <div
-                    key={idx}
-                    className={`w-8 h-1 rounded ${
-                      idx <= currentSectionIndex ? "bg-accent" : "bg-gray-200"
+      <div key={question.id} className="bg-surface-primary rounded-lg border border-gray-200 p-6">
+        <div className="mb-1">
+          <span className="text-xs uppercase tracking-wide text-accent font-medium">
+            {question.dimension.replace(/_/g, " ")}
+          </span>
+        </div>
+        <Label className="text-description font-medium text-contrast-high mb-1 block">
+          {question.label}
+        </Label>
+        {question.description && (
+          <p className="text-metadata text-contrast-medium mb-4">{question.description}</p>
+        )}
+
+        {isNA ? (
+          <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
+            <span className="text-contrast-medium text-sm">Marked as N/A</span>
+            <Button variant="ghost" size="sm" onClick={() => handleUndoNA(question.id)}>
+              Undo
+            </Button>
+          </div>
+        ) : (
+          <>
+            {question.type === "visual-select" && question.options && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {question.options.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleResponseChange(question.id, opt.value)}
+                    className={`p-4 rounded-lg border-2 text-left transition-all ${
+                      value === opt.value
+                        ? "border-accent bg-accent/5"
+                        : "border-gray-200 hover:border-gray-300"
                     }`}
-                  />
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                        value === opt.value ? "bg-accent text-white" : "bg-gray-100 text-gray-600"
+                      }`}>
+                        {STYLE_ICONS[opt.value] || <Palette className="w-5 h-5" />}
+                      </div>
+                      {value === opt.value && <Check className="w-4 h-4 text-accent ml-auto" />}
+                    </div>
+                    <p className="text-sm font-medium text-contrast-high">{opt.label}</p>
+                    {opt.description && (
+                      <p className="text-xs text-contrast-medium mt-1">{opt.description}</p>
+                    )}
+                  </button>
                 ))}
               </div>
-            </div>
-            <h2 className="text-h3 font-medium text-contrast-high">{currentSection.title}</h2>
-            <p className="text-description text-contrast-medium mt-1">{currentSection.description}</p>
-          </div>
+            )}
 
-          <div className="space-y-8">
-            {currentSection.questions.map((question) => (
-              <div key={question.id} className="bg-surface-primary rounded-lg border border-gray-200 p-6">
-                <Label className="text-description font-medium text-contrast-high mb-4 block">
-                  {question.question}
-                  {question.required && <span className="text-red-500 ml-1">*</span>}
-                </Label>
-
-                {surveyResponses[question.id] === "N/A" ? (
-                  <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
-                    <span className="text-contrast-medium">Marked as N/A</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleSurveyResponseChange(question.id, "")}
-                      data-testid={`button-undo-na-${question.id}`}
-                    >
-                      Undo
-                    </Button>
+            {question.type === "single-select" && question.options && (
+              <RadioGroup
+                value={typeof value === "string" ? value : ""}
+                onValueChange={v => handleResponseChange(question.id, v)}
+                className="space-y-2"
+              >
+                {question.options.map(opt => (
+                  <div key={opt.value} className="flex items-start space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
+                    <RadioGroupItem value={opt.value} id={`${question.id}-${opt.value}`} className="mt-0.5" />
+                    <div className="flex-1">
+                      <Label htmlFor={`${question.id}-${opt.value}`} className="text-description text-contrast-high cursor-pointer block">
+                        {opt.label}
+                      </Label>
+                      {opt.description && (
+                        <p className="text-metadata text-contrast-medium mt-0.5">{opt.description}</p>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <>
-                    {question.type === "slider" && (
-                      <div className="space-y-4">
-                        <Slider
-                          value={[typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] as number : (question.min || 1)]}
-                          onValueChange={([value]) => handleSurveyResponseChange(question.id, value)}
-                          min={question.min || 1}
-                          max={question.max || 5}
-                          step={1}
-                          className="w-full"
-                          data-testid={`slider-${question.id}`}
-                        />
-                        <div className="flex justify-between text-metadata text-contrast-medium">
-                          <span>{question.minLabel || question.min}</span>
-                          <span className="text-accent font-medium">
-                            {typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] : "-"}
-                          </span>
-                          <span>{question.maxLabel || question.max}</span>
-                        </div>
-                      </div>
-                    )}
+                ))}
+              </RadioGroup>
+            )}
 
-                    {question.type === "single-select" && question.options && (
-                      <RadioGroup
-                        value={surveyResponses[question.id] as string || ""}
-                        onValueChange={(value) => handleSurveyResponseChange(question.id, value)}
-                        className="space-y-2"
-                        data-testid={`radio-${question.id}`}
-                      >
-                        {question.options.map((option) => (
-                          <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                            <RadioGroupItem value={option} id={`${question.id}-${option}`} />
-                            <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                              {option}
-                            </Label>
-                          </div>
-                        ))}
-                      </RadioGroup>
-                    )}
-
-                    {question.type === "multi-select" && question.options && (
-                      <div className="space-y-2" data-testid={`checkbox-${question.id}`}>
-                        {question.options.map((option) => {
-                          const currentValues = (surveyResponses[question.id] as string[]) || [];
-                          return (
-                            <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                              <Checkbox
-                                id={`${question.id}-${option}`}
-                                checked={currentValues.includes(option)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    handleSurveyResponseChange(question.id, [...currentValues, option]);
-                                  } else {
-                                    handleSurveyResponseChange(question.id, currentValues.filter((v) => v !== option));
-                                  }
-                                }}
-                              />
-                              <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                                {option}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleMarkNA(question.id)}
-                          className="text-contrast-medium hover:text-contrast-high"
-                          data-testid={`button-na-${question.id}`}
-                        >
-                          Mark N/A
-                        </Button>
-                      </div>
-                      <div>
-                        <Label className="text-metadata text-contrast-medium mb-1 block">
-                          Additional notes (optional)
+            {question.type === "multi-select" && question.options && (
+              <div className="space-y-2">
+                {question.options.map(opt => {
+                  const currentValues: string[] = Array.isArray(value) ? value : [];
+                  const isChecked = currentValues.includes(opt.value);
+                  return (
+                    <div key={opt.value} className="flex items-start space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
+                      <Checkbox
+                        id={`${question.id}-${opt.value}`}
+                        checked={isChecked}
+                        onCheckedChange={checked => {
+                          if (checked) {
+                            handleResponseChange(question.id, [...currentValues, opt.value]);
+                          } else {
+                            handleResponseChange(question.id, currentValues.filter(v => v !== opt.value));
+                          }
+                        }}
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor={`${question.id}-${opt.value}`} className="text-description text-contrast-high cursor-pointer block">
+                          {opt.label}
                         </Label>
-                        <textarea
-                          value={(surveyResponses[`${question.id}_note`] as string) || ""}
-                          onChange={(e) => handleFreeformNoteChange(question.id, e.target.value)}
-                          placeholder="Add any clarifications or context..."
-                          className="w-full p-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-accent/20"
-                          rows={2}
-                          data-testid={`input-note-${question.id}`}
-                        />
+                        {opt.description && (
+                          <p className="text-metadata text-contrast-medium mt-0.5">{opt.description}</p>
+                        )}
                       </div>
                     </div>
-                  </>
-                )}
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            )}
 
-          <div className="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentSectionIndex((prev) => Math.max(0, prev - 1))}
-              disabled={currentSectionIndex === 0}
-              data-testid="button-prev-section"
-            >
-              Previous
-            </Button>
-            
-            <div className="flex items-center gap-3">
-              {!isLastSection && (
-                <Button
-                  variant="ghost"
-                  onClick={handleSkipSection}
-                  className="text-contrast-medium"
-                  data-testid="button-skip-section"
-                >
-                  Skip Section
-                </Button>
-              )}
-              
-              {isLastSection ? (
-                <Button
-                  onClick={handleReadyToGenerate}
-                  disabled={isGeneratingDocs}
-                  className="btn-primary"
-                  data-testid="button-submit-survey"
-                >
-                  {isGeneratingDocs ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Generating Docs...
-                    </>
-                  ) : (
-                    "Review & Generate"
-                  )}
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleNextSection}
-                  disabled={autoSaveSurveyMutation.isPending}
-                  className="btn-primary"
-                  data-testid="button-next-section"
-                >
-                  {autoSaveSurveyMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      Next Section
-                      <ChevronRight className="w-4 h-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-              )}
+            {question.type === "slider" && (
+              <div className="space-y-4 pt-2">
+                <Slider
+                  value={[typeof value === "number" ? value : (question.min || 1)]}
+                  onValueChange={([v]) => handleResponseChange(question.id, v)}
+                  min={question.min || 1}
+                  max={question.max || 5}
+                  step={1}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-metadata text-contrast-medium">
+                  <span>{question.minLabel || question.min}</span>
+                  <span className="text-accent font-medium">
+                    {typeof value === "number" ? value : "-"}
+                  </span>
+                  <span>{question.maxLabel || question.max}</span>
+                </div>
+              </div>
+            )}
+
+            {question.type === "free-text" && (
+              <Textarea
+                value={typeof value === "string" ? value : ""}
+                onChange={e => handleResponseChange(question.id, e.target.value)}
+                placeholder="Type your answer..."
+                className="min-h-[80px] resize-none"
+              />
+            )}
+
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleMarkNA(question.id)}
+                className="text-contrast-medium hover:text-contrast-high text-xs"
+              >
+                Not applicable
+              </Button>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     );
   };
-
-  const selectedCount = Object.values(documentSelections).filter(s => s.selected).length;
-  const progressPercent = generationProgress.total > 0 
-    ? Math.round((generationProgress.current / generationProgress.total) * 100) 
-    : 0;
 
   return (
     <div className="min-h-screen bg-surface-secondary flex flex-col">
+      {/* Header */}
       <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setLocation("/")}
+              onClick={() => setLocation("/details")}
               className="min-h-[44px] min-w-[44px]"
-              data-testid="button-back-home"
             >
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h1 className="text-h3 font-medium text-contrast-high">Survey Mode</h1>
-              <p className="text-description text-contrast-medium">
-                {surveyPhase === "discovery" 
-                  ? "Quick discovery chat before your personalized survey"
-                  : "Complete the survey to generate your documentation"
-                }
+              <h1 className="text-base font-medium text-contrast-high">Personalized Questions</h1>
+              <p className="text-sm text-contrast-medium">
+                {phase === "loading" && "Analyzing your answers..."}
+                {phase === "survey" && `${answeredCount} of ${totalQuestions} answered`}
+                {phase === "confirming" && "Generating final question..."}
+                {phase === "confirmation" && "One last thing before we generate"}
+                {phase === "generating" && "Generating your documentation..."}
               </p>
             </div>
-          </div>
-          <div className="flex items-center space-x-2 shrink-0">
-            <Button
-              variant="outline"
-              onClick={() => setShowPromptsSection(true)}
-              className="min-h-[44px] shrink-0"
-              data-testid="button-manage-prompts"
-            >
-              <Sparkles className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Prompts</span>
-              {customPrompts.length > 0 && (
-                <span className="ml-1 sm:ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
-                  {customPrompts.length}
-                </span>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleSave}
-              className="min-h-[44px] shrink-0"
-              data-testid="button-save-project"
-            >
-              <Save className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Save Project</span>
-            </Button>
           </div>
         </div>
       </header>
 
-      {/* Project name bar - persistent context */}
-      {project && (
-        <div className="bg-surface-tertiary border-b border-gray-100 px-6 py-2">
-          <div className="max-w-4xl mx-auto">
-            <p className="text-metadata text-contrast-medium" data-testid="text-project-name">
-              Working on: <span className="font-medium text-contrast-high">{project.name || "Untitled Project"}</span>
-            </p>
+      {/* Progress bar */}
+      {phase === "survey" && totalQuestions > 0 && (
+        <div className="bg-surface-primary border-b border-gray-100 px-6 py-2">
+          <div className="max-w-3xl mx-auto">
+            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-accent transition-all duration-300 rounded-full"
+                style={{ width: `${Math.round((answeredCount / totalQuestions) * 100)}%` }}
+              />
+            </div>
           </div>
         </div>
       )}
 
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-8">
+
+          {/* Loading phase */}
+          {phase === "loading" && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-10 h-10 animate-spin text-accent mb-4" />
+              <p className="text-description text-contrast-medium">
+                Analyzing your product to create targeted questions...
+              </p>
+              <p className="text-metadata text-contrast-medium mt-2">
+                This takes a few seconds
+              </p>
+            </div>
+          )}
+
+          {/* Survey phase — all questions on one screen */}
+          {phase === "survey" && catSurvey && (
+            <>
+              <div className="mb-8">
+                <h2 className="text-lg font-medium text-contrast-high mb-2">
+                  A few targeted questions
+                </h2>
+                <p className="text-sm text-contrast-medium">
+                  Based on your pitch, we identified {catSurvey.questions.length} areas that need more detail.
+                  Answer what you can — skip anything that doesn't apply.
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                {catSurvey.questions.map(renderQuestion)}
+              </div>
+
+              {/* Submit CTA */}
+              <div className="mt-10 pt-6 border-t border-gray-200 flex flex-col sm:flex-row sm:justify-end gap-3">
+                <Button
+                  onClick={handleSubmitSurvey}
+                  className="btn-primary min-h-[44px] w-full sm:w-auto px-8"
+                  disabled={answeredCount === 0}
+                >
+                  Next: Final Check
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Confirming phase — loading state */}
+          {phase === "confirming" && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-10 h-10 animate-spin text-accent mb-4" />
+              <p className="text-description text-contrast-medium">
+                Identifying remaining gaps...
+              </p>
+            </div>
+          )}
+
+          {/* Confirmation phase — single targeted question */}
+          {phase === "confirmation" && confirmation && (
+            <div className="max-w-2xl mx-auto">
+              <div className="mb-8">
+                <h2 className="text-lg font-medium text-contrast-high mb-2">
+                  One last question
+                </h2>
+                <p className="text-sm text-contrast-medium">
+                  {confirmation.reason}
+                </p>
+              </div>
+
+              <div className="bg-surface-primary rounded-lg border border-gray-200 p-6">
+                <Label className="text-description font-medium text-contrast-high mb-4 block">
+                  {confirmation.question}
+                </Label>
+
+                {confirmation.options && confirmation.options.length > 0 ? (
+                  <div className="space-y-3 mb-4">
+                    <RadioGroup
+                      value={confirmationAnswer}
+                      onValueChange={setConfirmationAnswer}
+                      className="space-y-2"
+                    >
+                      {confirmation.options.map(opt => (
+                        <div key={opt} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
+                          <RadioGroupItem value={opt} id={`confirm-${opt}`} />
+                          <Label htmlFor={`confirm-${opt}`} className="text-description text-contrast-high cursor-pointer flex-1">
+                            {opt}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                    <Textarea
+                      value={confirmationAnswer}
+                      onChange={e => setConfirmationAnswer(e.target.value)}
+                      placeholder="Or type your own answer..."
+                      className="min-h-[60px] resize-none mt-3"
+                    />
+                  </div>
+                ) : (
+                  <Textarea
+                    value={confirmationAnswer}
+                    onChange={e => setConfirmationAnswer(e.target.value)}
+                    placeholder="Type your answer..."
+                    className="min-h-[80px] resize-none"
+                  />
+                )}
+              </div>
+
+              <div className="mt-8 flex justify-between items-center">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleGenerate("")}
+                  className="text-contrast-medium"
+                >
+                  Skip & Generate
+                </Button>
+                <Button
+                  onClick={() => handleGenerate(confirmationAnswer)}
+                  className="btn-primary px-8"
+                  disabled={!confirmationAnswer.trim()}
+                >
+                  Generate All Documents
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
       {/* Generation progress overlay */}
-      {isGeneratingDocs && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="generation-overlay">
-          <div className="bg-surface-primary rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
+      {phase === "generating" && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface-primary rounded-xl p-4 sm:p-8 max-w-sm sm:max-w-md w-full mx-4 shadow-2xl">
             <div className="text-center mb-6">
               <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-accent" />
-              <h3 className="text-h4 font-medium text-contrast-high mb-2">Generating Documentation</h3>
-              <p className="text-description text-contrast-medium">{generationProgress.stageName}</p>
+              <h3 className="text-base font-medium text-contrast-high mb-2">
+                Generating Documentation
+              </h3>
+              <p className="text-sm text-contrast-medium">{generationProgress.stageName}</p>
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between text-metadata text-contrast-medium">
+              <div className="flex justify-between text-xs text-contrast-medium">
                 <span>Progress</span>
                 <span>{generationProgress.current} of {generationProgress.total} documents</span>
               </div>
               <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-accent transition-all duration-500 rounded-full"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              <p className="text-metadata text-contrast-medium text-center mt-4">
+              <p className="text-xs text-contrast-medium text-center mt-4">
                 This may take a minute...
               </p>
             </div>
           </div>
         </div>
       )}
-
-      <main className="flex-1 flex flex-col max-w-4xl w-full mx-auto">
-        {surveyPhase === "discovery" ? renderDiscoveryPhase() : renderSurveyPhase()}
-      </main>
-
-      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Save Your Project</DialogTitle>
-            <DialogDescription>
-              Give your project a name so you can continue working on it later.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Input
-              placeholder="Project name"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              data-testid="input-save-project-name"
-            />
-            <div className="flex justify-end space-x-2">
-              <Button variant="ghost" onClick={() => setShowSaveDialog(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSaveWithName} disabled={!projectName.trim()}>
-                Save
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showPromptsSection} onOpenChange={setShowPromptsSection}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Custom LLM Prompts</DialogTitle>
-            <DialogDescription>
-              Define custom prompts to use throughout your app. These prompts can be used for requirements, features, architecture, coding, or testing.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="flex justify-between items-center">
-              <span className="text-description text-contrast-medium">
-                {customPrompts.length} prompt{customPrompts.length !== 1 ? "s" : ""} defined
-              </span>
-              <Button
-                onClick={handleOpenAddDialog}
-                className="btn-primary"
-                data-testid="button-add-prompt"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Prompt
-              </Button>
-            </div>
-
-            {customPrompts.length === 0 ? (
-              <div className="text-center py-8 text-contrast-medium">
-                <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p className="text-description">No custom prompts yet.</p>
-                <p className="text-metadata">Add prompts to customize AI behavior in your app.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {customPrompts.map((prompt) => (
-                  <div
-                    key={prompt.id}
-                    className={`bg-surface-secondary rounded-lg p-4 border ${
-                      prompt.isActive ? "border-accent" : "border-gray-200 opacity-60"
-                    }`}
-                    data-testid={`prompt-card-${prompt.id}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <h4 className="text-title font-medium text-contrast-high">{prompt.name}</h4>
-                          <span className="text-xs bg-surface-primary px-2 py-0.5 rounded text-contrast-medium">
-                            {prompt.category}
-                          </span>
-                        </div>
-                        {prompt.description && (
-                          <p className="text-metadata text-contrast-medium mb-2">{prompt.description}</p>
-                        )}
-                        <p className="text-description text-contrast-high line-clamp-2">{prompt.prompt}</p>
-                      </div>
-                      <div className="flex items-center space-x-2 ml-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEditPrompt(prompt)}
-                          className="text-contrast-medium hover:text-contrast-high"
-                          data-testid={`button-edit-prompt-${prompt.id}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleTogglePrompt(prompt.id)}
-                          className={prompt.isActive ? "text-accent" : "text-contrast-medium"}
-                          data-testid={`button-toggle-prompt-${prompt.id}`}
-                        >
-                          {prompt.isActive ? "Active" : "Inactive"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeletePrompt(prompt.id)}
-                          className="text-red-500 hover:text-red-700"
-                          data-testid={`button-delete-prompt-${prompt.id}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showAddPromptDialog} onOpenChange={(open) => {
-        if (!open) {
-          setEditingPromptId(null);
-          setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
-        }
-        setShowAddPromptDialog(open);
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingPromptId ? "Edit Custom Prompt" : "Add Custom Prompt"}</DialogTitle>
-            <DialogDescription>
-              {editingPromptId ? "Update your LLM prompt." : "Create a new LLM prompt for use in your application."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label className="text-description mb-2 block">Name</Label>
-              <Input
-                placeholder="e.g., Code Review Prompt"
-                value={newPrompt.name}
-                onChange={(e) => setNewPrompt({ ...newPrompt, name: e.target.value })}
-                data-testid="input-prompt-name"
-              />
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Category</Label>
-              <Select
-                value={newPrompt.category}
-                onValueChange={(value) => setNewPrompt({ ...newPrompt, category: value as CustomPrompt["category"] })}
-              >
-                <SelectTrigger data-testid="select-prompt-category">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="requirements">Requirements</SelectItem>
-                  <SelectItem value="features">Features</SelectItem>
-                  <SelectItem value="architecture">Architecture</SelectItem>
-                  <SelectItem value="coding">Coding</SelectItem>
-                  <SelectItem value="testing">Testing</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Description (optional)</Label>
-              <Input
-                placeholder="Brief description of what this prompt does"
-                value={newPrompt.description}
-                onChange={(e) => setNewPrompt({ ...newPrompt, description: e.target.value })}
-                data-testid="input-prompt-description"
-              />
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Prompt</Label>
-              <Textarea
-                placeholder="Enter your LLM prompt here..."
-                value={newPrompt.prompt}
-                onChange={(e) => setNewPrompt({ ...newPrompt, prompt: e.target.value })}
-                className="min-h-[150px]"
-                data-testid="textarea-prompt-content"
-              />
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="ghost" onClick={() => setShowAddPromptDialog(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleAddPrompt} 
-                disabled={!newPrompt.name?.trim() || !newPrompt.prompt?.trim()}
-                data-testid="button-save-prompt"
-              >
-                {editingPromptId ? "Save Changes" : "Add Prompt"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Document Selection Dialog */}
-      <Dialog open={showDocumentSelection} onOpenChange={setShowDocumentSelection}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Ready to Generate Documentation</DialogTitle>
-            <DialogDescription>
-              Select which documents you want to generate and choose the detail level for each.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="flex justify-between items-center pb-2 border-b border-gray-200">
-              <span className="text-description text-contrast-medium">
-                {selectedCount} of {stages.length} documents selected
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
-                    stages.forEach(stage => {
-                      newSelections[stage.id] = { 
-                        selected: true, 
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
-                      };
-                    });
-                    setDocumentSelections(newSelections);
-                  }}
-                  data-testid="button-select-all"
-                >
-                  Select All
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
-                    stages.forEach(stage => {
-                      newSelections[stage.id] = { 
-                        selected: false, 
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
-                      };
-                    });
-                    setDocumentSelections(newSelections);
-                  }}
-                  data-testid="button-deselect-all"
-                >
-                  Deselect All
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {stages
-                .sort((a, b) => a.stageNumber - b.stageNumber)
-                .map((stage) => (
-                  <div
-                    key={stage.id}
-                    className={`bg-surface-secondary rounded-lg p-4 border transition-colors ${
-                      documentSelections[stage.id]?.selected 
-                        ? "border-accent bg-accent/5" 
-                        : "border-gray-200"
-                    }`}
-                    data-testid={`doc-selection-${stage.id}`}
-                  >
-                    <div className="flex items-start gap-4">
-                      <Checkbox
-                        id={`doc-${stage.id}`}
-                        checked={documentSelections[stage.id]?.selected || false}
-                        onCheckedChange={(checked) => {
-                          setDocumentSelections(prev => ({
-                            ...prev,
-                            [stage.id]: { 
-                              selected: !!checked, 
-                              detailLevel: prev[stage.id]?.detailLevel || "detailed" 
-                            }
-                          }));
-                        }}
-                        className="mt-1"
-                      />
-                      <div className="flex-1">
-                        <Label 
-                          htmlFor={`doc-${stage.id}`} 
-                          className="text-description font-medium text-contrast-high cursor-pointer"
-                        >
-                          {stage.title}
-                        </Label>
-                        <p className="text-metadata text-contrast-medium mt-1">
-                          {stage.description}
-                        </p>
-                        
-                        {documentSelections[stage.id]?.selected && (
-                          <div className="mt-3 flex items-center gap-2">
-                            <span className="text-metadata text-contrast-medium">Detail level:</span>
-                            <div className="flex rounded-lg overflow-hidden border border-gray-200">
-                              <button
-                                type="button"
-                                onClick={() => setDocumentSelections(prev => ({
-                                  ...prev,
-                                  [stage.id]: { 
-                                    selected: prev[stage.id]?.selected ?? true, 
-                                    detailLevel: "summary" 
-                                  }
-                                }))}
-                                className={`px-3 py-1.5 text-sm transition-colors ${
-                                  documentSelections[stage.id]?.detailLevel === "summary"
-                                    ? "bg-accent text-white"
-                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
-                                }`}
-                                data-testid={`button-summary-${stage.id}`}
-                              >
-                                Summary
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDocumentSelections(prev => ({
-                                  ...prev,
-                                  [stage.id]: { 
-                                    selected: prev[stage.id]?.selected ?? true, 
-                                    detailLevel: "detailed" 
-                                  }
-                                }))}
-                                className={`px-3 py-1.5 text-sm transition-colors ${
-                                  documentSelections[stage.id]?.detailLevel === "detailed"
-                                    ? "bg-accent text-white"
-                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
-                                }`}
-                                data-testid={`button-detailed-${stage.id}`}
-                              >
-                                Detailed
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-              <Button variant="ghost" onClick={() => setShowDocumentSelection(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleConfirmGenerate}
-                disabled={selectedCount === 0}
-                className="btn-primary"
-                data-testid="button-confirm-generate"
-              >
-                Generate {selectedCount} Document{selectedCount !== 1 ? "s" : ""}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

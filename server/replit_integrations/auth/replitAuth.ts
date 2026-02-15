@@ -75,6 +75,26 @@ async function upsertUser(claims: any) {
 }
 
 export async function setupAuth(app: Express) {
+  // Skip Replit auth when not running on Replit
+  if (!process.env.REPL_ID) {
+    console.log("Not running on Replit - skipping Replit auth, using local dev mode");
+    app.use(session({
+      secret: process.env.SESSION_SECRET || "local-dev-secret",
+      resave: false,
+      saveUninitialized: false,
+      cookie: { httpOnly: true, secure: false },
+    }));
+    // Inject a local dev user so auth-gated routes work
+    app.use((req: any, _res, next) => {
+      if (!req.user) {
+        req.user = { claims: { sub: "local-dev", email: "dev@localhost", first_name: "Local", last_name: "Dev" } };
+        req.isAuthenticated = () => true;
+      }
+      next();
+    });
+    return;
+  }
+
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
@@ -145,6 +165,11 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  // In local dev mode, always authenticated
+  if (!process.env.REPL_ID) {
+    return next();
+  }
+
   const user = req.user as any;
 
   if (!req.isAuthenticated() || !user.expires_at) {

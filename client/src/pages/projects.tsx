@@ -31,26 +31,19 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="text-h2 font-medium text-contrast-high line-clamp-1">Product Development Assistant</h1>
-              <p className="text-description text-contrast-medium mt-1 hidden sm:block">
-                Guided workflow for systematic product development
-              </p>
-            </div>
-            <Button
-              onClick={() => setLocation("/")}
-              className="btn-primary min-h-[44px] shrink-0"
-              data-testid="button-new-project"
-            >
-              <Plus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">New Product</span>
-            </Button>
-          </div>
+      <div className="max-w-7xl mx-auto px-4 pt-6 pb-2 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-h3 font-medium text-contrast-high">Your Projects</h1>
         </div>
-      </header>
+        <Button
+          onClick={() => setLocation("/details")}
+          className="btn-primary min-h-[44px] shrink-0"
+          data-testid="button-new-project"
+        >
+          <Plus className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">New Product</span>
+        </Button>
+      </div>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {projectsLoading && (

@@ -1,6 +1,6 @@
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Sparkles, ArrowRight, FileText, Layout, Code, ListTodo, Play } from "lucide-react";
+import { Sparkles, ArrowRight, FileText, Layout, Code, ListTodo, Play, Palette, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Project } from "@shared/schema";
 
@@ -15,17 +15,16 @@ export default function WelcomePage() {
   const handleContinue = () => {
     if (draft) {
       sessionStorage.setItem("surveyProjectId", draft.id);
-      if (draft.intakeAnswers) {
-        sessionStorage.setItem("intakeAnswers", JSON.stringify(draft.intakeAnswers));
-      }
       if (draft.minimumDetails) {
-        sessionStorage.setItem("minimumDetails", JSON.stringify(draft.minimumDetails));
-        sessionStorage.setItem("productIdea", (draft.minimumDetails as any).problemStatement || "");
+        const md = draft.minimumDetails as { pitch?: string; v1Scope?: string; platform?: string };
+        if (md.pitch && md.v1Scope && md.platform) {
+          sessionStorage.setItem("seedAnswers", JSON.stringify(md));
+          setLocation(`/session/survey?projectId=${draft.id}`);
+          return;
+        }
       }
-      if (draft.appStyle) {
-        sessionStorage.setItem("appStyle", JSON.stringify(draft.appStyle));
-      }
-      setLocation("/session/survey");
+      // If seed answers aren't complete, go to details to fill them in
+      setLocation("/details");
     }
   };
 
@@ -48,7 +47,7 @@ export default function WelcomePage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
-              onClick={() => setLocation("/style")}
+              onClick={() => setLocation("/details")}
               className="btn-primary min-h-[52px] px-10 text-body"
               data-testid="button-get-started"
             >
@@ -83,8 +82,10 @@ export default function WelcomePage() {
               {[
                 { icon: FileText, label: "Requirements" },
                 { icon: ListTodo, label: "Product Spec" },
+                { icon: Palette, label: "UI/UX Spec" },
                 { icon: Layout, label: "Architecture" },
                 { icon: Code, label: "Dev Guide" },
+                { icon: Settings, label: "Project Rules" },
               ].map(({ icon: Icon, label }) => (
                 <div key={label} className="flex flex-col items-center gap-2 p-4 bg-surface-primary rounded-lg border border-gray-200 cursor-default select-none">
                   <Icon className="w-6 h-6 text-accent" />
@@ -94,13 +95,19 @@ export default function WelcomePage() {
             </div>
           </div>
 
-          <div className="mt-8">
+          <div className="mt-8 flex items-center justify-center gap-6">
             <button
               onClick={() => setLocation("/projects")}
               className="text-description text-accent hover:underline"
               data-testid="link-view-existing-projects"
             >
               View existing projects →
+            </button>
+            <button
+              onClick={() => setLocation("/admin")}
+              className="text-description text-contrast-medium hover:text-contrast-high hover:underline"
+            >
+              Manage prompts →
             </button>
           </div>
         </div>

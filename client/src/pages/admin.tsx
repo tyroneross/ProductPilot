@@ -161,23 +161,17 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="bg-surface-primary border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-accent" />
-            <h1 className="text-title font-semibold">Admin Panel</h1>
-          </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <span className="text-description text-contrast-medium hidden sm:inline" data-testid="text-admin-user">
-              {user?.email || user?.firstName || "Admin"}
-            </span>
-            <Button variant="outline" size="sm" onClick={() => logout()} className="shrink-0" data-testid="button-admin-logout">
-              <LogOut className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </Button>
-          </div>
+      <div className="max-w-6xl mx-auto px-4 pt-6 pb-2 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-accent" />
+          <h1 className="text-h3 font-medium text-contrast-high">Prompt Management</h1>
         </div>
-      </header>
+        <div className="flex items-center gap-4 shrink-0">
+          <span className="text-description text-contrast-medium hidden sm:inline" data-testid="text-admin-user">
+            {user?.email || user?.firstName || "Admin"}
+          </span>
+        </div>
+      </div>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -196,7 +190,7 @@ export default function AdminPage() {
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-semibold">Stage Prompts</h2>
                 <Select value={filterScope} onValueChange={setFilterScope}>
-                  <SelectTrigger className="w-40" data-testid="select-filter-scope">
+                  <SelectTrigger className="w-full sm:w-40" data-testid="select-filter-scope">
                     <SelectValue placeholder="Filter by scope" />
                   </SelectTrigger>
                   <SelectContent>
@@ -207,7 +201,7 @@ export default function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex flex-wrap gap-2 shrink-0">
                 {(!prompts || prompts.length === 0) && (
                   <Button
                     variant="outline"
@@ -322,7 +316,7 @@ export default function AdminPage() {
                               {prompt.stageNumber && ` | Stage ${prompt.stageNumber}`}
                             </p>
                           </div>
-                          <div className="flex gap-2 shrink-0">
+                          <div className="flex flex-wrap gap-2 shrink-0">
                             <Button
                               variant="outline"
                               size="sm"
@@ -491,7 +485,7 @@ function PromptForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-description font-medium mb-1 block">Scope</label>
           <Select
