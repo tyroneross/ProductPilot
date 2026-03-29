@@ -32,6 +32,7 @@ export default function AdminPage() {
   const [editingPrompt, setEditingPrompt] = useState<AdminPrompt | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [filterScope, setFilterScope] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<string>("stage");
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -141,23 +142,36 @@ export default function AdminPage() {
     );
   }
 
-  const filteredPrompts = [
-    ...(prompts || []),
-    ...defaultStages.map(s => ({
-      id: `default-${s.stageNumber}`,
-      scope: "stage",
-      targetKey: `stage_${s.stageNumber}`,
-      label: s.title,
-      description: s.description,
-      content: s.systemPrompt,
-      isDefault: true,
-      stageNumber: s.stageNumber,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as AdminPrompt))
-  ].filter(p => 
-    filterScope === "all" || p.scope === filterScope
-  );
+  const filteredPrompts = (() => {
+    const dbPrompts = prompts || [];
+    const dbTargetKeys = new Set(dbPrompts.map(p => p.targetKey));
+
+    // Only show defaults for stages that don't have a DB override
+    const defaultEntries = defaultStages
+      .filter(s => !dbTargetKeys.has(`stage_${s.stageNumber}`))
+      .map(s => ({
+        id: `default-${s.stageNumber}`,
+        scope: "stage",
+        targetKey: `stage_${s.stageNumber}`,
+        label: s.title,
+        description: s.description,
+        content: s.systemPrompt,
+        isDefault: true,
+        stageNumber: s.stageNumber,
+        updatedBy: null,
+        createdAt: null,
+        updatedAt: null,
+      } as AdminPrompt));
+
+    return [...dbPrompts, ...defaultEntries].filter(p => {
+      const matchesScope = filterScope === "all" || p.scope === filterScope;
+      const matchesSearch = !searchQuery ||
+        p.label?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.targetKey?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesScope && matchesSearch;
+    });
+  })();
 
   return (
     <div className="min-h-screen bg-surface-secondary">
@@ -206,12 +220,28 @@ export default function AdminPage() {
                     <SelectItem value="system">System</SelectItem>
                   </SelectContent>
                 </Select>
+                <Input
+                  placeholder="Search prompts..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-48"
+                />
               </div>
               <div className="flex gap-2 shrink-0">
                 {(!prompts || prompts.length === 0) && (
                   <Button
                     variant="outline"
-                    onClick={() => seedMutation.mutate()}
+                    onClick={() => {
+                      setConfirmDialog({
+                        open: true,
+                        title: "Seed Default Prompts",
+                        description: "This will create default prompts for all 6 stages and the discovery flow. Existing prompts with the same target keys will not be overwritten.",
+                        onConfirm: () => {
+                          seedMutation.mutate();
+                          setConfirmDialog(prev => ({ ...prev, open: false }));
+                        },
+                      });
+                    }}
                     disabled={seedMutation.isPending}
                     data-testid="button-seed-prompts"
                   >
@@ -260,7 +290,17 @@ export default function AdminPage() {
                   <p className="text-contrast-medium mb-4">No prompts found.</p>
                   <Button
                     variant="outline"
-                    onClick={() => seedMutation.mutate()}
+                    onClick={() => {
+                      setConfirmDialog({
+                        open: true,
+                        title: "Seed Default Prompts",
+                        description: "This will create default prompts for all 6 stages and the discovery flow. Existing prompts with the same target keys will not be overwritten.",
+                        onConfirm: () => {
+                          seedMutation.mutate();
+                          setConfirmDialog(prev => ({ ...prev, open: false }));
+                        },
+                      });
+                    }}
                     disabled={seedMutation.isPending}
                     data-testid="button-seed-empty"
                   >
@@ -319,7 +359,9 @@ export default function AdminPage() {
                             </pre>
                             <p className="text-metadata text-contrast-low mt-2">
                               Key: {prompt.targetKey}
-                              {prompt.stageNumber && ` | Stage ${prompt.stageNumber}`}
+                              {prompt.stageNumber != null && ` | Stage ${prompt.stageNumber}`}
+                              {prompt.updatedBy && ` | Edited by ${prompt.updatedBy}`}
+                              {prompt.updatedAt && ` | ${new Date(prompt.updatedAt).toLocaleDateString()}`}
                             </p>
                           </div>
                           <div className="flex gap-2 shrink-0">
@@ -327,6 +369,8 @@ export default function AdminPage() {
                               variant="outline"
                               size="sm"
                               onClick={() => setEditingPrompt(prompt)}
+                              disabled={prompt.id.startsWith("default-")}
+                              title={prompt.id.startsWith("default-") ? "Seed prompts to customize defaults" : "Edit prompt"}
                               data-testid={`button-edit-${prompt.id}`}
                             >
                               <Pencil className="w-4 h-4" />
@@ -334,6 +378,7 @@ export default function AdminPage() {
                             <Button
                               variant="outline"
                               size="sm"
+                              disabled={prompt.id.startsWith("default-")}
                               onClick={() => {
                                 setConfirmDialog({
                                   open: true,
