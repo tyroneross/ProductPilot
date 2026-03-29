@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { MessageCircle, Plus, FileText } from "lucide-react";
 import ContextFlow from "@/components/context-flow";
@@ -25,9 +25,11 @@ export default function Dashboard() {
     projects.find((p) => p.id === currentProjectId) : 
     projects[0];
 
-  if (!currentProjectId && projects.length > 0) {
-    setCurrentProjectId(projects[0].id);
-  }
+  useEffect(() => {
+    if (!currentProjectId && projects.length > 0) {
+      setCurrentProjectId(projects[0].id);
+    }
+  }, [currentProjectId, projects]);
 
   return (
     <div className="min-h-screen bg-surface-secondary">

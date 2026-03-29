@@ -1,4 +1,6 @@
 import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
+import { projects, stages, messages, adminPrompts, DEFAULT_STAGES } from "@shared/schema";
+import { eq, and, ne, desc, asc } from "drizzle-orm";
 import { db } from "./db";
 
 interface IStorage {
@@ -383,8 +385,6 @@ QUESTION TOPICS (ask ONE per response):
   }
 
   async seedDefaultPrompts(userId: string): Promise<void> {
-    const { DEFAULT_STAGES } = await import("@shared/schema");
-    
     // Seed stage prompts
     for (const stage of DEFAULT_STAGES) {
       await this.createAdminPrompt({
@@ -428,7 +428,6 @@ class PostgresStorage implements IStorage {
   }
 
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const { projects, stages, DEFAULT_STAGES } = await import("@shared/schema");
     const [project] = await this.db.insert(projects).values(insertProject).returning();
     
     // Create default stages for the project
@@ -450,21 +449,15 @@ class PostgresStorage implements IStorage {
   }
 
   async getProject(id: string): Promise<Project | undefined> {
-    const { projects } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
     return result[0];
   }
 
   async getAllProjects(): Promise<Project[]> {
-    const { projects } = await import("@shared/schema");
-    const { desc } = await import("drizzle-orm");
     return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {
-    const { projects } = await import("@shared/schema");
-    const { eq, and, ne } = await import("drizzle-orm");
     const result = await this.db.select().from(projects)
       .where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete")))
       .limit(1);
@@ -472,9 +465,6 @@ class PostgresStorage implements IStorage {
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
-    const { projects } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
-    
     const finalUpdates: any = { ...updates };
     if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
       finalUpdates.updatedAt = new Date();
@@ -489,35 +479,25 @@ class PostgresStorage implements IStorage {
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const { projects } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.delete(projects).where(eq(projects.id, id));
     return result.rowCount > 0;
   }
 
   async createStage(insertStage: InsertStage): Promise<Stage> {
-    const { stages } = await import("@shared/schema");
     const [stage] = await this.db.insert(stages).values(insertStage).returning();
     return stage;
   }
 
   async getStage(id: string): Promise<Stage | undefined> {
-    const { stages } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(stages).where(eq(stages.id, id)).limit(1);
     return result[0];
   }
 
   async getStagesByProject(projectId: string): Promise<Stage[]> {
-    const { stages } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     return await this.db.select().from(stages).where(eq(stages.projectId, projectId));
   }
 
   async updateStage(id: string, updates: Partial<Stage>): Promise<Stage> {
-    const { stages } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
-    
     const finalUpdates: any = { ...updates };
     if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
       finalUpdates.updatedAt = new Date();
@@ -531,7 +511,7 @@ class PostgresStorage implements IStorage {
       if (Array.isArray(keyInsights) && keyInsights.length > 0) {
         const completedCount = Array.isArray(completedInsights) ? completedInsights.length : 0;
         const totalCount = keyInsights.length;
-        finalUpdates.progress = Math.round((completedCount / totalCount) * 100);
+        finalUpdates.progress = Math.max(0, Math.min(100, Math.round((completedCount / totalCount) * 100)));
       }
     }
     
@@ -544,9 +524,6 @@ class PostgresStorage implements IStorage {
   }
 
   async ensureStagesForProject(projectId: string): Promise<Stage[]> {
-    const { stages, DEFAULT_STAGES } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
-    
     // Check if stages already exist
     const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
     if (existing.length > 0) return existing;
@@ -571,62 +548,46 @@ class PostgresStorage implements IStorage {
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
-    const { messages } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(messages).where(eq(messages.id, id)).limit(1);
     return result[0];
   }
 
   async getMessagesByStage(stageId: string): Promise<Message[]> {
-    const { messages } = await import("@shared/schema");
-    const { eq, asc } = await import("drizzle-orm");
     return await this.db.select().from(messages)
       .where(eq(messages.stageId, stageId))
       .orderBy(asc(messages.createdAt));
   }
 
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
-    const { messages } = await import("@shared/schema");
     const [message] = await this.db.insert(messages).values(insertMessage).returning();
     return message;
   }
 
   async deleteMessagesByStage(stageId: string): Promise<void> {
-    const { messages } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     await this.db.delete(messages).where(eq(messages.stageId, stageId));
   }
 
   // Admin Prompts - PostgreSQL implementation
   async getAllAdminPrompts(): Promise<AdminPrompt[]> {
-    const { adminPrompts } = await import("@shared/schema");
     return await this.db.select().from(adminPrompts);
   }
 
   async getAdminPrompt(id: string): Promise<AdminPrompt | undefined> {
-    const { adminPrompts } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.id, id)).limit(1);
     return result[0];
   }
 
   async getAdminPromptByTargetKey(targetKey: string): Promise<AdminPrompt | undefined> {
-    const { adminPrompts } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.targetKey, targetKey)).limit(1);
     return result[0];
   }
 
   async createAdminPrompt(insertPrompt: InsertAdminPrompt): Promise<AdminPrompt> {
-    const { adminPrompts } = await import("@shared/schema");
     const [prompt] = await this.db.insert(adminPrompts).values(insertPrompt).returning();
     return prompt;
   }
 
   async updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined> {
-    const { adminPrompts } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
-    
     const finalUpdates: any = { ...updates };
     if (!finalUpdates.updatedAt) {
       finalUpdates.updatedAt = new Date();
@@ -641,15 +602,11 @@ class PostgresStorage implements IStorage {
   }
 
   async deleteAdminPrompt(id: string): Promise<boolean> {
-    const { adminPrompts } = await import("@shared/schema");
-    const { eq } = await import("drizzle-orm");
     const result = await this.db.delete(adminPrompts).where(eq(adminPrompts.id, id));
     return result.rowCount > 0;
   }
 
   async seedDefaultPrompts(userId: string): Promise<void> {
-    const { DEFAULT_STAGES } = await import("@shared/schema");
-    
     // Seed stage prompts
     for (const stage of DEFAULT_STAGES) {
       await this.createAdminPrompt({

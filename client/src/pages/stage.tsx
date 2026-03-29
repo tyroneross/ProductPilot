@@ -76,7 +76,7 @@ export default function StagePage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setLocation("/")}
+              onClick={() => setLocation("/projects")}
               className="min-h-[44px] min-w-[44px]"
               data-testid="button-back-dashboard"
             >

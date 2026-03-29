@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Edit, Download, Lock, MessageSquare } from "lucide-react";
+import { Edit, Lock, MessageSquare } from "lucide-react";
 import { ProgressRing } from "@/components/ui/progress-ring";
 import type { Stage } from "@shared/schema";
 
@@ -19,13 +19,7 @@ export default function StageCard({ stage }: StageCardProps) {
     setLocation(`/stage/${stage.id}`);
   };
 
-  const handleExport = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    // TODO: Implement export functionality
-    console.log("Export stage:", stage.id);
-  };
-
-  const isActive = stage.progress > 0 && stage.progress < 100;
+const isActive = stage.progress > 0 && stage.progress < 100;
   const isCompleted = stage.progress >= 75;
 
   return (
@@ -68,13 +62,6 @@ export default function StageCard({ stage }: StageCardProps) {
             data-testid={`button-edit-stage-${stage.stageNumber}`}
           >
             <Edit className="w-4 h-4" />
-          </button>
-          <button 
-            className="text-small min-h-[44px] min-w-[44px] flex items-center justify-center text-contrast-medium hover:text-accent"
-            onClick={handleExport}
-            data-testid={`button-export-stage-${stage.stageNumber}`}
-          >
-            <Download className="w-4 h-4" />
           </button>
         </div>
       </div>

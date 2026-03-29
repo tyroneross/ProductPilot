@@ -55,7 +55,8 @@ export class AIService {
         messages: conversationMessages,
       });
 
-      const content = response.content[0].type === "text" ? response.content[0].text : "";
+      const firstBlock = response.content?.[0];
+      const content = firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
 
       return {
         content,
@@ -102,7 +103,8 @@ export class AIService {
         messages: conversationMessages,
       });
 
-      const content = response.content[0].type === "text" ? response.content[0].text : "{}";
+      const firstBlock = response.content?.[0];
+      const content = firstBlock && firstBlock.type === "text" ? firstBlock.text : "{}";
       return JSON.parse(content);
     } catch (error) {
       throw new Error(`Claude structured output error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -138,15 +140,16 @@ Respond with JSON: {"progress": number, "reasoning": "explanation"}
     `;
 
     try {
+      // Use Haiku for progress calculation: faster and cheaper than Sonnet
       const result = await this.generateStructuredOutput([
         { role: "system", content: "You are a progress assessment expert." },
         { role: "user", content: progressPrompt }
-      ]);
+      ], "claude-haiku");
       
       return Math.min(100, Math.max(0, result.progress || 0));
     } catch (error) {
       const meaningfulMessages = messages.filter(m => m.role === "user" && m.content.length > 20);
-      return Math.min(75, meaningfulMessages.length * 15);
+      return Math.max(0, Math.min(75, meaningfulMessages.length * 15));
     }
   }
 }

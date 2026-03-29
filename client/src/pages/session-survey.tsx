@@ -40,6 +40,7 @@ export default function SessionSurveyPage() {
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const draftCreated = useRef(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -60,6 +61,13 @@ export default function SessionSurveyPage() {
     if (urlProjectId && !projectId) {
       setProjectId(urlProjectId);
     }
+  }, []);
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
   }, []);
 
   const { data: project, refetch: refetchProject } = useQuery<Project>({
@@ -422,7 +430,6 @@ export default function SessionSurveyPage() {
     setGenerationProgress({ current: 0, total: totalSelected, stageName: "Starting..." });
     
     let generationComplete = false;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
     
     // Function to check completion and navigate
     const checkAndNavigate = async () => {
@@ -450,7 +457,7 @@ export default function SessionSurveyPage() {
           // If all selected stages are complete, navigate immediately
           if (completedCount === totalSelected && totalSelected > 0) {
             generationComplete = true;
-            if (pollInterval) clearInterval(pollInterval);
+            if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
             setIsGeneratingDocs(false);
             setGenerationProgress({ current: 0, total: 0, stageName: "" });
             refetchProject();
@@ -467,7 +474,7 @@ export default function SessionSurveyPage() {
     };
     
     // Start polling for stage progress
-    pollInterval = setInterval(checkAndNavigate, 2000);
+    pollIntervalRef.current = setInterval(checkAndNavigate, 2000);
     
     try {
       // Submit survey and generate docs with preferences
@@ -510,7 +517,7 @@ export default function SessionSurveyPage() {
         });
       }
     } finally {
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
       if (!generationComplete) {
         setIsGeneratingDocs(false);
         setGenerationProgress({ current: 0, total: 0, stageName: "" });

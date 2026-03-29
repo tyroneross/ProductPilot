@@ -10,7 +10,7 @@ import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integra
 const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
 
 // Helper to get interceptor prompt by targetKey
-const getInterceptorPrompt = (targetKey: string) => 
+const getInterceptorPrompt = (targetKey: string) =>
   INTERCEPTOR_PROMPTS.find(p => p.targetKey === targetKey);
 
 // Middleware to check if user is an admin
@@ -19,28 +19,35 @@ const isAdmin: RequestHandler = (req: any, res, next) => {
   if (!user || !user.claims) {
     return res.status(401).json({ message: "Unauthorized" });
   }
-  
+
   // Check if user email or ID matches admin list
   const userEmail = user.claims.email || "";
   const userId = user.claims.sub || "";
-  
+
   // Check against allowlist - user ID or email must match
   const isAllowed = ADMIN_USERS.includes(userId) || ADMIN_USERS.includes(userEmail);
-  
+
   if (!isAllowed) {
     return res.status(403).json({ message: "Forbidden: Admin access required" });
   }
-  
+
   next();
 };
 
+// Passthrough middleware for non-Replit environments where auth is unavailable
+const noAuth: RequestHandler = (_req, _res, next) => next();
+const authMiddleware: RequestHandler = process.env.REPL_ID ? isAuthenticated : noAuth;
+const adminMiddleware: RequestHandler = process.env.REPL_ID ? isAdmin : noAuth;
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup authentication BEFORE other routes
-  await setupAuth(app);
-  registerAuthRoutes(app);
+  // Setup authentication BEFORE other routes (Replit only — REPL_ID absent on Vercel/local)
+  if (process.env.REPL_ID) {
+    await setupAuth(app);
+    registerAuthRoutes(app);
+  }
 
   // Admin check endpoint
-  app.get("/api/admin/check", isAuthenticated, (req: any, res) => {
+  app.get("/api/admin/check", authMiddleware, (req: any, res) => {
     const user = req.user?.claims;
     res.json({ 
       isAdmin: true, // All authenticated users are admins for now
@@ -53,7 +60,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get user's in-progress draft project (for session persistence)
-  app.get("/api/user/draft", isAuthenticated, async (req: any, res) => {
+  app.get("/api/user/draft", authMiddleware, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -68,7 +75,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Link a project to the current user
-  app.post("/api/projects/:id/claim", isAuthenticated, async (req: any, res) => {
+  app.post("/api/projects/:id/claim", authMiddleware, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -368,6 +375,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           systemPromptToUse += `\n\n${projectContext}\n\nUse this context to ask informed, specific follow-up questions. DO NOT re-ask for information already provided above.`;
         }
         
+        // Inject enforcement instructions upfront to avoid wasteful double-calls
+        const userMessageCount = existingMessages.filter(m => m.role === "user").length;
+
+        if (stage.stageNumber === 2 && userMessageCount < 6) {
+          systemPromptToUse += `\n\n<ENFORCEMENT>You have received ${userMessageCount} user messages so far. Since this is less than 6, you MUST ONLY ask 1-2 brief follow-up questions. Do NOT generate any document sections, headers (##), PRD content, or formatted output. Keep your response under 300 characters.</ENFORCEMENT>`;
+        }
+
+        if (stage.stageNumber === 3) {
+          systemPromptToUse += `\n\n<ENFORCEMENT>You MUST include HTML wireframe code in \`\`\`html code blocks in every response. Use orange color scheme (#FF6B35 primary, #FFA500 accents). If the user hasn't specified what to wireframe yet, ask them, but still include a simple placeholder HTML wireframe.</ENFORCEMENT>`;
+        }
+
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
           { role: "system", content: systemPromptToUse },
@@ -376,60 +394,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
-          let aiResponse = await aiService.chat(aiMessages, modelToUse);
-          
-          // Special handling for PRD stage (stage 2) to prevent premature document generation
-          if (stage.stageNumber === 2) {
-            // Count user messages (including the one we just created)
-            const userMessageCount = existingMessages.filter(m => m.role === "user").length;
-            
-            // If we have fewer than 6 user messages and the AI generated a document, force it to ask questions instead
-            if (userMessageCount < 6) {
-              const hasDocumentStructure = aiResponse.content.includes("##") || 
-                                         aiResponse.content.includes("# Product") ||
-                                         aiResponse.content.includes("# PRD") ||
-                                         aiResponse.content.includes("Executive Summary") ||
-                                         aiResponse.content.match(/\n\n.*:\n-/); // bullet lists with headers
-              
-              if (hasDocumentStructure || aiResponse.content.length > 800) {
-                // Use interceptor prompt from schema.ts with fallback
-                const prdInterceptor = getInterceptorPrompt("prd_early_document_prevention");
-                const isEnabled = prdInterceptor?.isEnabled ?? true; // Default to enabled if not found
-                if (isEnabled) {
-                  const systemPrompt = prdInterceptor?.systemPrompt || "You are an interviewer. Ask 2-3 brief questions. No documents. No headers. Just questions.";
-                  const userTemplate = prdInterceptor?.userPromptTemplate || `The user said: "{{USER_MESSAGE}}". You MUST respond with ONLY 2-3 simple questions. No documents.`;
-                  const overridePrompt = userTemplate.replace("{{USER_MESSAGE}}", messageData.content);
-                  aiResponse = await aiService.chat([
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: overridePrompt }
-                  ], modelToUse);
-                }
-              }
-            }
-          }
-          
-          // Special handling for UI Design stage (stage 3) to ensure HTML wireframes
-          if (stage.stageNumber === 3) {
-            const hasHTML = aiResponse.content.includes("<!DOCTYPE") || 
-                           aiResponse.content.includes("<html") ||
-                           aiResponse.content.includes("```html");
-            
-            if (!hasHTML) {
-              // Use interceptor prompt from schema.ts with fallback
-              const uiInterceptor = getInterceptorPrompt("ui_wireframe_html_enforcement");
-              const isEnabled = uiInterceptor?.isEnabled ?? true; // Default to enabled if not found
-              if (isEnabled) {
-                const systemPrompt = uiInterceptor?.systemPrompt || "You are a UI designer. Generate complete HTML wireframes with inline CSS. Always use orange color schemes. Return code in ```html blocks.";
-                const userTemplate = uiInterceptor?.userPromptTemplate || `Create a simple HTML wireframe for: "{{USER_MESSAGE}}". You MUST respond with actual HTML code wrapped in \`\`\`html code blocks. Use an orange color scheme.`;
-                const overridePrompt = userTemplate.replace("{{USER_MESSAGE}}", messageData.content);
-                aiResponse = await aiService.chat([
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: overridePrompt }
-                ], modelToUse);
-              }
-            }
-          }
-          
+          const aiResponse = await aiService.chat(aiMessages, modelToUse);
+
           // Create AI response message
           const aiMessage = await storage.createMessage({
             stageId: req.params.stageId,
@@ -437,10 +403,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             content: aiResponse.content,
           });
 
-          // Update stage progress
-          const allMessages = await storage.getMessagesByStage(req.params.stageId);
+          // Update stage progress — construct from what we already have, no extra DB call
+          const allMessages = [
+            ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+            { role: "assistant" as const, content: aiResponse.content }
+          ];
           const progress = await aiService.calculateProgress(
-            allMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+            allMessages,
             [stage.description] // In production, define more specific goals
           );
           
@@ -449,7 +418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
           console.error("AI service error:", aiError);
-          res.status(201).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
+          res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
         }
       } else {
         res.status(201).json({ userMessage: message });
@@ -632,10 +601,14 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
         5: 'testing',
       };
 
-      for (const stage of stages) {
+      // Batch-fetch all admin prompts once to avoid N queries in the loop
+      const allAdminPrompts = await storage.getAllAdminPrompts();
+      const adminPromptMap = new Map(allAdminPrompts.map(p => [p.targetKey, p]));
+
+      await Promise.allSettled(stages.map(async (stage) => {
         // Get detail level for this stage (default to detailed)
         const detailLevel = preferencesMap.get(stage.id) || "detailed";
-        
+
         // Use stage number for deterministic category mapping, fallback to title-based matching
         const stageCategory = stageCategoryMap[stage.stageNumber] || (() => {
           const titleLower = stage.title.toLowerCase();
@@ -666,10 +639,10 @@ ${detailInstruction}
 Be thorough and specific based on the survey answers provided.`;
 
         try {
-          // Try to get admin prompt from database, fallback to stage's default systemPrompt
-          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          // Use pre-fetched admin prompt map to avoid per-stage DB query
+          const adminPrompt = adminPromptMap.get(`stage_${stage.stageNumber}`);
           const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
-          
+
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
@@ -687,7 +660,7 @@ Be thorough and specific based on the survey answers provided.`;
         } catch (stageError) {
           console.error(`Error generating docs for stage ${stage.title}:`, stageError);
         }
-      }
+      }))
 
       res.json({ message: "Documentation generated successfully" });
     } catch (error) {
@@ -769,7 +742,11 @@ Be thorough and specific based on the survey answers provided.`;
 
       const coreStagesToGenerate = stages.filter(s => s.stageNumber <= 4);
 
-      for (const stage of coreStagesToGenerate) {
+      // Batch-fetch all admin prompts once to avoid N queries in the loop
+      const allAdminPrompts = await storage.getAllAdminPrompts();
+      const adminPromptMap = new Map(allAdminPrompts.map(p => [p.targetKey, p]));
+
+      await Promise.allSettled(coreStagesToGenerate.map(async (stage) => {
         const docPrompt = `Based on this minimal product context, generate content for the "${stage.title}" section.
 
 ${minimalContext}
@@ -777,9 +754,9 @@ ${minimalContext}
 Generate practical, actionable documentation based on the information provided. Be specific but acknowledge where more detail would be helpful. Focus on the core requirements and make reasonable assumptions where needed.${appStyle ? ` The UI/UX should follow a "${appStyle.name}" style direction.` : ''}`;
 
         try {
-          const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+          const adminPrompt = adminPromptMap.get(`stage_${stage.stageNumber}`);
           const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
-          
+
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
@@ -795,7 +772,7 @@ Generate practical, actionable documentation based on the information provided. 
         } catch (stageError) {
           console.error(`Error generating docs for stage ${stage.title}:`, stageError);
         }
-      }
+      }));
 
       res.json({ message: "Documentation generated from minimum details" });
     } catch (error) {
@@ -829,7 +806,7 @@ Generate practical, actionable documentation based on the information provided. 
   });
 
   // Admin Prompts CRUD (protected by isAdmin middleware)
-  app.get("/api/admin/prompts", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/prompts", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
@@ -839,7 +816,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const prompt = await storage.getAdminPrompt(req.params.id);
       if (!prompt) {
@@ -851,7 +828,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.post("/api/admin/prompts", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.post("/api/admin/prompts", authMiddleware, adminMiddleware, async (req: any, res) => {
     try {
       const promptData = insertAdminPromptSchema.parse(req.body);
       const userId = req.user?.claims?.sub || "unknown";
@@ -869,7 +846,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.put("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.put("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req: any, res) => {
     try {
       const updates = insertAdminPromptSchema.partial().parse(req.body);
       const userId = req.user?.claims?.sub || "unknown";
@@ -889,7 +866,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.delete("/api/admin/prompts/:id", isAuthenticated, isAdmin, async (req, res) => {
+  app.delete("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const deleted = await storage.deleteAdminPrompt(req.params.id);
       if (!deleted) {
@@ -902,7 +879,7 @@ Generate practical, actionable documentation based on the information provided. 
   });
 
   // Seed default prompts if none exist
-  app.post("/api/admin/prompts/seed", isAuthenticated, isAdmin, async (req: any, res) => {
+  app.post("/api/admin/prompts/seed", authMiddleware, adminMiddleware, async (req: any, res) => {
     try {
       const existingPrompts = await storage.getAllAdminPrompts();
       if (existingPrompts.length > 0) {
@@ -919,7 +896,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/default-stages", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/default-stages", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const { DEFAULT_STAGES } = await import("@shared/schema");
       res.json(DEFAULT_STAGES);
@@ -928,7 +905,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/interceptor-prompts", isAuthenticated, isAdmin, async (req, res) => {
+  app.get("/api/admin/interceptor-prompts", authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const { INTERCEPTOR_PROMPTS } = await import("@shared/schema");
       res.json(INTERCEPTOR_PROMPTS);

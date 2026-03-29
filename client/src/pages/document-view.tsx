@@ -1,4 +1,6 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
@@ -36,7 +38,7 @@ export default function DocumentViewPage() {
     enabled: !!stageId,
   });
 
-  const documentContent = messages.find((m) => m.role === "assistant")?.content || "";
+  const documentContent = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
 
   const getStageIcon = (stageNumber: number) => {
     const icons: Record<number, typeof FileText> = {
@@ -167,10 +169,8 @@ export default function DocumentViewPage() {
           </div>
         ) : documentContent ? (
           <div className="bg-surface-primary rounded-lg border border-gray-200 p-8">
-            <div className="prose prose-lg max-w-none">
-              <div className="whitespace-pre-wrap text-contrast-high leading-relaxed">
-                {documentContent}
-              </div>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown>
             </div>
           </div>
         ) : (

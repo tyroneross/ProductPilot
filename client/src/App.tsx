@@ -1,22 +1,33 @@
 import { Switch, Route, Redirect } from "wouter";
+import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import WelcomePage from "@/pages/welcome";
-import StylePickerPage from "@/pages/style-picker";
-import DetailsPage from "@/pages/details";
-import ProjectsPage from "@/pages/projects";
-import StagePage from "@/pages/stage";
-import DocumentsPage from "@/pages/documents";
-import DocumentViewPage from "@/pages/document-view";
-import SessionSectionsPage from "@/pages/session-sections";
-import SessionSurveyPage from "@/pages/session-survey";
-import AdminPage from "@/pages/admin";
-import NotFound from "@/pages/not-found";
+
+const WelcomePage = lazy(() => import("@/pages/welcome"));
+const StylePickerPage = lazy(() => import("@/pages/style-picker"));
+const DetailsPage = lazy(() => import("@/pages/details"));
+const ProjectsPage = lazy(() => import("@/pages/projects"));
+const StagePage = lazy(() => import("@/pages/stage"));
+const DocumentsPage = lazy(() => import("@/pages/documents"));
+const DocumentViewPage = lazy(() => import("@/pages/document-view"));
+const SessionSectionsPage = lazy(() => import("@/pages/session-sections"));
+const SessionSurveyPage = lazy(() => import("@/pages/session-survey"));
+const AdminPage = lazy(() => import("@/pages/admin"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+    </div>
+  );
+}
 
 function Router() {
   return (
+    <Suspense fallback={<PageLoader />}>
     <Switch>
       <Route path="/" component={WelcomePage} />
       <Route path="/style" component={StylePickerPage} />
@@ -33,6 +44,7 @@ function Router() {
       <Route path="/admin" component={AdminPage} />
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 
