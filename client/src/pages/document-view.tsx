@@ -111,7 +111,7 @@ export default function DocumentViewPage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4 sticky top-0 z-10">
+      <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button
@@ -161,20 +161,20 @@ export default function DocumentViewPage() {
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         {isRegenerating ? (
-          <div className="bg-surface-primary rounded-lg border border-gray-200 p-12 text-center">
+          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-12 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent mx-auto mb-4"></div>
             <p className="text-description text-contrast-medium">
               Regenerating document with {detailLevel} level...
             </p>
           </div>
         ) : documentContent ? (
-          <div className="bg-surface-primary rounded-lg border border-gray-200 p-8">
-            <div className="prose prose-sm max-w-none dark:prose-invert">
+          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-8">
+            <div className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e]">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown>
             </div>
           </div>
         ) : (
-          <div className="bg-surface-primary rounded-lg border border-gray-200 p-12 text-center">
+          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-12 text-center">
             <p className="text-description text-contrast-medium mb-4">
               No content has been generated for this document yet.
             </p>
@@ -200,7 +200,7 @@ export default function DocumentViewPage() {
           
           <div className="py-4">
             <RadioGroup value={detailLevel} onValueChange={(v) => setDetailLevel(v as "detailed" | "summary")}>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 mb-2 cursor-pointer hover:bg-surface-secondary"
+              <div className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] mb-2 cursor-pointer hover:bg-surface-secondary"
                    onClick={() => setDetailLevel("summary")}>
                 <RadioGroupItem value="summary" id="summary" className="mt-1" />
                 <div>
@@ -208,7 +208,7 @@ export default function DocumentViewPage() {
                   <p className="text-description text-contrast-medium">Concise overview with key points</p>
                 </div>
               </div>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-surface-secondary"
+              <div className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] cursor-pointer hover:bg-surface-secondary"
                    onClick={() => setDetailLevel("detailed")}>
                 <RadioGroupItem value="detailed" id="detailed" className="mt-1" />
                 <div>

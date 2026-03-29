@@ -105,7 +105,7 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
                   {htmlContent ? (
                     <div className="space-y-3">
                       <p className="text-small whitespace-pre-wrap">{message.content.replace(/```html\n[\s\S]*?\n```/, "[See wireframe preview below]")}</p>
-                      <div className="border border-gray-300 rounded-lg overflow-hidden" style={{ height: "500px" }}>
+                      <div className="border border-[rgba(200,180,160,0.08)] rounded-lg overflow-hidden" style={{ height: "500px" }}>
                         <WireframePreview htmlContent={htmlContent} />
                       </div>
                     </div>
@@ -135,7 +135,7 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
         <div ref={messagesEndRef} />
       </div>
       
-      <div className="border-t border-gray-200 p-4">
+      <div className="border-t border-[rgba(200,180,160,0.08)] p-4">
         <form onSubmit={handleSubmit} className="flex space-x-3">
           <Input
             type="text"

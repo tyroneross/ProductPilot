@@ -55,12 +55,12 @@ function formatDate(date: string | null | undefined): string {
 
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
-    stage: "bg-blue-50 text-blue-700",
-    discovery: "bg-purple-50 text-purple-700",
-    system: "bg-gray-100 text-gray-600",
+    stage: "bg-[rgba(240,182,94,0.12)] text-[#f0b65e]",
+    discovery: "bg-[rgba(200,180,160,0.08)] text-[#a89a8c]",
+    system: "bg-[rgba(200,180,160,0.08)] text-[#6b5d52]",
   };
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${colors[scope] ?? "bg-gray-100 text-gray-600"}`}>
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${colors[scope] ?? "bg-[rgba(200,180,160,0.08)] text-[#6b5d52]"}`}>
       {scope}
     </span>
   );
@@ -99,17 +99,17 @@ function PromptItem({
 
   return (
     <div
-      className={`px-4 py-4 ${isEditing ? "bg-gray-50" : "bg-white"}`}
+      className={`px-4 py-4 ${isEditing ? "bg-[#231f1b]" : "bg-[#1a1714]"}`}
       data-testid={`card-prompt-${prompt.id}`}
     >
       {/* Title line */}
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
-            <span className="text-[15px] font-semibold text-gray-900 leading-snug">{prompt.label}</span>
+            <span className="text-[15px] font-semibold text-[#f5f0eb] leading-snug">{prompt.label}</span>
             <ScopeBadge scope={prompt.scope} />
             {isDefault && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-[rgba(200,180,160,0.08)] text-[#6b5d52]">
                 Default
               </span>
             )}
@@ -117,11 +117,11 @@ function PromptItem({
 
           {/* Description line */}
           {prompt.description && (
-            <p className="text-[13px] text-gray-600 mb-1.5 leading-snug">{prompt.description}</p>
+            <p className="text-[13px] text-[#a89a8c] mb-1.5 leading-snug">{prompt.description}</p>
           )}
 
           {/* Metadata line */}
-          <p className="text-[11px] text-gray-400 leading-snug flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <p className="text-[11px] text-[#6b5d52] leading-snug flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span>{prompt.targetKey}</span>
             {prompt.stageNumber != null && <span>·</span>}
             {prompt.stageNumber != null && <span>Stage {prompt.stageNumber}</span>}
@@ -140,7 +140,7 @@ function PromptItem({
         {!isEditing && (
           <div className="flex items-center gap-1 shrink-0 mt-0.5">
             <button
-              className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="p-1.5 rounded text-[#6b5d52] hover:text-[#f5f0eb] hover:bg-[rgba(200,180,160,0.08)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               onClick={onEdit}
               disabled={isDefault}
               title={isDefault ? "Seed prompts first to customize defaults" : "Edit prompt"}
@@ -149,7 +149,7 @@ function PromptItem({
               <Pencil className="w-3.5 h-3.5" />
             </button>
             <button
-              className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="p-1.5 rounded text-[#6b5d52] hover:text-red-400 hover:bg-[rgba(200,180,160,0.08)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               disabled={isDefault}
               onClick={onDelete}
               title={isDefault ? "Seed prompts first to delete defaults" : "Delete prompt"}
@@ -164,12 +164,12 @@ function PromptItem({
       {/* Content block — collapsed or expanded */}
       {!isEditing && (
         <div className="mt-2.5">
-          <pre className="text-[12px] text-gray-500 bg-gray-50 border border-gray-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+          <pre className="text-[12px] text-[#a89a8c] bg-[#231f1b] border border-[rgba(200,180,160,0.08)] rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
             {expanded ? prompt.content : previewText}
           </pre>
           {prompt.content.length > PREVIEW_CHARS && (
             <button
-              className="mt-1.5 text-[11px] text-gray-400 hover:text-gray-600 flex items-center gap-0.5 transition-colors"
+              className="mt-1.5 text-[11px] text-[#6b5d52] hover:text-[#a89a8c] flex items-center gap-0.5 transition-colors"
               onClick={() => setExpanded((v) => !v)}
             >
               {expanded ? (
@@ -184,7 +184,7 @@ function PromptItem({
 
       {/* Inline edit form */}
       {isEditing && (
-        <div className="mt-3 pt-3 border-t border-gray-200">
+        <div className="mt-3 pt-3 border-t border-[rgba(200,180,160,0.08)]">
           <PromptForm
             initialData={prompt}
             onSubmit={onSave}
@@ -209,7 +209,7 @@ function InterceptorItem({ interceptor }: { interceptor: InterceptorPrompt }) {
 
   return (
     <div
-      className="px-4 py-4 bg-white border-l-2 border-orange-300"
+      className="px-4 py-4 bg-[#1a1714] border-l-2 border-orange-400"
       data-testid={`card-interceptor-${interceptor.id}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -217,8 +217,8 @@ function InterceptorItem({ interceptor }: { interceptor: InterceptorPrompt }) {
           {/* Title line */}
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
             <Zap className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-            <span className="text-[15px] font-semibold text-gray-900 leading-snug">{interceptor.label}</span>
-            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${interceptor.isEnabled ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+            <span className="text-[15px] font-semibold text-[#f5f0eb] leading-snug">{interceptor.label}</span>
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${interceptor.isEnabled ? "bg-[rgba(74,222,128,0.12)] text-green-400" : "bg-[rgba(200,180,160,0.08)] text-[#6b5d52]"}`}>
               {interceptor.isEnabled ? "Active" : "Disabled"}
             </span>
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-50 text-orange-600">
@@ -228,25 +228,25 @@ function InterceptorItem({ interceptor }: { interceptor: InterceptorPrompt }) {
 
           {/* Description */}
           {interceptor.description && (
-            <p className="text-[13px] text-gray-600 mb-1.5 leading-snug">{interceptor.description}</p>
+            <p className="text-[13px] text-[#a89a8c] mb-1.5 leading-snug">{interceptor.description}</p>
           )}
 
           {/* Metadata */}
-          <p className="text-[11px] text-gray-400 leading-snug">
-            Trigger: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono text-[11px]">{interceptor.triggerCondition}</code>
+          <p className="text-[11px] text-[#6b5d52] leading-snug">
+            Trigger: <code className="bg-[rgba(200,180,160,0.08)] px-1 py-0.5 rounded font-mono text-[11px]">{interceptor.triggerCondition}</code>
           </p>
         </div>
       </div>
 
       {/* System prompt preview */}
       <div className="mt-2.5">
-        <p className="text-[11px] font-medium text-gray-400 mb-1">System prompt</p>
-        <pre className="text-[12px] text-gray-500 bg-orange-50/50 border border-orange-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+        <p className="text-[11px] font-medium text-[#6b5d52] mb-1">System prompt</p>
+        <pre className="text-[12px] text-[#a89a8c] bg-[rgba(240,182,94,0.04)] border border-orange-900/30 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
           {expanded ? interceptor.systemPrompt : previewText}
         </pre>
         {interceptor.systemPrompt.length > PREVIEW_CHARS && (
           <button
-            className="mt-1.5 text-[11px] text-gray-400 hover:text-gray-600 flex items-center gap-0.5 transition-colors"
+            className="mt-1.5 text-[11px] text-[#6b5d52] hover:text-[#a89a8c] flex items-center gap-0.5 transition-colors"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? (
@@ -261,8 +261,8 @@ function InterceptorItem({ interceptor }: { interceptor: InterceptorPrompt }) {
       {/* User prompt template */}
       {interceptor.userPromptTemplate && (
         <div className="mt-2">
-          <p className="text-[11px] font-medium text-gray-400 mb-1">User prompt template</p>
-          <pre className="text-[12px] text-gray-500 bg-orange-50/50 border border-orange-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-20">
+          <p className="text-[11px] font-medium text-[#6b5d52] mb-1">User prompt template</p>
+          <pre className="text-[12px] text-[#a89a8c] bg-[rgba(240,182,94,0.04)] border border-orange-900/30 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-20">
             {interceptor.userPromptTemplate.length > 200
               ? interceptor.userPromptTemplate.slice(0, 200) + "…"
               : interceptor.userPromptTemplate}
@@ -284,11 +284,11 @@ function EmptyState({
 }) {
   return (
     <div className="py-16 text-center px-6">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
-        <Shield className="w-5 h-5 text-gray-400" />
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[rgba(200,180,160,0.08)] mb-4">
+        <Shield className="w-5 h-5 text-[#6b5d52]" />
       </div>
-      <h3 className="text-[15px] font-semibold text-gray-800 mb-1.5">No prompts configured yet</h3>
-      <p className="text-[13px] text-gray-500 max-w-xs mx-auto mb-5 leading-relaxed">
+      <h3 className="text-[15px] font-semibold text-[#f5f0eb] mb-1.5">No prompts configured yet</h3>
+      <p className="text-[13px] text-[#a89a8c] max-w-xs mx-auto mb-5 leading-relaxed">
         Stage prompts tell the AI how to respond at each step of the product discovery flow.
         Seed the defaults to get started instantly, or create a custom prompt above.
       </p>
@@ -354,7 +354,7 @@ function PromptForm({
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Scope</label>
+          <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Scope</label>
           <Select
             value={formData.scope}
             onValueChange={(v) => setFormData({ ...formData, scope: v })}
@@ -370,7 +370,7 @@ function PromptForm({
           </Select>
         </div>
         <div>
-          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Target Key</label>
+          <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Target Key</label>
           <Input
             className="h-8 text-[13px]"
             value={formData.targetKey}
@@ -383,7 +383,7 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Label</label>
+        <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Label</label>
         <Input
           className="h-8 text-[13px]"
           value={formData.label}
@@ -395,7 +395,7 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Description</label>
+        <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Description</label>
         <Input
           className="h-8 text-[13px]"
           value={formData.description}
@@ -406,7 +406,7 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Prompt Content</label>
+        <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Prompt Content</label>
         <Textarea
           value={formData.content}
           onChange={(e) => setFormData({ ...formData, content: e.target.value })}
@@ -416,14 +416,14 @@ function PromptForm({
           className="font-mono text-[12px] leading-relaxed resize-y"
           data-testid="textarea-prompt-content"
         />
-        <p className="mt-1 text-[11px] text-gray-400">
+        <p className="mt-1 text-[11px] text-[#6b5d52]">
           {contentWordCount} words · {contentCharCount} characters
         </p>
       </div>
 
       {formData.scope === "stage" && (
         <div className="w-32">
-          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Stage Number</label>
+          <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Stage Number</label>
           <Input
             className="h-8 text-[13px]"
             type="number"
@@ -480,10 +480,10 @@ function SectionHeader({
   accent?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 sticky top-[57px] z-[5]">
+    <div className="flex items-center gap-2 px-4 py-2.5 bg-[#231f1b] border-b border-[rgba(200,180,160,0.08)] sticky top-[57px] z-[5]">
       {accent && <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
-      <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide">{title}</span>
-      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-gray-200 text-[11px] font-semibold text-gray-600">
+      <span className="text-[12px] font-semibold text-[#6b5d52] uppercase tracking-wide">{title}</span>
+      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-[rgba(200,180,160,0.08)] text-[11px] font-semibold text-[#a89a8c]">
         {count}
       </span>
     </div>
@@ -657,22 +657,22 @@ export default function AdminPage() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      <div className="min-h-screen flex items-center justify-center bg-[#110f0d]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#6b5d52]" />
       </div>
     );
   }
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Card className="w-full max-w-sm border-gray-200 shadow-sm">
+      <div className="min-h-screen flex items-center justify-center bg-[#110f0d]">
+        <Card className="w-full max-w-sm border-[rgba(200,180,160,0.08)] shadow-sm bg-[#1a1714]">
           <CardHeader className="text-center pb-4">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 mx-auto mb-3">
-              <Shield className="w-5 h-5 text-gray-500" />
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[rgba(200,180,160,0.08)] mx-auto mb-3">
+              <Shield className="w-5 h-5 text-[#a89a8c]" />
             </div>
-            <CardTitle className="text-[16px] font-semibold">Admin Panel</CardTitle>
-            <p className="text-[13px] text-gray-500 mt-1">
+            <CardTitle className="text-[16px] font-semibold text-[#f5f0eb]">Admin Panel</CardTitle>
+            <p className="text-[13px] text-[#a89a8c] mt-1">
               Sign in with your GitHub account to access the admin panel.
             </p>
           </CardHeader>
@@ -696,18 +696,18 @@ export default function AdminPage() {
   const hasNoPrompts = !promptsLoading && !error && filteredPrompts.length === 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#110f0d]">
 
       {/* ── Sticky header ──────────────────────────────────────────────────── */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 h-[57px]">
+      <header className="bg-[#1a1714] border-b border-[rgba(200,180,160,0.08)] sticky top-0 z-10 h-[57px]">
         <div className="max-w-4xl mx-auto px-4 h-full flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-gray-500 shrink-0" />
-            <span className="text-[15px] font-semibold text-gray-900">Prompt Manager</span>
+            <Shield className="w-4 h-4 text-[#a89a8c] shrink-0" />
+            <span className="text-[15px] font-semibold text-[#f5f0eb]">Prompt Manager</span>
           </div>
           <div className="flex items-center gap-3">
             <span
-              className="text-[12px] text-gray-500 hidden sm:inline truncate max-w-[180px]"
+              className="text-[12px] text-[#a89a8c] hidden sm:inline truncate max-w-[180px]"
               data-testid="text-admin-user"
             >
               {user?.email || user?.firstName || "Admin"}
@@ -793,21 +793,21 @@ export default function AdminPage() {
         </div>
 
         {/* ── Stage Prompts list ────────────────────────────────────────────── */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-6">
+        <div className="border border-[rgba(200,180,160,0.08)] rounded-lg overflow-hidden bg-[#1a1714] mb-6">
           <SectionHeader title="Stage Prompts" count={filteredPrompts.length} />
 
           {promptsLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              <Loader2 className="w-5 h-5 animate-spin text-[#6b5d52]" />
             </div>
           ) : error ? (
             <div className="py-10 text-center">
-              <p className="text-[13px] text-gray-500">Failed to load prompts. Please try again.</p>
+              <p className="text-[13px] text-[#a89a8c]">Failed to load prompts. Please try again.</p>
             </div>
           ) : hasNoPrompts ? (
             <EmptyState onSeed={handleSeedConfirm} isSeeding={seedMutation.isPending} />
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-[rgba(200,180,160,0.06)]">
               {filteredPrompts.map((prompt) => (
                 <PromptItem
                   key={prompt.id}
@@ -826,7 +826,7 @@ export default function AdminPage() {
 
         {/* ── Interceptors list ─────────────────────────────────────────────── */}
         {interceptorPrompts.length > 0 && (
-          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-6">
+          <div className="border border-[rgba(200,180,160,0.08)] rounded-lg overflow-hidden bg-[#1a1714] mb-6">
             <SectionHeader title="Interceptors" count={interceptorPrompts.length} accent />
 
             {/* Read-only notice */}
@@ -839,7 +839,7 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-[rgba(200,180,160,0.06)]">
               {interceptorPrompts.map((interceptor) => (
                 <InterceptorItem key={interceptor.id} interceptor={interceptor} />
               ))}

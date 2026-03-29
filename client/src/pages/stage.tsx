@@ -70,7 +70,7 @@ export default function StagePage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary flex flex-col">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
+      <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button
@@ -108,7 +108,7 @@ export default function StagePage() {
       </header>
 
       <div className="flex-1 flex">
-        <div className="w-80 border-r border-gray-200">
+        <div className="w-80 border-r border-[rgba(200,180,160,0.08)] bg-[#231f1b]">
           <InsightsPanel stage={stage} />
         </div>
         <div className="flex-1 flex flex-col">

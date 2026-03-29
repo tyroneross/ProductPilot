@@ -25,7 +25,7 @@ const isActive = stage.progress > 0 && stage.progress < 100;
   return (
     <div 
       className={`bg-surface-primary rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition-shadow ${
-        isActive ? 'border-2 border-accent' : 'border border-gray-200'
+        isActive ? 'border-2 border-accent' : 'border border-[rgba(200,180,160,0.08)]'
       }`}
       onClick={handleCardClick}
       data-testid={`card-stage-${stage.stageNumber}`}

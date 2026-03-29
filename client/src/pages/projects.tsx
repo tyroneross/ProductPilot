@@ -33,7 +33,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary">
+      <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
@@ -97,7 +97,7 @@ export default function Dashboard() {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div
-                className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-6 hover:shadow-md transition-shadow cursor-pointer"
                 onClick={() => setLocation(`/documents/${currentProject.id}`)}
                 data-testid="card-view-documents"
               >
@@ -120,7 +120,7 @@ export default function Dashboard() {
               </div>
 
               <div
-                className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-6 hover:shadow-md transition-shadow cursor-pointer"
                 onClick={() => setLocation(`/session/survey?projectId=${currentProject.id}`)}
                 data-testid="card-continue-building"
               >
@@ -158,8 +158,8 @@ export default function Dashboard() {
 
         {!currentProject && !projectsLoading && projects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 space-y-4">
-            <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-orange-500" />
+            <div className="w-12 h-12 rounded-full bg-[rgba(240,182,94,0.1)] flex items-center justify-center">
+              <Sparkles className="w-6 h-6 text-[#f0b65e]" />
             </div>
             <h3 className="text-h4 font-medium text-contrast-high">No projects yet</h3>
             <p className="text-description text-contrast-medium text-center max-w-sm">
