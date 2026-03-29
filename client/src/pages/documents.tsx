@@ -1,312 +1,560 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, FileText, Code, Layout, ListTodo, Palette, Plus, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { ArrowLeft, FileText, ListTodo, Layout, Code, BookOpen, Layers } from "lucide-react";
 import type { Project, Stage } from "@shared/schema";
+
+const SHIMMER_STYLE: React.CSSProperties = {
+  background: "linear-gradient(90deg, rgba(200,180,160,0.05) 0%, rgba(200,180,160,0.10) 40%, rgba(200,180,160,0.05) 80%)",
+  backgroundSize: "200% 100%",
+  animation: "shimmer 1.8s ease-in-out infinite",
+};
+
+const SPINNER_STYLE: React.CSSProperties = {
+  width: 11,
+  height: 11,
+  border: "1.5px solid rgba(240,182,94,0.25)",
+  borderTopColor: "#f0b65e",
+  borderRadius: "50%",
+  animation: "spin 0.8s linear infinite",
+  flexShrink: 0,
+};
+
+const DOC_TYPES = [
+  {
+    stageNumber: 1,
+    title: "Requirements Definition",
+    description: "Core users, problem space, and success metrics",
+    icon: "📋",
+  },
+  {
+    stageNumber: 2,
+    title: "Product Requirements",
+    description: "Feature scope, user stories, and acceptance criteria",
+    icon: "📄",
+  },
+  {
+    stageNumber: 3,
+    title: "UI Wireframes",
+    description: "Page layouts, navigation flow, and interaction patterns",
+    icon: "🖼️",
+  },
+  {
+    stageNumber: 4,
+    title: "System Architecture",
+    description: "Tech stack, data model, and service design",
+    icon: "🗄️",
+  },
+  {
+    stageNumber: 5,
+    title: "Coding Prompts",
+    description: "Implementation instructions for your AI coding assistant",
+    icon: "💻",
+  },
+  {
+    stageNumber: 6,
+    title: "Development Guide",
+    description: "Build phases, milestones, and deployment strategy",
+    icon: "🚀",
+  },
+];
 
 export default function DocumentsPage() {
   const { projectId } = useParams();
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
-  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<Stage | null>(null);
-  const [detailLevel, setDetailLevel] = useState<"detailed" | "summary">("detailed");
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const { data: project } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
     enabled: !!projectId,
   });
 
-  const { data: stages = [], refetch: refetchStages } = useQuery<Stage[]>({
+  const { data: stages = [] } = useQuery<Stage[]>({
     queryKey: ["/api/projects", projectId, "stages"],
     enabled: !!projectId,
+    refetchInterval: (query) => {
+      const data = query.state.data as Stage[] | undefined;
+      const hasGenerating = data?.some((s) => s.progress > 0 && s.progress < 100);
+      return hasGenerating ? 3000 : false;
+    },
   });
 
-  const handleGenerateClick = (stage: Stage, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSelectedStage(stage);
-    setShowGenerateDialog(true);
-  };
+  const docs = DOC_TYPES.map((docType) => ({
+    ...docType,
+    stage: stages.find((s) => s.stageNumber === docType.stageNumber),
+  }));
 
-  const handleGenerate = async () => {
-    if (!selectedStage) return;
-    
-    setIsGenerating(true);
-    setShowGenerateDialog(false);
-    
-    try {
-      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
-        documentPreferences: [{ stageId: selectedStage.id, detailLevel }],
-      });
-      
-      await refetchStages();
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
-      
-      toast({
-        title: "Document generated",
-        description: `${selectedStage.title} has been generated.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Generation failed",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsGenerating(false);
-      setSelectedStage(null);
-    }
-  };
+  const completedDocs = docs.filter((d) => d.stage && d.stage.progress === 100);
+  const generatingDocs = docs.filter((d) => d.stage && d.stage.progress > 0 && d.stage.progress < 100);
+  const isGenerating = generatingDocs.length > 0;
+
+  // For generation progress bar
+  const totalDocs = docs.length;
+  const completedCount = completedDocs.length;
+  const currentlyGeneratingDoc = generatingDocs[0];
+  const progressPct = totalDocs > 0 ? (completedCount / totalDocs) * 100 : 0;
+
+  // For "Refine with AI" — navigate to first incomplete stage
+  const firstIncompleteStage = docs.find((d) => !d.stage || d.stage.progress < 100)?.stage;
+
+  // Stat line: most recent updatedAt among completed stages
+  const lastGenerated: Date | null = completedDocs
+    .map((d) => d.stage?.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(t as string | Date))
+    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+  const timeAgo = lastGenerated
+    ? (() => {
+        const diffMs = Date.now() - lastGenerated.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 1) return "just now";
+        if (diffMin < 60) return `${diffMin} min ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        return `${diffHr}h ago`;
+      })()
+    : null;
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-surface-secondary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#110f0d" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            border: "2px solid rgba(240,182,94,0.2)",
+            borderTopColor: "#f0b65e",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  const documents = [
-    {
-      id: "requirements",
-      title: "Requirements Definition",
-      icon: FileText,
-      stage: stages.find((s) => s.stageNumber === 1),
-      description: "User personas, use cases, and MVP scope",
-    },
-    {
-      id: "prd",
-      title: "Product Requirements Document",
-      icon: ListTodo,
-      stage: stages.find((s) => s.stageNumber === 2),
-      description: "User stories, features, and success metrics",
-    },
-    {
-      id: "ui-design",
-      title: "UI Design & Wireframes",
-      icon: Palette,
-      stage: stages.find((s) => s.stageNumber === 3),
-      description: "Simple wireframe mockups with orange theme",
-    },
-    {
-      id: "architecture",
-      title: "System Architecture",
-      icon: Layout,
-      stage: stages.find((s) => s.stageNumber === 4),
-      description: "Technical design and architecture decisions",
-    },
-    {
-      id: "prompts",
-      title: "Coding Prompts",
-      icon: Code,
-      stage: stages.find((s) => s.stageNumber === 5),
-      description: "AI-optimized implementation instructions",
-    },
-    {
-      id: "guide",
-      title: "Development Guide",
-      icon: ListTodo,
-      stage: stages.find((s) => s.stageNumber === 6),
-      description: "Implementation roadmap and milestones",
-    },
-  ];
-
-  const generatedDocs = documents.filter(doc => doc.stage && doc.stage.progress === 100);
-  const pendingDocs = documents.filter(doc => doc.stage && doc.stage.progress < 100);
-
   return (
-    <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center space-x-4 min-w-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocation("/projects")}
-              className="min-h-[44px] min-w-[44px] shrink-0"
-              data-testid="button-back-projects"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div className="min-w-0">
-              <h1 className="text-h3 font-medium text-contrast-high truncate">{project.name}</h1>
-              <p className="text-description text-contrast-medium hidden sm:block">Product documentation and iteration</p>
-            </div>
-          </div>
-          <Button
-            onClick={() => setLocation(`/session/survey?projectId=${project.id}`)}
-            className="btn-primary min-h-[44px] shrink-0"
-            data-testid="button-continue-building"
+    <div className="min-h-screen flex flex-col" style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      {/* Keyframes */}
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes shimmer { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }
+        @keyframes glow-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+      `}</style>
+
+      {/* Nav */}
+      <nav
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+          height: 56,
+          display: "flex",
+          alignItems: "center",
+          background: "rgba(17,15,13,0.80)",
+          backdropFilter: "blur(12px) saturate(1.2)",
+          WebkitBackdropFilter: "blur(12px) saturate(1.2)",
+          borderBottom: "1px solid rgba(200,180,160,0.08)",
+        }}
+        aria-label="Main navigation"
+      >
+        <div
+          style={{
+            maxWidth: "56rem",
+            width: "100%",
+            margin: "0 auto",
+            padding: "0 1.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <button
+            onClick={() => setLocation("/")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: 18,
+              color: "#f5f0eb",
+              letterSpacing: "-0.02em",
+              lineHeight: 1,
+              padding: 0,
+            }}
           >
-            <span className="hidden sm:inline">Continue Building</span>
-            <span className="sm:hidden">Continue</span>
-          </Button>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                background: "#f0b65e",
+                transform: "rotate(45deg)",
+                borderRadius: 2,
+                flexShrink: 0,
+                display: "inline-block",
+              }}
+              aria-hidden="true"
+            />
+            ProductPilot
+          </button>
+          <ul
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "1.5rem",
+              listStyle: "none",
+              margin: 0,
+              padding: 0,
+            }}
+          >
+            {[
+              { label: "Projects", href: "/projects" },
+            ].map(({ label, href }) => (
+              <li key={label}>
+                <button
+                  onClick={() => setLocation(href)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: "#a89a8c",
+                    transition: "color 0.2s",
+                    padding: 0,
+                    fontFamily: "inherit",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#f0b65e")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
-      </header>
+      </nav>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Generated Documents Section */}
-        {generatedDocs.length > 0 && (
-          <div className="mb-8">
-            <div className="mb-4">
-              <h2 className="text-title text-contrast-high mb-1">Your Documents</h2>
-              <p className="text-description text-contrast-medium">
-                Click any document to view or refine it.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {generatedDocs.map((doc) => {
-                const Icon = doc.icon;
-                return (
-                  <div
-                    key={doc.id}
-                    className="bg-surface-primary rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
-                    onClick={() => doc.stage && setLocation(`/document/${projectId}/${doc.stage.id}`)}
-                    data-testid={`document-${doc.id}`}
-                  >
-                    <div className="flex flex-col space-y-3">
-                      <div className="p-3 rounded-lg self-start bg-accent">
-                        <Icon className="w-6 h-6 text-surface-primary" />
-                      </div>
-                      <div>
-                        <h3 className="text-title text-contrast-high mb-1">{doc.title}</h3>
-                        <p className="text-description text-contrast-medium mb-3">{doc.description}</p>
-                        <div className="flex items-center space-x-3">
-                          <div className="flex-1 bg-surface-secondary rounded-full h-2">
-                            <div
-                              className="bg-accent h-2 rounded-full transition-all duration-300"
-                              style={{ width: `100%` }}
-                            />
-                          </div>
-                          <span className="text-metadata text-accent font-medium">
-                            Complete
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+      {/* Main */}
+      <main style={{ flex: 1 }}>
+        <div
+          style={{
+            maxWidth: "44rem",
+            margin: "0 auto",
+            padding: "2.5rem 1.5rem 3rem",
+          }}
+        >
+          {/* Breadcrumb */}
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={() => setLocation("/projects")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "#a89a8c",
+                fontSize: 13,
+                padding: 0,
+                fontFamily: "inherit",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#f5f0eb")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6 }}>
+                <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {project.name}
+            </button>
           </div>
-        )}
 
-        {/* Pending Documents Section */}
-        {pendingDocs.length > 0 && (
-          <div className="mb-8">
-            <div className="mb-4">
-              <h2 className="text-title text-contrast-high mb-1">Available to Generate</h2>
-              <p className="text-description text-contrast-medium">
-                These documents can be generated from your survey data.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {pendingDocs.map((doc) => {
-                const Icon = doc.icon;
-                const isCurrentlyGenerating = isGenerating && selectedStage?.id === doc.stage?.id;
-                
-                return (
-                  <div
-                    key={doc.id}
-                    className="bg-surface-primary rounded-lg border border-gray-200 p-6 opacity-70"
-                    data-testid={`document-pending-${doc.id}`}
-                  >
-                    <div className="flex flex-col space-y-3">
-                      <div className="p-3 rounded-lg self-start bg-gray-300">
-                        <Icon className="w-6 h-6 text-gray-500" />
-                      </div>
-                      <div>
-                        <h3 className="text-title text-contrast-medium mb-1">{doc.title}</h3>
-                        <p className="text-description text-contrast-low mb-3">{doc.description}</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          disabled={isGenerating}
-                          onClick={(e) => doc.stage && handleGenerateClick(doc.stage, e)}
-                          data-testid={`button-generate-${doc.id}`}
-                        >
-                          {isCurrentlyGenerating ? (
-                            <>
-                              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                              Generating...
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="w-4 h-4 mr-2" />
-                              Generate
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {generatedDocs.length === 0 && pendingDocs.length === 0 && (
-          <div className="bg-surface-primary rounded-lg border border-gray-200 p-8 text-center">
-            <p className="text-description text-contrast-medium">
-              No documents available. Click "Continue Building" to complete your survey first.
+          {/* Page header */}
+          <header style={{ marginBottom: "1.75rem" }}>
+            <h1
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                color: "#f5f0eb",
+                marginBottom: 4,
+                margin: 0,
+              }}
+            >
+              Your Documents
+            </h1>
+            <p
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                color: "#6b5d52",
+                marginTop: 4,
+              }}
+            >
+              {totalDocs} documents{timeAgo ? ` · Generated ${timeAgo}` : ""}
             </p>
-          </div>
-        )}
-      </main>
+          </header>
 
-      {/* Generate Dialog */}
-      <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Generate {selectedStage?.title}</DialogTitle>
-            <DialogDescription>
-              Choose the level of detail for this document.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="py-4">
-            <RadioGroup value={detailLevel} onValueChange={(v) => setDetailLevel(v as "detailed" | "summary")}>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 mb-2 cursor-pointer hover:bg-surface-secondary"
-                   onClick={() => setDetailLevel("summary")}>
-                <RadioGroupItem value="summary" id="summary" className="mt-1" />
-                <div>
-                  <Label htmlFor="summary" className="text-title font-medium cursor-pointer">Summary</Label>
-                  <p className="text-description text-contrast-medium">Concise overview with key points</p>
-                </div>
+          {/* Generation progress — only shown while generating */}
+          {isGenerating && (
+            <div
+              role="status"
+              aria-label={`Generating ${currentlyGeneratingDoc?.title ?? ""}, ${completedCount} of ${totalDocs}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: "1.5rem",
+                padding: "10px 14px",
+                background: "#1a1714",
+                border: "1px solid rgba(200,180,160,0.08)",
+                borderRadius: 7,
+              }}
+            >
+              <span style={SPINNER_STYLE} aria-hidden="true" />
+              <span style={{ fontSize: 12, color: "#a89a8c", flex: 1 }}>
+                Generating {currentlyGeneratingDoc?.title ?? ""}…
+              </span>
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  color: "#6b5d52",
+                  flexShrink: 0,
+                }}
+              >
+                {completedCount} of {totalDocs}
+              </span>
+              <div
+                style={{
+                  width: 80,
+                  height: 2,
+                  background: "rgba(200,180,160,0.08)",
+                  borderRadius: 9999,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+                aria-hidden="true"
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progressPct}%`,
+                    background: "#f0b65e",
+                    borderRadius: 9999,
+                    animation: "glow-pulse 1.6s ease-in-out infinite",
+                    transition: "width 0.4s ease",
+                  }}
+                />
               </div>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-surface-secondary"
-                   onClick={() => setDetailLevel("detailed")}>
-                <RadioGroupItem value="detailed" id="detailed" className="mt-1" />
-                <div>
-                  <Label htmlFor="detailed" className="text-title font-medium cursor-pointer">Detailed</Label>
-                  <p className="text-description text-contrast-medium">Comprehensive document with full details</p>
-                </div>
-              </div>
-            </RadioGroup>
+            </div>
+          )}
+
+          {/* Document list */}
+          <section aria-label="Generated documents">
+            <div
+              style={{
+                border: "1px solid rgba(200,180,160,0.08)",
+                borderRadius: 8,
+                overflow: "hidden",
+                marginBottom: "1.5rem",
+              }}
+            >
+              {docs.map((doc, idx) => {
+                const isComplete = doc.stage && doc.stage.progress === 100;
+                const isPending = !isComplete;
+
+                return (
+                  <div
+                    key={doc.stageNumber}
+                    aria-busy={isPending ? true : undefined}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "14px 18px 14px 16px",
+                      borderBottom: idx < docs.length - 1 ? "1px solid rgba(200,180,160,0.06)" : "none",
+                      borderLeft: isComplete ? "2px solid #f0b65e" : "2px solid transparent",
+                      transition: "background 0.12s",
+                      cursor: isComplete ? "pointer" : "default",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isComplete) e.currentTarget.style.background = "rgba(200,180,160,0.03)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                    onClick={() => {
+                      if (isComplete && doc.stage) {
+                        setLocation(`/document/${projectId}/${doc.stage.id}`);
+                      }
+                    }}
+                  >
+                    {/* Icon */}
+                    <span
+                      aria-hidden="true"
+                      style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: "center" }}
+                    >
+                      {doc.icon}
+                    </span>
+
+                    {/* Body */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: "#f5f0eb",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {doc.title}
+                      </div>
+                      {isComplete ? (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#a89a8c",
+                            marginTop: 1,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {doc.description}
+                        </div>
+                      ) : (
+                        <div
+                          aria-hidden="true"
+                          style={{
+                            display: "inline-block",
+                            marginTop: 3,
+                            width: 220,
+                            height: 11,
+                            borderRadius: 4,
+                            ...SHIMMER_STYLE,
+                          }}
+                        />
+                      )}
+                    </div>
+
+                    {/* View link */}
+                    {isComplete && doc.stage ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLocation(`/document/${projectId}/${doc.stage!.id}`);
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: "#f0b65e",
+                          flexShrink: 0,
+                          padding: 0,
+                          fontFamily: "inherit",
+                          textDecoration: "none",
+                          transition: "color 0.15s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                      >
+                        View
+                      </button>
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: "#6b5d52",
+                          flexShrink: 0,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        View
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Bottom actions */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingTop: "1.25rem",
+            }}
+          >
+            <button
+              onClick={() => {
+                if (firstIncompleteStage) {
+                  setLocation(`/stage/${firstIncompleteStage.id}`);
+                } else {
+                  setLocation(`/session/survey?projectId=${projectId}`);
+                }
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                border: "1px solid rgba(240,182,94,0.30)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "#f0b65e",
+                fontSize: 13,
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                transition: "border-color 0.2s, background 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                e.currentTarget.style.background = "rgba(240,182,94,0.05)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              Refine with AI
+            </button>
+
+            <button
+              style={{
+                background: "none",
+                border: "none",
+                color: "#6b5d52",
+                fontSize: 13,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                padding: 0,
+                transition: "color 0.2s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#a89a8c")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#6b5d52")}
+              onClick={() => {
+                // TODO: Implement export — no backend endpoint exists yet
+                console.log("Export All clicked");
+              }}
+            >
+              Export All
+            </button>
           </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleGenerate} className="btn-primary">
-              Generate
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </main>
     </div>
   );
 }
