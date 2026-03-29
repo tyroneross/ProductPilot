@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -6,13 +6,20 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Loader2, LogIn, LogOut, Plus, Pencil, Trash2, Save, X, RefreshCw, Shield, AlertTriangle, Zap } from "lucide-react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Loader2, LogIn, LogOut, Plus, Pencil, Trash2, Save, X,
+  RefreshCw, Shield, AlertTriangle, Zap, ChevronDown, ChevronUp,
+} from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { AdminPrompt } from "@shared/schema";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface InterceptorPrompt {
   id: string;
@@ -26,479 +33,285 @@ interface InterceptorPrompt {
   isEnabled: boolean;
 }
 
-export default function AdminPage() {
-  const { user, isLoading: authLoading, isAuthenticated, logout } = useAuth();
-  const { toast } = useToast();
-  const [editingPrompt, setEditingPrompt] = useState<AdminPrompt | null>(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [filterScope, setFilterScope] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<string>("stage");
-  const [confirmDialog, setConfirmDialog] = useState<{
-    open: boolean;
-    title: string;
-    description: string;
-    onConfirm: () => void;
-  }>({ open: false, title: "", description: "", onConfirm: () => {} });
+interface ConfirmDialog {
+  open: boolean;
+  title: string;
+  description: string;
+  onConfirm: () => void;
+}
 
-  const { data: prompts, isLoading: promptsLoading, error } = useQuery<AdminPrompt[]>({
-    queryKey: ["/api/admin/prompts"],
-    enabled: isAuthenticated,
-  });
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  const { data: defaultStages = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/default-stages"],
-    enabled: isAuthenticated,
-  });
+function wordCount(text: string): number {
+  return text.trim() ? text.trim().split(/\s+/).length : 0;
+}
 
-  const { data: interceptorPrompts = [] } = useQuery<InterceptorPrompt[]>({
-    queryKey: ["/api/admin/interceptor-prompts"],
-    enabled: isAuthenticated,
-  });
+function formatDate(date: string | null | undefined): string {
+  if (!date) return "";
+  return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
-  const seedMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/prompts/seed"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
-      toast({ title: "Success", description: "Default prompts seeded successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to seed prompts", variant: "destructive" });
-    },
-  });
+// ─── Scope Badge ──────────────────────────────────────────────────────────────
 
-  const createMutation = useMutation({
-    mutationFn: (data: Partial<AdminPrompt>) => 
-      apiRequest("POST", "/api/admin/prompts", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
-      setIsCreateOpen(false);
-      toast({ title: "Success", description: "Prompt created successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to create prompt", variant: "destructive" });
-    },
-  });
+function ScopeBadge({ scope }: { scope: string }) {
+  const colors: Record<string, string> = {
+    stage: "bg-blue-50 text-blue-700",
+    discovery: "bg-purple-50 text-purple-700",
+    system: "bg-gray-100 text-gray-600",
+  };
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${colors[scope] ?? "bg-gray-100 text-gray-600"}`}>
+      {scope}
+    </span>
+  );
+}
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<AdminPrompt> }) =>
-      apiRequest("PUT", `/api/admin/prompts/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
-      setEditingPrompt(null);
-      setConfirmDialog(prev => ({ ...prev, open: false }));
-      toast({ title: "Success", description: "Prompt updated successfully" });
-    },
-    onError: () => {
-      setConfirmDialog(prev => ({ ...prev, open: false }));
-      toast({ title: "Error", description: "Failed to update prompt", variant: "destructive" });
-    },
-  });
+// ─── Prompt Item ──────────────────────────────────────────────────────────────
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/admin/prompts/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
-      setConfirmDialog(prev => ({ ...prev, open: false }));
-      toast({ title: "Success", description: "Prompt deleted successfully" });
-    },
-    onError: () => {
-      setConfirmDialog(prev => ({ ...prev, open: false }));
-      toast({ title: "Error", description: "Failed to delete prompt", variant: "destructive" });
-    },
-  });
+function PromptItem({
+  prompt,
+  isEditing,
+  onEdit,
+  onCancelEdit,
+  onSave,
+  onDelete,
+  isSaving,
+}: {
+  prompt: AdminPrompt;
+  isEditing: boolean;
+  onEdit: () => void;
+  onCancelEdit: () => void;
+  onSave: (data: Partial<AdminPrompt>) => void;
+  onDelete: () => void;
+  isSaving: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isDefault = prompt.id.startsWith("default-");
+  const words = wordCount(prompt.content);
+  const chars = prompt.content.length;
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-secondary">
-        <Loader2 className="w-8 h-8 animate-spin text-accent" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-secondary">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <Shield className="w-12 h-12 mx-auto mb-4 text-accent" />
-            <CardTitle>Admin Panel</CardTitle>
-            <p className="text-description text-contrast-medium mt-2">
-              Sign in with your GitHub account to access the admin panel
-            </p>
-          </CardHeader>
-          <CardContent className="flex justify-center">
-            <Button
-              onClick={() => window.location.href = "/api/login"}
-              className="btn-primary"
-              data-testid="button-admin-login"
-            >
-              <LogIn className="w-4 h-4 mr-2" />
-              Sign in with GitHub
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const filteredPrompts = (() => {
-    const dbPrompts = prompts || [];
-    const dbTargetKeys = new Set(dbPrompts.map(p => p.targetKey));
-
-    // Only show defaults for stages that don't have a DB override
-    const defaultEntries = defaultStages
-      .filter(s => !dbTargetKeys.has(`stage_${s.stageNumber}`))
-      .map(s => ({
-        id: `default-${s.stageNumber}`,
-        scope: "stage",
-        targetKey: `stage_${s.stageNumber}`,
-        label: s.title,
-        description: s.description,
-        content: s.systemPrompt,
-        isDefault: true,
-        stageNumber: s.stageNumber,
-        updatedBy: null,
-        createdAt: null,
-        updatedAt: null,
-      } as AdminPrompt));
-
-    return [...dbPrompts, ...defaultEntries].filter(p => {
-      const matchesScope = filterScope === "all" || p.scope === filterScope;
-      const matchesSearch = !searchQuery ||
-        p.label?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.targetKey?.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesScope && matchesSearch;
-    });
-  })();
+  // Collapsed content preview: first ~160 chars, no hard cut mid-word
+  const PREVIEW_CHARS = 160;
+  const previewText =
+    prompt.content.length > PREVIEW_CHARS
+      ? prompt.content.slice(0, prompt.content.lastIndexOf(" ", PREVIEW_CHARS)) + "…"
+      : prompt.content;
 
   return (
-    <div className="min-h-screen bg-surface-secondary">
-      <header className="bg-surface-primary border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-accent" />
-            <h1 className="text-title font-semibold">Admin Panel</h1>
-          </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <span className="text-description text-contrast-medium hidden sm:inline" data-testid="text-admin-user">
-              {user?.email || user?.firstName || "Admin"}
-            </span>
-            <Button variant="outline" size="sm" onClick={() => logout()} className="shrink-0" data-testid="button-admin-logout">
-              <LogOut className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-6">
-            <TabsTrigger value="stage" data-testid="tab-stage-prompts">
-              Stage Prompts
-            </TabsTrigger>
-            <TabsTrigger value="interceptor" data-testid="tab-interceptor-prompts">
-              <Zap className="w-4 h-4 mr-1" />
-              Interceptors
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="stage">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-              <div className="flex items-center gap-4">
-                <h2 className="text-xl font-semibold">Stage Prompts</h2>
-                <Select value={filterScope} onValueChange={setFilterScope}>
-                  <SelectTrigger className="w-40" data-testid="select-filter-scope">
-                    <SelectValue placeholder="Filter by scope" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Scopes</SelectItem>
-                    <SelectItem value="stage">Stage</SelectItem>
-                    <SelectItem value="discovery">Discovery</SelectItem>
-                    <SelectItem value="system">System</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  placeholder="Search prompts..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-48"
-                />
-              </div>
-              <div className="flex gap-2 shrink-0">
-                {(!prompts || prompts.length === 0) && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setConfirmDialog({
-                        open: true,
-                        title: "Seed Default Prompts",
-                        description: "This will create default prompts for all 6 stages and the discovery flow. Existing prompts with the same target keys will not be overwritten.",
-                        onConfirm: () => {
-                          seedMutation.mutate();
-                          setConfirmDialog(prev => ({ ...prev, open: false }));
-                        },
-                      });
-                    }}
-                    disabled={seedMutation.isPending}
-                    data-testid="button-seed-prompts"
-                  >
-                    {seedMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                    )}
-                    Seed Defaults
-                  </Button>
-                )}
-                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                  <DialogTrigger asChild>
-                    <Button className="btn-primary" data-testid="button-create-prompt">
-                      <Plus className="w-4 h-4 mr-2" />
-                      New Prompt
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>Create New Prompt</DialogTitle>
-                    </DialogHeader>
-                    <PromptForm
-                      onSubmit={(data) => createMutation.mutate(data)}
-                      onCancel={() => setIsCreateOpen(false)}
-                      isLoading={createMutation.isPending}
-                    />
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </div>
-
-            {promptsLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-accent" />
-              </div>
-            ) : error ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <p className="text-contrast-medium">Failed to load prompts. Please try again.</p>
-                </CardContent>
-              </Card>
-            ) : filteredPrompts.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <p className="text-contrast-medium mb-4">No prompts found.</p>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setConfirmDialog({
-                        open: true,
-                        title: "Seed Default Prompts",
-                        description: "This will create default prompts for all 6 stages and the discovery flow. Existing prompts with the same target keys will not be overwritten.",
-                        onConfirm: () => {
-                          seedMutation.mutate();
-                          setConfirmDialog(prev => ({ ...prev, open: false }));
-                        },
-                      });
-                    }}
-                    disabled={seedMutation.isPending}
-                    data-testid="button-seed-empty"
-                  >
-                    {seedMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                    )}
-                    Seed Default Prompts
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-4">
-                {filteredPrompts.map((prompt) => (
-                  <Card key={prompt.id} data-testid={`card-prompt-${prompt.id}`}>
-                    <CardContent className="py-4">
-                      {editingPrompt?.id === prompt.id ? (
-                        <PromptForm
-                          initialData={prompt}
-                          onSubmit={(data) => {
-                            setConfirmDialog({
-                              open: true,
-                              title: "Confirm Prompt Update",
-                              description: `Are you sure you want to update "${prompt.label}"? This will affect how the AI responds in the application.`,
-                              onConfirm: () => {
-                                updateMutation.mutate({ id: prompt.id, data });
-                              },
-                            });
-                          }}
-                          onCancel={() => setEditingPrompt(null)}
-                          isLoading={updateMutation.isPending}
-                        />
-                      ) : (
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="text-title font-medium">{prompt.label}</h3>
-                              <span className="px-2 py-0.5 text-xs bg-accent/10 text-accent rounded">
-                                {prompt.scope}
-                              </span>
-                              {prompt.isDefault && (
-                                <span className="px-2 py-0.5 text-xs bg-gray-100 text-contrast-medium rounded">
-                                  Default
-                                </span>
-                              )}
-                            </div>
-                            {prompt.description && (
-                              <p className="text-description text-contrast-medium mb-2">
-                                {prompt.description}
-                              </p>
-                            )}
-                            <pre className="text-metadata text-contrast-low bg-surface-secondary p-3 rounded overflow-x-auto whitespace-pre-wrap max-h-32">
-                              {prompt.content.substring(0, 300)}
-                              {prompt.content.length > 300 && "..."}
-                            </pre>
-                            <p className="text-metadata text-contrast-low mt-2">
-                              Key: {prompt.targetKey}
-                              {prompt.stageNumber != null && ` | Stage ${prompt.stageNumber}`}
-                              {prompt.updatedBy && ` | Edited by ${prompt.updatedBy}`}
-                              {prompt.updatedAt && ` | ${new Date(prompt.updatedAt).toLocaleDateString()}`}
-                            </p>
-                          </div>
-                          <div className="flex gap-2 shrink-0">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setEditingPrompt(prompt)}
-                              disabled={prompt.id.startsWith("default-")}
-                              title={prompt.id.startsWith("default-") ? "Seed prompts to customize defaults" : "Edit prompt"}
-                              data-testid={`button-edit-${prompt.id}`}
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={prompt.id.startsWith("default-")}
-                              onClick={() => {
-                                setConfirmDialog({
-                                  open: true,
-                                  title: "Confirm Delete",
-                                  description: `Are you sure you want to delete "${prompt.label}"? This action cannot be undone.`,
-                                  onConfirm: () => {
-                                    deleteMutation.mutate(prompt.id);
-                                  },
-                                });
-                              }}
-                              data-testid={`button-delete-${prompt.id}`}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+    <div
+      className={`px-4 py-4 ${isEditing ? "bg-gray-50" : "bg-white"}`}
+      data-testid={`card-prompt-${prompt.id}`}
+    >
+      {/* Title line */}
+      <div className="flex items-start justify-between gap-3 min-w-0">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <span className="text-[15px] font-semibold text-gray-900 leading-snug">{prompt.label}</span>
+            <ScopeBadge scope={prompt.scope} />
+            {isDefault && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500">
+                Default
+              </span>
             )}
-          </TabsContent>
+          </div>
 
-          <TabsContent value="interceptor">
-            <div className="mb-6">
-              <div className="flex items-center gap-2 mb-2">
-                <h2 className="text-xl font-semibold">Interceptor Prompts</h2>
-                <span className="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" />
-                  Advanced
-                </span>
-              </div>
-              <p className="text-description text-contrast-medium">
-                Interceptor prompts modify AI behavior at runtime. They can override responses, enforce output formats, or add guardrails. Changes here directly affect how the AI responds to users.
-              </p>
-            </div>
+          {/* Description line */}
+          {prompt.description && (
+            <p className="text-[13px] text-gray-600 mb-1.5 leading-snug">{prompt.description}</p>
+          )}
 
-            <Card className="mb-4 bg-orange-50 border-orange-200">
-              <CardContent className="py-3">
-                <p className="text-sm text-orange-800 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>
-                    <strong>Read-only:</strong> Interceptor prompts are defined in code (<code className="bg-orange-100 px-1 rounded">shared/schema.ts</code>) and cannot be edited through this panel. They control runtime AI behavior and require code changes to modify.
-                  </span>
-                </p>
-              </CardContent>
-            </Card>
+          {/* Metadata line */}
+          <p className="text-[11px] text-gray-400 leading-snug flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>{prompt.targetKey}</span>
+            {prompt.stageNumber != null && <span>·</span>}
+            {prompt.stageNumber != null && <span>Stage {prompt.stageNumber}</span>}
+            {prompt.updatedBy && <span>·</span>}
+            {prompt.updatedBy && <span>Edited by {prompt.updatedBy}</span>}
+            {prompt.updatedAt && <span>·</span>}
+            {prompt.updatedAt && <span>{formatDate(prompt.updatedAt)}</span>}
+            <span>·</span>
+            <span>{words} words</span>
+            <span>·</span>
+            <span>{chars} chars</span>
+          </p>
+        </div>
 
-            <div className="space-y-4">
-              {interceptorPrompts.map((interceptor) => (
-                <Card key={interceptor.id} className="border-orange-200" data-testid={`card-interceptor-${interceptor.id}`}>
-                  <CardContent className="py-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Zap className="w-4 h-4 text-orange-500" />
-                          <h3 className="text-title font-medium">{interceptor.label}</h3>
-                          <span className={`px-2 py-0.5 text-xs rounded ${interceptor.isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                            {interceptor.isEnabled ? 'Active' : 'Disabled'}
-                          </span>
-                          <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded">
-                            Read-only
-                          </span>
-                        </div>
-                        <p className="text-description text-contrast-medium mb-2">
-                          {interceptor.description}
-                        </p>
-                        <div className="space-y-2">
-                          <div>
-                            <p className="text-xs font-medium text-contrast-medium mb-1">System Prompt:</p>
-                            <pre className="text-metadata text-contrast-low bg-surface-secondary p-3 rounded overflow-x-auto whitespace-pre-wrap max-h-24">
-                              {interceptor.systemPrompt}
-                            </pre>
-                          </div>
-                          {interceptor.userPromptTemplate && (
-                            <div>
-                              <p className="text-xs font-medium text-contrast-medium mb-1">User Prompt Template:</p>
-                              <pre className="text-metadata text-contrast-low bg-surface-secondary p-3 rounded overflow-x-auto whitespace-pre-wrap max-h-24">
-                                {interceptor.userPromptTemplate.substring(0, 200)}
-                                {interceptor.userPromptTemplate.length > 200 && "..."}
-                              </pre>
-                            </div>
-                          )}
-                          <p className="text-metadata text-contrast-low">
-                            <span className="font-medium">Trigger:</span> <code className="bg-gray-100 px-1 rounded">{interceptor.triggerCondition}</code>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
+        {/* Action buttons — only when not editing */}
+        {!isEditing && (
+          <div className="flex items-center gap-1 shrink-0 mt-0.5">
+            <button
+              className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={onEdit}
+              disabled={isDefault}
+              title={isDefault ? "Seed prompts first to customize defaults" : "Edit prompt"}
+              data-testid={`button-edit-${prompt.id}`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              disabled={isDefault}
+              onClick={onDelete}
+              title={isDefault ? "Seed prompts first to delete defaults" : "Delete prompt"}
+              data-testid={`button-delete-${prompt.id}`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
 
-        <AlertDialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-orange-500" />
-                {confirmDialog.title}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {confirmDialog.description}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="button-confirm-cancel">Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={confirmDialog.onConfirm} data-testid="button-confirm-action">
-                Confirm
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </main>
+      {/* Content block — collapsed or expanded */}
+      {!isEditing && (
+        <div className="mt-2.5">
+          <pre className="text-[12px] text-gray-500 bg-gray-50 border border-gray-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+            {expanded ? prompt.content : previewText}
+          </pre>
+          {prompt.content.length > PREVIEW_CHARS && (
+            <button
+              className="mt-1.5 text-[11px] text-gray-400 hover:text-gray-600 flex items-center gap-0.5 transition-colors"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? (
+                <><ChevronUp className="w-3 h-3" />Show less</>
+              ) : (
+                <><ChevronDown className="w-3 h-3" />Show more</>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Inline edit form */}
+      {isEditing && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <PromptForm
+            initialData={prompt}
+            onSubmit={onSave}
+            onCancel={onCancelEdit}
+            isLoading={isSaving}
+          />
+        </div>
+      )}
     </div>
   );
 }
+
+// ─── Interceptor Item ─────────────────────────────────────────────────────────
+
+function InterceptorItem({ interceptor }: { interceptor: InterceptorPrompt }) {
+  const [expanded, setExpanded] = useState(false);
+  const PREVIEW_CHARS = 160;
+  const previewText =
+    interceptor.systemPrompt.length > PREVIEW_CHARS
+      ? interceptor.systemPrompt.slice(0, interceptor.systemPrompt.lastIndexOf(" ", PREVIEW_CHARS)) + "…"
+      : interceptor.systemPrompt;
+
+  return (
+    <div
+      className="px-4 py-4 bg-white border-l-2 border-orange-300"
+      data-testid={`card-interceptor-${interceptor.id}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          {/* Title line */}
+          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <Zap className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            <span className="text-[15px] font-semibold text-gray-900 leading-snug">{interceptor.label}</span>
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${interceptor.isEnabled ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+              {interceptor.isEnabled ? "Active" : "Disabled"}
+            </span>
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-orange-50 text-orange-600">
+              Read-only
+            </span>
+          </div>
+
+          {/* Description */}
+          {interceptor.description && (
+            <p className="text-[13px] text-gray-600 mb-1.5 leading-snug">{interceptor.description}</p>
+          )}
+
+          {/* Metadata */}
+          <p className="text-[11px] text-gray-400 leading-snug">
+            Trigger: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono text-[11px]">{interceptor.triggerCondition}</code>
+          </p>
+        </div>
+      </div>
+
+      {/* System prompt preview */}
+      <div className="mt-2.5">
+        <p className="text-[11px] font-medium text-gray-400 mb-1">System prompt</p>
+        <pre className="text-[12px] text-gray-500 bg-orange-50/50 border border-orange-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+          {expanded ? interceptor.systemPrompt : previewText}
+        </pre>
+        {interceptor.systemPrompt.length > PREVIEW_CHARS && (
+          <button
+            className="mt-1.5 text-[11px] text-gray-400 hover:text-gray-600 flex items-center gap-0.5 transition-colors"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? (
+              <><ChevronUp className="w-3 h-3" />Show less</>
+            ) : (
+              <><ChevronDown className="w-3 h-3" />Show more</>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* User prompt template */}
+      {interceptor.userPromptTemplate && (
+        <div className="mt-2">
+          <p className="text-[11px] font-medium text-gray-400 mb-1">User prompt template</p>
+          <pre className="text-[12px] text-gray-500 bg-orange-50/50 border border-orange-100 rounded px-3 py-2.5 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-20">
+            {interceptor.userPromptTemplate.length > 200
+              ? interceptor.userPromptTemplate.slice(0, 200) + "…"
+              : interceptor.userPromptTemplate}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Empty State ──────────────────────────────────────────────────────────────
+
+function EmptyState({
+  onSeed,
+  isSeeding,
+}: {
+  onSeed: () => void;
+  isSeeding: boolean;
+}) {
+  return (
+    <div className="py-16 text-center px-6">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
+        <Shield className="w-5 h-5 text-gray-400" />
+      </div>
+      <h3 className="text-[15px] font-semibold text-gray-800 mb-1.5">No prompts configured yet</h3>
+      <p className="text-[13px] text-gray-500 max-w-xs mx-auto mb-5 leading-relaxed">
+        Stage prompts tell the AI how to respond at each step of the product discovery flow.
+        Seed the defaults to get started instantly, or create a custom prompt above.
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onSeed}
+        disabled={isSeeding}
+        className="h-9 px-4 text-[13px]"
+        data-testid="button-seed-empty"
+      >
+        {isSeeding ? (
+          <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+        ) : (
+          <RefreshCw className="w-3.5 h-3.5 mr-2" />
+        )}
+        Seed default prompts
+      </Button>
+    </div>
+  );
+}
+
+// ─── PromptForm ───────────────────────────────────────────────────────────────
 
 function PromptForm({
   initialData,
@@ -534,16 +347,19 @@ function PromptForm({
     });
   };
 
+  const contentWordCount = wordCount(formData.content);
+  const contentCharCount = formData.content.length;
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="text-description font-medium mb-1 block">Scope</label>
+          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Scope</label>
           <Select
             value={formData.scope}
             onValueChange={(v) => setFormData({ ...formData, scope: v })}
           >
-            <SelectTrigger data-testid="select-prompt-scope">
+            <SelectTrigger className="h-8 text-[13px]" data-testid="select-prompt-scope">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -554,8 +370,9 @@ function PromptForm({
           </Select>
         </div>
         <div>
-          <label className="text-description font-medium mb-1 block">Target Key</label>
+          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Target Key</label>
           <Input
+            className="h-8 text-[13px]"
             value={formData.targetKey}
             onChange={(e) => setFormData({ ...formData, targetKey: e.target.value })}
             placeholder="e.g., stage_1, discovery_initial"
@@ -566,8 +383,9 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-description font-medium mb-1 block">Label</label>
+        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Label</label>
         <Input
+          className="h-8 text-[13px]"
           value={formData.label}
           onChange={(e) => setFormData({ ...formData, label: e.target.value })}
           placeholder="Human-readable name"
@@ -577,8 +395,9 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-description font-medium mb-1 block">Description</label>
+        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Description</label>
         <Input
+          className="h-8 text-[13px]"
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           placeholder="Optional description"
@@ -587,43 +406,60 @@ function PromptForm({
       </div>
 
       <div>
-        <label className="text-description font-medium mb-1 block">Prompt Content</label>
+        <label className="text-[12px] font-medium text-gray-600 mb-1 block">Prompt Content</label>
         <Textarea
           value={formData.content}
           onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-          placeholder="The actual prompt text..."
+          placeholder="The actual prompt text…"
           rows={8}
           required
-          className="font-mono text-sm"
+          className="font-mono text-[12px] leading-relaxed resize-y"
           data-testid="textarea-prompt-content"
         />
+        <p className="mt-1 text-[11px] text-gray-400">
+          {contentWordCount} words · {contentCharCount} characters
+        </p>
       </div>
 
       {formData.scope === "stage" && (
-        <div>
-          <label className="text-description font-medium mb-1 block">Stage Number</label>
+        <div className="w-32">
+          <label className="text-[12px] font-medium text-gray-600 mb-1 block">Stage Number</label>
           <Input
+            className="h-8 text-[13px]"
             type="number"
             min="1"
             max="6"
             value={formData.stageNumber}
             onChange={(e) => setFormData({ ...formData, stageNumber: e.target.value })}
-            placeholder="1-6"
+            placeholder="1–6"
             data-testid="input-prompt-stageNumber"
           />
         </div>
       )}
 
-      <div className="flex justify-end gap-2 pt-4">
-        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-prompt-cancel">
-          <X className="w-4 h-4 mr-2" />
+      <div className="flex justify-end gap-2 pt-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 px-3 text-[13px]"
+          onClick={onCancel}
+          data-testid="button-prompt-cancel"
+        >
+          <X className="w-3.5 h-3.5 mr-1.5" />
           Cancel
         </Button>
-        <Button type="submit" className="btn-primary" disabled={isLoading} data-testid="button-prompt-save">
+        <Button
+          type="submit"
+          size="sm"
+          className="h-8 px-3 text-[13px] btn-primary"
+          disabled={isLoading}
+          data-testid="button-prompt-save"
+        >
           {isLoading ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
           ) : (
-            <Save className="w-4 h-4 mr-2" />
+            <Save className="w-3.5 h-3.5 mr-1.5" />
           )}
           Save
         </Button>
@@ -632,3 +468,415 @@ function PromptForm({
   );
 }
 
+// ─── Section Header ───────────────────────────────────────────────────────────
+
+function SectionHeader({
+  title,
+  count,
+  accent,
+}: {
+  title: string;
+  count: number;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 sticky top-[57px] z-[5]">
+      {accent && <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />}
+      <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide">{title}</span>
+      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-gray-200 text-[11px] font-semibold text-gray-600">
+        {count}
+      </span>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function AdminPage() {
+  const { user, isLoading: authLoading, isAuthenticated, logout } = useAuth();
+  const { toast } = useToast();
+
+  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  const [pendingUpdateData, setPendingUpdateData] = useState<{ id: string; data: Partial<AdminPrompt> } | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [filterScope, setFilterScope] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>({
+    open: false,
+    title: "",
+    description: "",
+    onConfirm: () => {},
+  });
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+
+  const { data: prompts, isLoading: promptsLoading, error } = useQuery<AdminPrompt[]>({
+    queryKey: ["/api/admin/prompts"],
+    enabled: isAuthenticated,
+  });
+
+  const { data: defaultStages = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/default-stages"],
+    enabled: isAuthenticated,
+  });
+
+  const { data: interceptorPrompts = [] } = useQuery<InterceptorPrompt[]>({
+    queryKey: ["/api/admin/interceptor-prompts"],
+    enabled: isAuthenticated,
+  });
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
+  const seedMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/prompts/seed"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
+      toast({ title: "Success", description: "Default prompts seeded successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to seed prompts", variant: "destructive" });
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: Partial<AdminPrompt>) => apiRequest("POST", "/api/admin/prompts", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
+      setIsCreateOpen(false);
+      toast({ title: "Success", description: "Prompt created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to create prompt", variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<AdminPrompt> }) =>
+      apiRequest("PUT", `/api/admin/prompts/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
+      setEditingPromptId(null);
+      setPendingUpdateData(null);
+      setConfirmDialog((prev) => ({ ...prev, open: false }));
+      toast({ title: "Success", description: "Prompt updated successfully" });
+    },
+    onError: () => {
+      setConfirmDialog((prev) => ({ ...prev, open: false }));
+      toast({ title: "Error", description: "Failed to update prompt", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/admin/prompts/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/prompts"] });
+      setConfirmDialog((prev) => ({ ...prev, open: false }));
+      toast({ title: "Success", description: "Prompt deleted successfully" });
+    },
+    onError: () => {
+      setConfirmDialog((prev) => ({ ...prev, open: false }));
+      toast({ title: "Error", description: "Failed to delete prompt", variant: "destructive" });
+    },
+  });
+
+  // ── Derived data ───────────────────────────────────────────────────────────
+
+  const filteredPrompts = (() => {
+    const dbPrompts = prompts || [];
+    const dbTargetKeys = new Set(dbPrompts.map((p) => p.targetKey));
+
+    const defaultEntries = defaultStages
+      .filter((s) => !dbTargetKeys.has(`stage_${s.stageNumber}`))
+      .map(
+        (s) =>
+          ({
+            id: `default-${s.stageNumber}`,
+            scope: "stage",
+            targetKey: `stage_${s.stageNumber}`,
+            label: s.title,
+            description: s.description,
+            content: s.systemPrompt,
+            isDefault: true,
+            stageNumber: s.stageNumber,
+            updatedBy: null,
+            createdAt: null,
+            updatedAt: null,
+          } as AdminPrompt)
+      );
+
+    return [...dbPrompts, ...defaultEntries].filter((p) => {
+      const matchesScope = filterScope === "all" || p.scope === filterScope;
+      const matchesSearch =
+        !searchQuery ||
+        p.label?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.targetKey?.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesScope && matchesSearch;
+    });
+  })();
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  function handleSeedConfirm() {
+    setConfirmDialog({
+      open: true,
+      title: "Seed Default Prompts",
+      description:
+        "This will create default prompts for all 6 stages and the discovery flow. Existing prompts with the same target keys will not be overwritten.",
+      onConfirm: () => {
+        seedMutation.mutate();
+        setConfirmDialog((prev) => ({ ...prev, open: false }));
+      },
+    });
+  }
+
+  function handleEditSave(prompt: AdminPrompt, data: Partial<AdminPrompt>) {
+    setPendingUpdateData({ id: prompt.id, data });
+    setConfirmDialog({
+      open: true,
+      title: "Confirm Prompt Update",
+      description: `Are you sure you want to update "${prompt.label}"? This will affect how the AI responds in the application.`,
+      onConfirm: () => {
+        updateMutation.mutate({ id: prompt.id, data });
+      },
+    });
+  }
+
+  function handleDeleteConfirm(prompt: AdminPrompt) {
+    setConfirmDialog({
+      open: true,
+      title: "Confirm Delete",
+      description: `Are you sure you want to delete "${prompt.label}"? This action cannot be undone.`,
+      onConfirm: () => {
+        deleteMutation.mutate(prompt.id);
+      },
+    });
+  }
+
+  // ── Auth states ────────────────────────────────────────────────────────────
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Card className="w-full max-w-sm border-gray-200 shadow-sm">
+          <CardHeader className="text-center pb-4">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 mx-auto mb-3">
+              <Shield className="w-5 h-5 text-gray-500" />
+            </div>
+            <CardTitle className="text-[16px] font-semibold">Admin Panel</CardTitle>
+            <p className="text-[13px] text-gray-500 mt-1">
+              Sign in with your GitHub account to access the admin panel.
+            </p>
+          </CardHeader>
+          <CardContent className="flex justify-center pb-6">
+            <Button
+              onClick={() => (window.location.href = "/api/login")}
+              className="btn-primary h-9 px-5 text-[13px]"
+              data-testid="button-admin-login"
+            >
+              <LogIn className="w-3.5 h-3.5 mr-2" />
+              Sign in with GitHub
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const hasNoPrompts = !promptsLoading && !error && filteredPrompts.length === 0;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+
+      {/* ── Sticky header ──────────────────────────────────────────────────── */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 h-[57px]">
+        <div className="max-w-4xl mx-auto px-4 h-full flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-gray-500 shrink-0" />
+            <span className="text-[15px] font-semibold text-gray-900">Prompt Manager</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className="text-[12px] text-gray-500 hidden sm:inline truncate max-w-[180px]"
+              data-testid="text-admin-user"
+            >
+              {user?.email || user?.firstName || "Admin"}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-[13px]"
+              onClick={() => logout()}
+              data-testid="button-admin-logout"
+            >
+              <LogOut className="w-3.5 h-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main ───────────────────────────────────────────────────────────── */}
+      <main className="max-w-4xl mx-auto px-4 py-5">
+
+        {/* Controls row */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-5">
+          <Input
+            placeholder="Search prompts…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 h-9 text-[13px]"
+          />
+          <Select value={filterScope} onValueChange={setFilterScope}>
+            <SelectTrigger className="h-9 text-[13px] sm:w-36" data-testid="select-filter-scope">
+              <SelectValue placeholder="Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All scopes</SelectItem>
+              <SelectItem value="stage">Stage</SelectItem>
+              <SelectItem value="discovery">Discovery</SelectItem>
+              <SelectItem value="system">System</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Seed button — only visible when no DB prompts exist */}
+          {(!prompts || prompts.length === 0) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3 text-[13px]"
+              onClick={handleSeedConfirm}
+              disabled={seedMutation.isPending}
+              data-testid="button-seed-prompts"
+            >
+              {seedMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Seed defaults
+            </Button>
+          )}
+
+          {/* New Prompt dialog */}
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button
+                className="h-9 px-4 text-[13px] btn-primary shrink-0"
+                data-testid="button-create-prompt"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                New Prompt
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-xl">
+              <DialogHeader>
+                <DialogTitle className="text-[15px]">Create New Prompt</DialogTitle>
+              </DialogHeader>
+              <PromptForm
+                onSubmit={(data) => createMutation.mutate(data)}
+                onCancel={() => setIsCreateOpen(false)}
+                isLoading={createMutation.isPending}
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* ── Stage Prompts list ────────────────────────────────────────────── */}
+        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-6">
+          <SectionHeader title="Stage Prompts" count={filteredPrompts.length} />
+
+          {promptsLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+            </div>
+          ) : error ? (
+            <div className="py-10 text-center">
+              <p className="text-[13px] text-gray-500">Failed to load prompts. Please try again.</p>
+            </div>
+          ) : hasNoPrompts ? (
+            <EmptyState onSeed={handleSeedConfirm} isSeeding={seedMutation.isPending} />
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {filteredPrompts.map((prompt) => (
+                <PromptItem
+                  key={prompt.id}
+                  prompt={prompt}
+                  isEditing={editingPromptId === prompt.id}
+                  onEdit={() => setEditingPromptId(prompt.id)}
+                  onCancelEdit={() => setEditingPromptId(null)}
+                  onSave={(data) => handleEditSave(prompt, data)}
+                  onDelete={() => handleDeleteConfirm(prompt)}
+                  isSaving={updateMutation.isPending}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Interceptors list ─────────────────────────────────────────────── */}
+        {interceptorPrompts.length > 0 && (
+          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-6">
+            <SectionHeader title="Interceptors" count={interceptorPrompts.length} accent />
+
+            {/* Read-only notice */}
+            <div className="px-4 py-2.5 bg-orange-50/60 border-b border-orange-100 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-orange-500 shrink-0 mt-0.5" />
+              <p className="text-[12px] text-orange-700 leading-snug">
+                <span className="font-semibold">Read-only.</span> Interceptors are defined in{" "}
+                <code className="bg-orange-100 px-1 rounded font-mono text-[11px]">shared/schema.ts</code>{" "}
+                and require code changes to modify. They control runtime AI behavior.
+              </p>
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              {interceptorPrompts.map((interceptor) => (
+                <InterceptorItem key={interceptor.id} interceptor={interceptor} />
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ── Confirm dialog ─────────────────────────────────────────────────── */}
+      <AlertDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-[15px]">
+              <AlertTriangle className="w-4 h-4 text-orange-500 shrink-0" />
+              {confirmDialog.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-[13px]">
+              {confirmDialog.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-8 text-[13px]" data-testid="button-confirm-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="h-8 text-[13px]"
+              onClick={confirmDialog.onConfirm}
+              data-testid="button-confirm-action"
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
