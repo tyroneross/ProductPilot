@@ -1,116 +1,125 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
-import { Sparkles, Plus, X, ArrowRight, ChevronDown, ChevronUp, Loader2, FileText, MessageCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-type MinimumDetails = {
-  problemStatement: string;
-  userGoals: string[];
-  mainObjects: string[];
-  mainActions: string[];
-  inspirationLink: string;
-  v1Definition: string;
-  mustUseTools: string;
-  mustAvoidTools: string;
-};
+// ── Style definitions ────────────────────────────────────────────────────────
+
+const STYLES = [
+  {
+    id: "minimal",
+    name: "Minimal",
+    gradient: "linear-gradient(145deg, #f8f8f6 0%, #e8e6e2 100%)",
+  },
+  {
+    id: "bold",
+    name: "Bold",
+    gradient: "linear-gradient(145deg, #1a0a2e 0%, #6d28d9 60%, #f59e0b 100%)",
+  },
+  {
+    id: "playful",
+    name: "Playful",
+    gradient: "linear-gradient(145deg, #fef3c7 0%, #fbcfe8 50%, #bfdbfe 100%)",
+  },
+  {
+    id: "corporate",
+    name: "Corporate",
+    gradient: "linear-gradient(145deg, #1e3a5f 0%, #2563eb 60%, #f1f5f9 100%)",
+  },
+  {
+    id: "retro",
+    name: "Retro",
+    gradient: "linear-gradient(145deg, #fef08a 0%, #fb923c 50%, #84cc16 100%)",
+  },
+  {
+    id: "organic",
+    name: "Organic",
+    gradient: "linear-gradient(145deg, #d4edda 0%, #6aab76 50%, #3d7a46 100%)",
+  },
+] as const;
+
+type StyleId = (typeof STYLES)[number]["id"];
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
-  const [showOptional, setShowOptional] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
 
-  const savedStyle = (() => {
-    try {
-      const raw = sessionStorage.getItem("appStyle");
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  })();
+  // Form state
+  const [productIdea, setProductIdea] = useState("");
+  const [selectedStyle, setSelectedStyle] = useState<StyleId>("minimal");
+  const [problemStatement, setProblemStatement] = useState("");
+  const [primaryUsers, setPrimaryUsers] = useState("");
+  const [v1Definition, setV1Definition] = useState("");
 
-  const [details, setDetails] = useState<MinimumDetails>({
-    problemStatement: "",
-    userGoals: ["", "", ""],
-    mainObjects: [""],
-    mainActions: [""],
-    inspirationLink: "",
-    v1Definition: "",
-    mustUseTools: "",
-    mustAvoidTools: "",
-  });
+  // Optional fields
+  const [showOptional, setShowOptional] = useState(false);
+  const [mainFeatures, setMainFeatures] = useState("");
+  const [techConstraints, setTechConstraints] = useState("");
+  const [inspirationLink, setInspirationLink] = useState("");
 
-  const updateField = (field: keyof MinimumDetails, value: string | string[]) => {
-    setDetails(prev => ({ ...prev, [field]: value }));
+  // Async state
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // CTA is enabled only when the 4 required fields have content
+  const canContinue =
+    productIdea.trim().length > 0 &&
+    problemStatement.trim().length > 0 &&
+    primaryUsers.trim().length > 0 &&
+    v1Definition.trim().length > 0;
+
+  const buildSessionPayload = () => {
+    const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
+    const details = {
+      problemStatement: problemStatement.trim(),
+      userGoals: [primaryUsers.trim()],
+      v1Definition: v1Definition.trim(),
+      ...(mainFeatures.trim() && { mainFeatures: mainFeatures.trim() }),
+      ...(techConstraints.trim() && { techConstraints: techConstraints.trim() }),
+      ...(inspirationLink.trim() && { inspirationLink: inspirationLink.trim() }),
+    };
+    return { styleObj, details };
   };
 
-  const updateArrayItem = (field: "userGoals" | "mainObjects" | "mainActions", index: number, value: string) => {
-    const newArray = [...details[field]];
-    newArray[index] = value;
-    updateField(field, newArray);
-  };
-
-  const addArrayItem = (field: "mainObjects" | "mainActions") => {
-    updateField(field, [...details[field], ""]);
-  };
-
-  const removeArrayItem = (field: "mainObjects" | "mainActions", index: number) => {
-    if (details[field].length > 1) {
-      updateField(field, details[field].filter((_, i) => i !== index));
-    }
-  };
-
-  const canContinue = details.problemStatement.trim() && 
-    details.userGoals.some(g => g.trim()) && 
-    details.v1Definition.trim();
-
-  const getCleanedDetails = () => ({
-    ...details,
-    userGoals: details.userGoals.filter(g => g.trim()),
-    mainObjects: details.mainObjects.filter(o => o.trim()),
-    mainActions: details.mainActions.filter(a => a.trim()),
-  });
-
-  const handleAddMoreDetails = () => {
-    const cleanedDetails = getCleanedDetails();
-    sessionStorage.setItem("minimumDetails", JSON.stringify(cleanedDetails));
-    sessionStorage.setItem("productIdea", details.problemStatement);
+  const handleContinueToSurvey = () => {
+    const { styleObj, details } = buildSessionPayload();
+    sessionStorage.setItem("productIdea", productIdea.trim());
+    sessionStorage.setItem("appStyle", JSON.stringify(styleObj));
+    sessionStorage.setItem("minimumDetails", JSON.stringify(details));
     setLocation("/session/survey");
   };
 
   const handleBuildDocsNow = async () => {
     setIsGenerating(true);
-    const cleanedDetails = getCleanedDetails();
-    
+    const { styleObj, details } = buildSessionPayload();
+
     try {
-      const projectPayload: Record<string, unknown> = {
-        name: cleanedDetails.problemStatement.substring(0, 50) + (cleanedDetails.problemStatement.length > 50 ? "..." : ""),
-        description: cleanedDetails.v1Definition,
+      const projectPayload = {
+        name:
+          productIdea.trim().substring(0, 50) +
+          (productIdea.trim().length > 50 ? "..." : ""),
+        description: v1Definition.trim(),
         mode: "survey",
-        minimumDetails: cleanedDetails,
+        appStyle: styleObj,
+        minimumDetails: details,
       };
-      if (savedStyle) {
-        projectPayload.appStyle = savedStyle;
-      }
+
       const response = await apiRequest("POST", "/api/projects", projectPayload);
-      
       const project = await response.json();
-      
-      // Generate docs directly from minimum details
-      await apiRequest("POST", `/api/projects/${project.id}/generate-docs-from-minimum`, {
-        minimumDetails: cleanedDetails,
-      });
-      
+
+      await apiRequest(
+        "POST",
+        `/api/projects/${project.id}/generate-docs-from-minimum`,
+        { minimumDetails: details }
+      );
+
       toast({
         title: "Documents generated!",
         description: "Your product docs are ready to view.",
       });
-      
+
       setLocation(`/documents/${project.id}`);
     } catch (error) {
       console.error("Failed to generate docs:", error);
@@ -124,271 +133,422 @@ export default function DetailsPage() {
     }
   };
 
+  // ── Shared input class helpers ───────────────────────────────────────────
+
+  const fieldInputCls =
+    "w-full h-11 bg-[#1a1714] border border-[rgba(200,180,160,0.08)] rounded-md " +
+    "text-sm text-[#f5f0eb] placeholder:text-[#6b5d52] px-3 outline-none " +
+    "focus:border-[#f0b65e] focus:ring-1 focus:ring-[#f0b65e]/20 transition-colors caret-[#f0b65e]";
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen bg-surface-secondary">
-      <div className="max-w-2xl mx-auto px-6 py-8">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-3 bg-accent rounded-full mb-4">
-            <Sparkles className="w-6 h-6 text-surface-primary" />
+    <div
+      className="min-h-screen"
+      style={{ background: "#110f0d", paddingBottom: "100px" }}
+    >
+      {/* ── Nav ── */}
+      <div
+        className="sticky top-0 z-50 border-b"
+        style={{
+          background: "rgba(17,15,13,0.92)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderColor: "rgba(200,180,160,0.08)",
+        }}
+      >
+        <div
+          className="flex items-center justify-between mx-auto px-8"
+          style={{ maxWidth: "1100px", padding: "18px 32px" }}
+        >
+          <a
+            href="/"
+            className="text-base font-bold tracking-tight no-underline"
+            style={{ color: "#f5f0eb", letterSpacing: "-0.02em" }}
+          >
+            Product<span style={{ color: "#f0b65e" }}>Pilot</span>
+          </a>
+          <div className="flex items-center gap-5">
+            <span className="text-xs font-medium" style={{ color: "#6b5d52", letterSpacing: "0.04em" }}>
+              Step <strong style={{ color: "#a89a8c" }}>1 of 3</strong>
+            </span>
+            <a
+              href="/auth"
+              className="text-sm font-medium no-underline transition-colors"
+              style={{ color: "#f0b65e" }}
+            >
+              Sign in
+            </a>
           </div>
-          <h1 className="text-h3 font-medium text-contrast-high mb-2">
-            Tell us about your idea
-          </h1>
-          <p className="text-description text-contrast-medium">
-            Just 3 things needed to generate your product docs
+        </div>
+      </div>
+
+      {/* ── Page content ── */}
+      <div className="mx-auto px-6" style={{ maxWidth: "672px" }}>
+
+        {/* Page header */}
+        <div style={{ paddingTop: "48px", paddingBottom: "32px" }}>
+          <h2
+            className="font-bold text-[#f5f0eb] mb-2"
+            style={{ fontSize: "26px", letterSpacing: "-0.03em", lineHeight: "1.25" }}
+          >
+            What are you building?
+          </h2>
+          <p className="text-base text-[#a89a8c]" style={{ lineHeight: "1.55" }}>
+            Tell us about your product idea. We'll generate docs tailored to your vision.
           </p>
         </div>
 
-        <div className="bg-surface-primary rounded-lg border border-gray-200 p-6 space-y-6">
-          <div>
-            <Label className="text-title font-medium text-contrast-high mb-2 block">
-              Problem statement <span className="text-red-500">*</span>
-            </Label>
-            <p className="text-metadata text-contrast-medium mb-2">
-              "Users need to ___ because ___."
-            </p>
-            <Textarea
-              value={details.problemStatement}
-              onChange={(e) => updateField("problemStatement", e.target.value)}
-              placeholder="e.g., Users need to track their daily habits because existing apps are too complex"
-              className="min-h-[80px]"
-              data-testid="input-problem-statement"
-            />
-          </div>
+        {/* Main textarea */}
+        <div>
+          <textarea
+            rows={5}
+            value={productIdea}
+            onChange={(e) => setProductIdea(e.target.value)}
+            placeholder="Describe your product idea..."
+            aria-label="Product description"
+            data-testid="input-product-idea"
+            className="w-full outline-none transition-colors caret-[#f0b65e]"
+            style={{
+              minHeight: "140px",
+              background: "#1a1714",
+              border: "1px solid rgba(200,180,160,0.08)",
+              borderRadius: "10px",
+              color: "#f5f0eb",
+              fontFamily: "inherit",
+              fontSize: "16px",
+              lineHeight: "1.6",
+              padding: "16px 18px",
+              resize: "vertical",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "#f0b65e";
+              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          />
+          <p className="mt-2 text-xs text-[#6b5d52]">
+            Be as detailed as you like — more context means better docs
+          </p>
+        </div>
 
-          <div>
-            <Label className="text-title font-medium text-contrast-high mb-2 block">
-              Top 3 user goals <span className="text-red-500">*</span>
-            </Label>
-            <p className="text-metadata text-contrast-medium mb-2">
-              What should users accomplish?
-            </p>
-            <div className="space-y-2">
-              {details.userGoals.map((goal, index) => (
-                <Input
-                  key={index}
-                  value={goal}
-                  onChange={(e) => updateArrayItem("userGoals", index, e.target.value)}
-                  placeholder={`Goal ${index + 1}`}
-                  data-testid={`input-goal-${index}`}
-                />
-              ))}
+        {/* Style selector */}
+        <div style={{ paddingTop: "36px" }}>
+          <p
+            className="text-[#a89a8c] font-semibold uppercase mb-3"
+            style={{ fontSize: "11px", letterSpacing: "0.1em" }}
+          >
+            Visual Direction
+          </p>
+
+          <div
+            style={{
+              overflowX: "auto",
+              WebkitOverflowScrolling: "touch",
+              scrollbarWidth: "none",
+              margin: "0 -4px",
+              padding: "4px 4px 8px",
+            }}
+          >
+            <div
+              role="radiogroup"
+              aria-label="Visual style"
+              className="flex gap-2.5"
+              style={{ width: "max-content" }}
+            >
+              {STYLES.map((style) => {
+                const isSelected = selectedStyle === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    role="radio"
+                    aria-checked={isSelected}
+                    onClick={() => setSelectedStyle(style.id)}
+                    data-testid={`style-card-${style.id}`}
+                    className="flex flex-col cursor-pointer transition-all duration-200 outline-none"
+                    style={{
+                      width: "116px",
+                      height: "82px",
+                      borderRadius: "8px",
+                      border: isSelected
+                        ? "2px solid #f0b65e"
+                        : "1.5px solid rgba(200,180,160,0.08)",
+                      background: "#1a1714",
+                      overflow: "hidden",
+                      transform: isSelected ? "scale(1.02)" : "scale(1)",
+                      boxShadow: isSelected
+                        ? "0 0 0 3px rgba(240,182,94,0.14)"
+                        : "none",
+                      flexShrink: 0,
+                      padding: 0,
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedStyle(style.id);
+                      }
+                    }}
+                  >
+                    {/* Swatch */}
+                    <div
+                      className="flex-1"
+                      style={{ background: style.gradient, minHeight: 0 }}
+                    />
+                    {/* Label */}
+                    <div
+                      className="text-center font-medium"
+                      style={{
+                        padding: "5px 6px",
+                        fontSize: "11px",
+                        color: isSelected ? "#f0b65e" : "#a89a8c",
+                        background: "#1a1714",
+                        letterSpacing: "0.01em",
+                      }}
+                    >
+                      {style.name}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div>
-            <Label className="text-title font-medium text-contrast-high mb-2 block">
-              V1 definition <span className="text-red-500">*</span>
-            </Label>
-            <p className="text-metadata text-contrast-medium mb-2">
-              What makes v1 "done"? What can it do end-to-end?
-            </p>
-            <Textarea
-              value={details.v1Definition}
-              onChange={(e) => updateField("v1Definition", e.target.value)}
-              placeholder="e.g., Users can create habits, check them off daily, and see a weekly streak chart"
-              className="min-h-[80px]"
-              data-testid="input-v1-definition"
-            />
-          </div>
-
-          <Collapsible open={showOptional} onOpenChange={setShowOptional}>
-            <CollapsibleTrigger asChild>
-              <button
-                className="flex items-center gap-2 text-description text-accent hover:underline w-full justify-center py-2"
-                data-testid="button-show-optional"
-              >
-                {showOptional ? (
-                  <>
-                    <ChevronUp className="w-4 h-4" />
-                    Hide optional fields
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-4 h-4" />
-                    Add more details (optional)
-                  </>
-                )}
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-6 pt-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <Label className="text-title font-medium text-contrast-high mb-2 block">
-                    Main objects (nouns)
-                  </Label>
-                  <p className="text-metadata text-contrast-medium mb-2">
-                    What things exist in your app?
-                  </p>
-                  <div className="space-y-2">
-                    {details.mainObjects.map((obj, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
-                          value={obj}
-                          onChange={(e) => updateArrayItem("mainObjects", index, e.target.value)}
-                          placeholder="e.g., Project, Task, User"
-                          data-testid={`input-object-${index}`}
-                        />
-                        {details.mainObjects.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeArrayItem("mainObjects", index)}
-                            className="shrink-0 w-11 h-11"
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => addArrayItem("mainObjects")}
-                      className="text-accent"
-                    >
-                      <Plus className="w-4 h-4 mr-1" /> Add object
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-title font-medium text-contrast-high mb-2 block">
-                    Main actions (verbs)
-                  </Label>
-                  <p className="text-metadata text-contrast-medium mb-2">
-                    What can users do?
-                  </p>
-                  <div className="space-y-2">
-                    {details.mainActions.map((action, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
-                          value={action}
-                          onChange={(e) => updateArrayItem("mainActions", index, e.target.value)}
-                          placeholder="e.g., Create, Edit, Share"
-                          data-testid={`input-action-${index}`}
-                        />
-                        {details.mainActions.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeArrayItem("mainActions", index)}
-                            className="shrink-0 w-11 h-11"
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => addArrayItem("mainActions")}
-                      className="text-accent"
-                    >
-                      <Plus className="w-4 h-4 mr-1" /> Add action
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-title font-medium text-contrast-high mb-2 block">
-                  Inspiration link
-                </Label>
-                <Input
-                  value={details.inspirationLink}
-                  onChange={(e) => updateField("inspirationLink", e.target.value)}
-                  placeholder="https://example.com"
-                  data-testid="input-inspiration-link"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-description font-medium text-contrast-high mb-2 block">
-                    Must-use tools
-                  </Label>
-                  <Input
-                    value={details.mustUseTools}
-                    onChange={(e) => updateField("mustUseTools", e.target.value)}
-                    placeholder="e.g., Supabase, Stripe"
-                    data-testid="input-must-use"
-                  />
-                </div>
-                <div>
-                  <Label className="text-description font-medium text-contrast-high mb-2 block">
-                    Must-avoid tools
-                  </Label>
-                  <Input
-                    value={details.mustAvoidTools}
-                    onChange={(e) => updateField("mustAvoidTools", e.target.value)}
-                    placeholder="e.g., Firebase, MongoDB"
-                    data-testid="input-must-avoid"
-                  />
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-
-        <div className="flex flex-col gap-4 mt-8">
-          <Button
-            onClick={handleBuildDocsNow}
-            disabled={!canContinue || isGenerating}
-            className="btn-primary min-h-[52px] w-full text-body"
-            data-testid="button-build-docs-now"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                Generating docs...
-              </>
-            ) : (
-              <>
-                <FileText className="w-5 h-5 mr-2" />
-                Build Docs Now
-              </>
-            )}
-          </Button>
-          
-          <div className="flex items-center gap-4">
-            <div className="flex-1 border-t border-gray-200" />
-            <span className="text-metadata text-contrast-medium">or</span>
-            <div className="flex-1 border-t border-gray-200" />
-          </div>
-          
-          <Button
-            variant="outline"
-            onClick={handleAddMoreDetails}
-            disabled={!canContinue || isGenerating}
-            className="min-h-[44px] w-full"
-            data-testid="button-add-more-details"
-          >
-            <MessageCircle className="w-4 h-4 mr-2" />
-            Add More Details First
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </Button>
-          
-          <p className="text-metadata text-contrast-medium text-center">
-            Adding more details helps generate more accurate documentation
+          <p className="mt-2 text-xs text-[#6b5d52]">
+            Style influences wireframe aesthetics and color suggestions
           </p>
         </div>
 
-        <div className="mt-8 flex items-center justify-between">
-          <button
-            onClick={() => setLocation("/")}
-            className="text-description text-contrast-medium hover:text-accent"
-            data-testid="button-back-home"
+        {/* Core details */}
+        <div style={{ paddingTop: "36px" }}>
+          <p
+            className="text-[#a89a8c] font-semibold uppercase mb-3"
+            style={{ fontSize: "11px", letterSpacing: "0.1em" }}
           >
-            ← Back to home
+            Core Details
+          </p>
+          <div className="flex flex-col gap-2.5">
+            <input
+              type="text"
+              value={problemStatement}
+              onChange={(e) => setProblemStatement(e.target.value)}
+              placeholder="What problem does this solve?"
+              aria-label="Problem statement"
+              data-testid="input-problem-statement"
+              className={fieldInputCls}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#f0b65e";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+            <input
+              type="text"
+              value={primaryUsers}
+              onChange={(e) => setPrimaryUsers(e.target.value)}
+              placeholder="Who are the primary users?"
+              aria-label="Primary users"
+              data-testid="input-primary-users"
+              className={fieldInputCls}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#f0b65e";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+            <input
+              type="text"
+              value={v1Definition}
+              onChange={(e) => setV1Definition(e.target.value)}
+              placeholder="What does v1 look like?"
+              aria-label="Version 1 scope"
+              data-testid="input-v1-definition"
+              className={fieldInputCls}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#f0b65e";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Optional details */}
+        <div style={{ paddingTop: "24px" }}>
+          <button
+            type="button"
+            onClick={() => setShowOptional((v) => !v)}
+            aria-expanded={showOptional}
+            aria-controls="optional-fields"
+            data-testid="button-show-optional"
+            className="flex items-center gap-2 transition-colors"
+            style={{
+              background: "none",
+              border: "none",
+              padding: "6px 0",
+              color: "#a89a8c",
+              fontFamily: "inherit",
+              fontSize: "14px",
+              fontWeight: 500,
+              cursor: "pointer",
+              letterSpacing: "0.01em",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#f5f0eb")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
+          >
+            <ChevronDown
+              className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
+              style={{ transform: showOptional ? "rotate(180deg)" : "rotate(0deg)" }}
+            />
+            More details (optional)
           </button>
+
+          {showOptional && (
+            <div
+              id="optional-fields"
+              aria-hidden={!showOptional}
+              className="flex flex-col gap-2.5 pt-3"
+            >
+              <input
+                type="text"
+                value={mainFeatures}
+                onChange={(e) => setMainFeatures(e.target.value)}
+                placeholder="Main features (comma-separated)"
+                aria-label="Main features"
+                data-testid="input-main-features"
+                className={fieldInputCls}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "#f0b65e";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+              <input
+                type="text"
+                value={techConstraints}
+                onChange={(e) => setTechConstraints(e.target.value)}
+                placeholder="Tech constraints (e.g. no-code, React, iOS only)"
+                aria-label="Tech constraints"
+                data-testid="input-tech-constraints"
+                className={fieldInputCls}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "#f0b65e";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+              <input
+                type="url"
+                value={inspirationLink}
+                onChange={(e) => setInspirationLink(e.target.value)}
+                placeholder="Inspiration link (optional URL)"
+                aria-label="Inspiration link"
+                data-testid="input-inspiration-link"
+                className={fieldInputCls}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "#f0b65e";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+      </div>{/* /page-content */}
+
+      {/* ── Sticky CTA bar ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-50 border-t"
+        style={{
+          background: "rgba(17,15,13,0.96)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          borderColor: "rgba(200,180,160,0.08)",
+          padding: "14px 24px",
+        }}
+      >
+        <div
+          className="mx-auto flex items-center flex-wrap gap-4"
+          style={{ maxWidth: "672px" }}
+        >
+          {/* Primary CTA */}
           <button
-            onClick={() => setLocation("/style")}
-            className="text-description text-contrast-medium hover:text-accent"
-            data-testid="button-change-style"
+            type="button"
+            onClick={handleContinueToSurvey}
+            disabled={!canContinue || isGenerating}
+            data-testid="button-continue-survey"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 font-bold transition-all duration-150"
+            style={{
+              height: "48px",
+              padding: "0 28px",
+              background: "#f0b65e",
+              color: "#1a0f00",
+              fontFamily: "inherit",
+              fontSize: "15px",
+              border: "none",
+              borderRadius: "10px",
+              cursor: canContinue && !isGenerating ? "pointer" : "not-allowed",
+              opacity: canContinue && !isGenerating ? 1 : 0.38,
+              letterSpacing: "-0.01em",
+            }}
           >
-            {savedStyle ? `Style: ${savedStyle.name}` : "Pick a style"} →
+            Continue to Survey &rarr;
+          </button>
+
+          <span className="text-[#6b5d52] text-sm flex-shrink-0">or</span>
+
+          {/* Secondary CTA */}
+          <button
+            type="button"
+            onClick={handleBuildDocsNow}
+            disabled={!canContinue || isGenerating}
+            data-testid="button-build-docs-now"
+            className="inline-flex items-center gap-1.5 font-medium transition-colors flex-shrink-0"
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              fontFamily: "inherit",
+              fontSize: "14px",
+              color: "#a89a8c",
+              cursor: canContinue && !isGenerating ? "pointer" : "not-allowed",
+              opacity: canContinue && !isGenerating ? 1 : 0.4,
+              whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => {
+              if (canContinue && !isGenerating) e.currentTarget.style.color = "#f5f0eb";
+            }}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              "or Build Docs Now →"
+            )}
           </button>
         </div>
       </div>
