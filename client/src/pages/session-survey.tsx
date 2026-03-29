@@ -287,30 +287,6 @@ export default function SessionSurveyPage() {
     },
   });
 
-  const submitSurveyMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
-        responses: surveyResponses,
-      });
-      return apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {});
-    },
-    onSuccess: () => {
-      refetchProject();
-      toast({
-        title: "Documentation generated!",
-        description: "Your complete product documentation is ready.",
-      });
-      setLocation(`/documents/${projectId}`);
-    },
-    onError: () => {
-      toast({
-        title: "Failed to generate documentation",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
   const saveProjectMutation = useMutation({
     mutationFn: async (name: string) => {
       if (projectId) {

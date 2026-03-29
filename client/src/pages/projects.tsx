@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { MessageCircle, Plus, FileText } from "lucide-react";
+import { MessageCircle, Plus, FileText, Sparkles } from "lucide-react";
 import ContextFlow from "@/components/context-flow";
 import StageCard from "@/components/stage-card";
 import { Button } from "@/components/ui/button";
@@ -157,21 +157,20 @@ export default function Dashboard() {
         )}
 
         {!currentProject && !projectsLoading && projects.length === 0 && (
-          <div className="text-center py-12">
-            <div className="inline-flex items-center justify-center p-4 bg-surface-tertiary rounded-full mb-4">
-              <FileText className="w-8 h-8 text-contrast-medium" />
+          <div className="flex flex-col items-center justify-center py-16 space-y-4">
+            <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center">
+              <Sparkles className="w-6 h-6 text-orange-500" />
             </div>
-            <h3 className="text-h4 font-medium text-contrast-high mb-2">No products yet</h3>
-            <p className="text-description text-contrast-medium mb-6 max-w-md mx-auto">
-              Start by describing what you want to build. We'll guide you through creating comprehensive documentation.
+            <h3 className="text-h4 font-medium text-contrast-high">No projects yet</h3>
+            <p className="text-description text-contrast-medium text-center max-w-sm">
+              Describe what you want to build and get a complete PRD, wireframes, architecture docs, and coding prompts.
             </p>
             <Button
               onClick={() => setLocation("/")}
               className="btn-primary min-h-[44px] px-8"
               data-testid="button-start-first-project"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              Create Your First Product
+              Start building
             </Button>
           </div>
         )}

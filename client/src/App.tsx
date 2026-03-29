@@ -4,6 +4,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const WelcomePage = lazy(() => import("@/pages/welcome"));
 const StylePickerPage = lazy(() => import("@/pages/style-picker"));
@@ -31,14 +32,11 @@ function Router() {
     <Switch>
       <Route path="/" component={WelcomePage} />
       <Route path="/style" component={StylePickerPage} />
-      <Route path="/intake">{() => <Redirect to="/details" />}</Route>
       <Route path="/details" component={DetailsPage} />
       <Route path="/projects" component={ProjectsPage} />
       <Route path="/stage/:stageId" component={StagePage} />
-      <Route path="/interview/:projectId">{() => <Redirect to="/session/survey" />}</Route>
       <Route path="/documents/:projectId" component={DocumentsPage} />
       <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
-      <Route path="/session/interview">{() => <Redirect to="/session/survey" />}</Route>
       <Route path="/session/sections" component={SessionSectionsPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
       <Route path="/admin" component={AdminPage} />
@@ -53,7 +51,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <ErrorBoundary>
+          <Router />
+        </ErrorBoundary>
       </TooltipProvider>
     </QueryClientProvider>
   );

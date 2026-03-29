@@ -60,7 +60,6 @@ export default function SessionSectionsPage() {
         title: projectId ? "Project updated!" : "Project saved!",
         description: `"${updatedProject.name}" has been saved successfully.`,
       });
-      sessionStorage.setItem("sectionsProjectId", updatedProject.id);
     },
     onError: () => {
       toast({
