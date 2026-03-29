@@ -19,7 +19,11 @@ function getDatabaseUrl(): string {
 }
 
 export async function runMigrations() {
-  const pool = new Pool({ connectionString: getDatabaseUrl() });
+  const dbUrl = getDatabaseUrl();
+  const connString = !dbUrl.includes('sslmode=')
+    ? dbUrl + (dbUrl.includes('?') ? '&' : '?') + 'sslmode=require'
+    : dbUrl;
+  const pool = new Pool({ connectionString: connString });
   
   try {
     console.log("Running database migrations...");
@@ -198,6 +202,50 @@ export async function runMigrations() {
       END $$;
     `);
     
+    // Create user_settings table for BYOK LLM configuration
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "user_settings" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "user_id" varchar(255) NOT NULL UNIQUE,
+        "llm_provider" text DEFAULT 'groq',
+        "llm_api_key" text,
+        "llm_model" text DEFAULT 'llama-3.3-70b-versatile',
+        "created_at" timestamp DEFAULT now(),
+        "updated_at" timestamp DEFAULT now()
+      )
+    `);
+
+    // Enable RLS on all public tables
+    await pool.query(`
+      DO $$
+      DECLARE
+        tbl TEXT;
+      BEGIN
+        FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+        LOOP
+          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+        END LOOP;
+      END $$;
+    `);
+
+    // RLS policies — projects scoped to user_id, user_settings scoped to user_id
+    await pool.query(`
+      DO $$
+      BEGIN
+        -- Projects: users see their own + unowned projects (demo)
+        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'projects_user_isolation') THEN
+          CREATE POLICY projects_user_isolation ON projects
+            USING (user_id IS NULL OR user_id = current_setting('app.current_user_id', true));
+        END IF;
+
+        -- User settings: users see only their own
+        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_settings_isolation') THEN
+          CREATE POLICY user_settings_isolation ON user_settings
+            USING (user_id = current_setting('app.current_user_id', true));
+        END IF;
+      END $$;
+    `);
+
     console.log("Database migrations completed successfully!");
     return true;
   } catch (error) {

@@ -24,9 +24,14 @@ function getDatabaseUrl(): string {
 
 const dbUrl = getDatabaseUrl();
 
-const pool = dbUrl
+// Append sslmode=require if not already present (Neon requires SSL)
+const connString = dbUrl && !dbUrl.includes('sslmode=')
+  ? dbUrl + (dbUrl.includes('?') ? '&' : '?') + 'sslmode=require'
+  : dbUrl;
+
+const pool = connString
   ? new Pool({
-      connectionString: dbUrl,
+      connectionString: connString,
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
