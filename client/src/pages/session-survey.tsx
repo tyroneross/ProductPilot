@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil } from "lucide-react";
+import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil, Menu, X, Check } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,9 @@ export default function SessionSurveyPage() {
     category: "general",
     isActive: true,
   });
+  // Mobile sidebar drawer state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const draftCreated = useRef(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -47,10 +50,10 @@ export default function SessionSurveyPage() {
   const productIdea = sessionStorage.getItem("productIdea") || "";
   const projectType = sessionStorage.getItem("projectType") || "not-sure";
   const projectPurpose = sessionStorage.getItem("projectPurpose") || "";
-  
+
   const intakeAnswersRaw = sessionStorage.getItem("intakeAnswers");
   const intakeAnswers = intakeAnswersRaw ? JSON.parse(intakeAnswersRaw) : null;
-  
+
   const minimumDetailsRaw = sessionStorage.getItem("minimumDetails");
   const minimumDetails = minimumDetailsRaw ? JSON.parse(minimumDetailsRaw) : null;
 
@@ -120,20 +123,16 @@ export default function SessionSurveyPage() {
   // Restore saved survey responses and calculate current section when project loads
   const surveyRestored = useRef(false);
   useEffect(() => {
-    // Wait for both project and surveyDefinition with sections to be available
     const sections = surveyDefinition?.sections;
     if (!project || !sections || sections.length === 0 || surveyRestored.current) {
       return;
     }
-    
-    // Restore saved responses
+
     const savedResponses = project.surveyResponses as SurveyResponse | null;
     if (savedResponses && Object.keys(savedResponses).length > 0) {
       setSurveyResponses(savedResponses);
-      
-      // Calculate which section to start on based on answered questions
+
       let lastCompletedSection = -1;
-      
       for (let i = 0; i < sections.length; i++) {
         const section = sections[i];
         const allQuestionsAnswered = section.questions.every(
@@ -145,12 +144,9 @@ export default function SessionSurveyPage() {
           break;
         }
       }
-      
-      // Start at the next incomplete section, or last section if all complete
+
       const targetSection = Math.min(lastCompletedSection + 1, sections.length - 1);
       setCurrentSectionIndex(targetSection);
-      
-      // Mark as restored AFTER state updates
       surveyRestored.current = true;
     }
   }, [project, surveyDefinition]);
@@ -245,7 +241,7 @@ export default function SessionSurveyPage() {
       if (projectId && prdStage) {
         queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
       }
-      
+
       if (data && data.userMessage && !data.aiMessage) {
         toast({
           title: "AI service error",
@@ -254,7 +250,7 @@ export default function SessionSurveyPage() {
         });
         return;
       }
-      
+
       setInputValue("");
     },
     onError: () => {
@@ -291,14 +287,11 @@ export default function SessionSurveyPage() {
     mutationFn: async (name: string) => {
       if (projectId) {
         const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { name });
-        const project = await res.json();
-        
+        const savedProject = await res.json();
         try {
           await apiRequest("POST", `/api/projects/${projectId}/claim`, {});
-        } catch (e) {
-        }
-        
-        return project;
+        } catch (e) {}
+        return savedProject;
       }
       return null;
     },
@@ -389,48 +382,44 @@ export default function SessionSurveyPage() {
   };
 
   const handleReadyToGenerate = async () => {
-    // Save survey responses first
     autoSaveSurveyMutation.mutate(surveyResponses);
-    // Show document selection dialog
     setShowDocumentSelection(true);
   };
 
   const handleConfirmGenerate = async () => {
     setShowDocumentSelection(false);
     setIsGeneratingDocs(true);
-    
+
     const selectedStageIds = new Set(
       stages.filter(s => documentSelections[s.id]?.selected).map(s => s.id)
     );
     const totalSelected = selectedStageIds.size;
     setGenerationProgress({ current: 0, total: totalSelected, stageName: "Starting..." });
-    
+
     let generationComplete = false;
-    
-    // Function to check completion and navigate
+
     const checkAndNavigate = async () => {
       if (generationComplete) return;
       try {
         const res = await fetch(`/api/projects/${projectId}/stages`);
         if (res.ok) {
           const updatedStages: Stage[] = await res.json();
-          const completedCount = updatedStages.filter(s => 
+          const completedCount = updatedStages.filter(s =>
             selectedStageIds.has(s.id) && s.progress === 100
           ).length;
-          const inProgressStage = updatedStages.find(s => 
+          const inProgressStage = updatedStages.find(s =>
             selectedStageIds.has(s.id) && s.progress > 0 && s.progress < 100
           );
-          const nextStage = updatedStages.find(s => 
+          const nextStage = updatedStages.find(s =>
             selectedStageIds.has(s.id) && s.progress === 0
           );
-          
+
           setGenerationProgress({
             current: completedCount,
             total: totalSelected,
             stageName: inProgressStage?.title || nextStage?.title || "Finishing up...",
           });
-          
-          // If all selected stages are complete, navigate immediately
+
           if (completedCount === totalSelected && totalSelected > 0) {
             generationComplete = true;
             if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
@@ -448,32 +437,27 @@ export default function SessionSurveyPage() {
         // Ignore polling errors
       }
     };
-    
-    // Start polling for stage progress
+
     pollIntervalRef.current = setInterval(checkAndNavigate, 2000);
-    
+
     try {
-      // Submit survey and generate docs with preferences
       await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
         responses: surveyResponses,
       });
-      
-      // Generate with document preferences
+
       const preferences = Object.entries(documentSelections)
         .filter(([_, pref]) => pref.selected)
         .map(([stageId, pref]) => ({
           stageId,
           detailLevel: pref.detailLevel,
         }));
-      
+
       await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
         documentPreferences: preferences,
       });
-      
-      // API returned - check one more time and navigate if not already done
+
       if (!generationComplete) {
         await checkAndNavigate();
-        // If still not complete (edge case), force navigate
         if (!generationComplete) {
           generationComplete = true;
           refetchProject();
@@ -541,7 +525,7 @@ export default function SessionSurveyPage() {
   const handleAddPrompt = () => {
     if (newPrompt.name && newPrompt.prompt) {
       let updatedPrompts: CustomPrompt[];
-      
+
       if (editingPromptId) {
         updatedPrompts = customPrompts.map((p) =>
           p.id === editingPromptId
@@ -566,7 +550,7 @@ export default function SessionSurveyPage() {
         };
         updatedPrompts = [...customPrompts, prompt];
       }
-      
+
       setCustomPrompts(updatedPrompts);
       savePromptsMutation.mutate(updatedPrompts);
       setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
@@ -613,8 +597,7 @@ export default function SessionSurveyPage() {
 
   const userMessages = messages.filter((m) => m.role === "user");
   const canGenerateSurvey = userMessages.length >= 3;
-  
-  // Progress tracking for discovery phase
+
   const TOTAL_DISCOVERY_QUESTIONS = 6;
   const discoveryProgress = Math.min(userMessages.length, TOTAL_DISCOVERY_QUESTIONS);
   const discoveryProgressPercent = Math.round((discoveryProgress / TOTAL_DISCOVERY_QUESTIONS) * 100);
@@ -634,7 +617,7 @@ export default function SessionSurveyPage() {
     }
     if (intakeAnswers) {
       const { buildingType, coreBehavior, aiUsage } = intakeAnswers;
-      
+
       if (coreBehavior === "ai-assist" || aiUsage === "generate" || aiUsage === "automate") {
         return "Tell me about the AI features you envision. What will the AI help users do, and what inputs will it need?";
       }
@@ -657,9 +640,27 @@ export default function SessionSurveyPage() {
     return "Tell me more about your idea. What problem does it solve, and who are the main users?";
   };
 
+  // ── Helper: determine step state ──────────────────────────────────────
+  const getStepState = (idx: number): "completed" | "active" | "locked" => {
+    if (!surveyDefinition) return idx === currentSectionIndex ? "active" : "locked";
+    if (idx < currentSectionIndex) return "completed";
+    if (idx === currentSectionIndex) return "active";
+    return "locked";
+  };
+
+  const sections = surveyDefinition?.sections ?? [];
+  const totalSections = sections.length;
+  const progressPercent = totalSections > 0
+    ? Math.round(((currentSectionIndex) / totalSections) * 100)
+    : 0;
+  const genProgressPercent = generationProgress.total > 0
+    ? Math.round((generationProgress.current / generationProgress.total) * 100)
+    : 0;
+  const selectedCount = Object.values(documentSelections).filter(s => s.selected).length;
+
+  // ── Discovery phase (unchanged visual) ────────────────────────────────
   const renderDiscoveryPhase = () => (
     <div className="flex-1 flex flex-col">
-      {/* Progress indicator for discovery phase */}
       <div className="px-6 pt-4 pb-2 bg-surface-secondary border-b border-gray-200">
         <div className="flex items-center justify-between mb-2">
           <span className="text-metadata text-contrast-medium" data-testid="discovery-progress-text">
@@ -670,7 +671,7 @@ export default function SessionSurveyPage() {
           </span>
         </div>
         <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden" data-testid="discovery-progress-bar">
-          <div 
+          <div
             className="h-full bg-accent transition-all duration-300 rounded-full"
             style={{ width: `${discoveryProgressPercent}%` }}
           />
@@ -804,284 +805,737 @@ export default function SessionSurveyPage() {
     </div>
   );
 
+  // ── Survey Phase — Step Wizard ─────────────────────────────────────────
   const renderSurveyPhase = () => {
     if (!surveyDefinition || !currentSection) {
       return (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-accent" />
-            <p className="text-description text-contrast-medium">Loading survey...</p>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#110f0d",
+          }}
+        >
+          <div style={{ textAlign: "center" }}>
+            <Loader2
+              style={{ width: 32, height: 32, color: "#f0b65e", margin: "0 auto 16px", animation: "spin 1s linear infinite" }}
+            />
+            <p style={{ color: "#a89a8c", fontSize: 14 }}>Loading survey...</p>
           </div>
         </div>
       );
     }
 
+    const nextSectionTitle = !isLastSection && sections[currentSectionIndex + 1]?.title;
+
     return (
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-2xl mx-auto">
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-metadata text-contrast-medium">
-                Section {currentSectionIndex + 1} of {surveyDefinition.sections.length}
+      <div
+        style={{
+          display: "flex",
+          height: "100%",
+          overflow: "hidden",
+          background: "#110f0d",
+          flex: 1,
+        }}
+      >
+        {/* ── Mobile overlay ── */}
+        {sidebarOpen && (
+          <div
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(17,15,13,0.8)",
+              zIndex: 100,
+              backdropFilter: "blur(2px)",
+            }}
+          />
+        )}
+
+        {/* ── Sidebar ── */}
+        <aside
+          style={{
+            width: 256,
+            minWidth: 256,
+            height: "100%",
+            background: "#231f1b",
+            borderRight: "1px solid rgba(200,180,160,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            overflow: "hidden",
+            transition: "transform 0.25s ease",
+            // Mobile: fixed drawer
+            ...(typeof window !== "undefined" && window.innerWidth <= 768
+              ? {
+                  position: "fixed" as const,
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  zIndex: 101,
+                  transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+                }
+              : {}),
+          }}
+          className="survey-sidebar"
+        >
+          {/* Top */}
+          <div style={{ padding: "20px 16px 16px", display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setLocation("/")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "none", border: "none", color: "#a89a8c",
+                  fontSize: 13, fontFamily: "inherit", cursor: "pointer", padding: 0,
+                }}
+                data-testid="button-back-home"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M9 11L5 7L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#f5f0eb", letterSpacing: "-0.01em" }}>
+                Product<span style={{ color: "#f0b65e" }}>Pilot</span>
               </span>
-              <div className="flex space-x-1">
-                {surveyDefinition.sections.map((_, idx) => (
-                  <div
-                    key={idx}
-                    className={`w-8 h-1 rounded ${
-                      idx <= currentSectionIndex ? "bg-accent" : "bg-gray-200"
-                    }`}
-                  />
-                ))}
-              </div>
             </div>
-            <h2 className="text-h3 font-medium text-contrast-high">{currentSection.title}</h2>
-            <p className="text-description text-contrast-medium mt-1">{currentSection.description}</p>
+            {project?.name && (
+              <div
+                style={{
+                  fontSize: 13, fontWeight: 500, color: "#f5f0eb",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  padding: "0 2px",
+                }}
+                data-testid="text-project-name"
+              >
+                {project.name}
+              </div>
+            )}
           </div>
 
-          <div className="space-y-8">
-            {currentSection.questions.map((question) => (
-              <div key={question.id} className="bg-surface-primary rounded-lg border border-gray-200 p-6">
-                <Label className="text-description font-medium text-contrast-high mb-4 block">
-                  {question.question}
-                  {question.required && <span className="text-red-500 ml-1">*</span>}
-                </Label>
+          <div style={{ height: 1, background: "rgba(200,180,160,0.08)", flexShrink: 0 }} />
 
-                {surveyResponses[question.id] === "N/A" ? (
-                  <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
-                    <span className="text-contrast-medium">Marked as N/A</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleSurveyResponseChange(question.id, "")}
-                      data-testid={`button-undo-na-${question.id}`}
-                    >
-                      Undo
-                    </Button>
+          {/* Steps list */}
+          <nav
+            style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}
+          >
+            {sections.map((section, idx) => {
+              const state = getStepState(idx);
+              return (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    if (state === "completed") {
+                      setCurrentSectionIndex(idx);
+                      setSidebarOpen(false);
+                    }
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 16px", fontSize: 13, width: "100%",
+                    background: state === "active" ? "rgba(240,182,94,0.06)" : "none",
+                    border: "none",
+                    borderLeft: state === "active" ? "2px solid #f0b65e" : "2px solid transparent",
+                    color: state === "completed" ? "#a89a8c" : state === "active" ? "#f5f0eb" : "#6b5d52",
+                    fontWeight: state === "active" ? 500 : 400,
+                    fontFamily: "inherit",
+                    cursor: state === "completed" ? "pointer" : "default",
+                    textAlign: "left",
+                    position: "relative",
+                  }}
+                >
+                  {/* Icon */}
+                  <div style={{ width: 16, height: 16, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {state === "completed" && (
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M2.5 7L5.5 10L11.5 4" stroke="#f0b65e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                    {state === "active" && (
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f0b65e" }} />
+                    )}
+                    {state === "locked" && (
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", border: "1px solid rgba(200,180,160,0.16)" }} />
+                    )}
                   </div>
-                ) : (
-                  <>
-                    {question.type === "slider" && (
-                      <div className="space-y-4">
-                        <Slider
-                          value={[typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] as number : (question.min || 1)]}
-                          onValueChange={([value]) => handleSurveyResponseChange(question.id, value)}
-                          min={question.min || 1}
-                          max={question.max || 5}
-                          step={1}
-                          className="w-full"
-                          data-testid={`slider-${question.id}`}
-                        />
-                        <div className="flex justify-between text-metadata text-contrast-medium">
-                          <span>{question.minLabel || question.min}</span>
-                          <span className="text-accent font-medium">
-                            {typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] : "-"}
-                          </span>
-                          <span>{question.maxLabel || question.max}</span>
-                        </div>
-                      </div>
-                    )}
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {section.title}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
 
-                    {question.type === "single-select" && question.options && (
-                      <RadioGroup
-                        value={surveyResponses[question.id] as string || ""}
-                        onValueChange={(value) => handleSurveyResponseChange(question.id, value)}
-                        className="space-y-2"
-                        data-testid={`radio-${question.id}`}
-                      >
-                        {question.options.map((option) => (
-                          <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                            <RadioGroupItem value={option} id={`${question.id}-${option}`} />
-                            <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                              {option}
-                            </Label>
-                          </div>
-                        ))}
-                      </RadioGroup>
-                    )}
+          {/* Footer progress */}
+          <div style={{ padding: 16, flexShrink: 0, borderTop: "1px solid rgba(200,180,160,0.08)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b5d52", marginBottom: 8 }}>
+              <span>Progress</span>
+              <span>{currentSectionIndex + 1} of {totalSections}</span>
+            </div>
+            <div style={{ height: 3, background: "rgba(200,180,160,0.08)", borderRadius: 99, overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: `${progressPercent}%`,
+                  background: "#f0b65e",
+                  borderRadius: 99,
+                  transition: "width 0.4s ease",
+                }}
+              />
+            </div>
+          </div>
+        </aside>
 
-                    {question.type === "multi-select" && question.options && (
-                      <div className="space-y-2" data-testid={`checkbox-${question.id}`}>
-                        {question.options.map((option) => {
-                          const currentValues = (surveyResponses[question.id] as string[]) || [];
-                          return (
-                            <div key={option} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-surface-secondary">
-                              <Checkbox
-                                id={`${question.id}-${option}`}
-                                checked={currentValues.includes(option)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    handleSurveyResponseChange(question.id, [...currentValues, option]);
-                                  } else {
-                                    handleSurveyResponseChange(question.id, currentValues.filter((v) => v !== option));
-                                  }
-                                }}
-                              />
-                              <Label htmlFor={`${question.id}-${option}`} className="text-description text-contrast-high cursor-pointer flex-1">
-                                {option}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+        {/* ── Main area ── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
 
-                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleMarkNA(question.id)}
-                          className="text-contrast-medium hover:text-contrast-high"
-                          data-testid={`button-na-${question.id}`}
-                        >
-                          Mark N/A
-                        </Button>
-                      </div>
-                      <div>
-                        <Label className="text-metadata text-contrast-medium mb-1 block">
-                          Additional notes (optional)
-                        </Label>
-                        <textarea
-                          value={(surveyResponses[`${question.id}_note`] as string) || ""}
-                          onChange={(e) => handleFreeformNoteChange(question.id, e.target.value)}
-                          placeholder="Add any clarifications or context..."
-                          className="w-full p-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-accent/20"
-                          rows={2}
-                          data-testid={`input-note-${question.id}`}
-                        />
-                      </div>
+          {/* Mobile top bar */}
+          <div
+            className="survey-mobile-topbar"
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 16px",
+              background: "#231f1b",
+              borderBottom: "1px solid rgba(200,180,160,0.08)",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#f5f0eb" }}>
+              Product<span style={{ color: "#f0b65e" }}>Pilot</span>
+            </span>
+            <button
+              onClick={() => setSidebarOpen(true)}
+              style={{ background: "none", border: "none", color: "#a89a8c", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
+              aria-label="Open menu"
+            >
+              <Menu size={20} />
+            </button>
+          </div>
+
+          {/* Mobile step dots */}
+          <div
+            className="survey-step-dots"
+            style={{
+              display: "none",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              padding: "10px 16px",
+              background: "#231f1b",
+              borderBottom: "1px solid rgba(200,180,160,0.08)",
+            }}
+          >
+            {sections.map((_, idx) => {
+              const state = getStepState(idx);
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    width: state === "active" ? 18 : 6,
+                    height: 6,
+                    borderRadius: state === "active" ? 3 : "50%",
+                    background: state === "completed" ? "rgba(240,182,94,0.4)" : state === "active" ? "#f0b65e" : "rgba(200,180,160,0.16)",
+                    transition: "width 0.2s, background 0.2s",
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Scrollable content */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "48px 32px 120px",
+            }}
+            className="survey-content-scroll"
+          >
+            <div style={{ maxWidth: 640, margin: "0 auto" }}>
+
+              {/* Generating overlay (inline) */}
+              {isGeneratingDocs && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "64px 24px",
+                  }}
+                  data-testid="generation-overlay"
+                >
+                  <Loader2
+                    style={{
+                      width: 40, height: 40, color: "#f0b65e",
+                      margin: "0 auto 20px",
+                      animation: "spin 1s linear infinite",
+                    }}
+                  />
+                  <h3 style={{ fontSize: 20, fontWeight: 700, color: "#f5f0eb", marginBottom: 8 }}>
+                    Generating Documentation
+                  </h3>
+                  <p style={{ color: "#a89a8c", marginBottom: 24 }}>{generationProgress.stageName}</p>
+                  <div style={{ maxWidth: 320, margin: "0 auto" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b5d52", marginBottom: 8 }}>
+                      <span>Progress</span>
+                      <span>{generationProgress.current} of {generationProgress.total} documents</span>
                     </div>
-                  </>
+                    <div style={{ height: 4, background: "rgba(200,180,160,0.08)", borderRadius: 99, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${genProgressPercent}%`,
+                          background: "#f0b65e",
+                          borderRadius: 99,
+                          transition: "width 0.5s ease",
+                        }}
+                      />
+                    </div>
+                    <p style={{ fontSize: 12, color: "#6b5d52", marginTop: 12 }}>This may take a minute...</p>
+                  </div>
+                </div>
+              )}
+
+              {!isGeneratingDocs && (
+                <>
+                  {/* Step header */}
+                  <div
+                    style={{
+                      fontSize: 11, fontWeight: 500, color: "#6b5d52",
+                      textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8,
+                    }}
+                  >
+                    Step {currentSectionIndex + 1}
+                  </div>
+                  <h2
+                    style={{
+                      fontSize: 24, fontWeight: 700, color: "#f5f0eb",
+                      letterSpacing: "-0.02em", lineHeight: 1.2, marginBottom: 10,
+                    }}
+                  >
+                    {currentSection.title}
+                  </h2>
+                  {currentSection.description && (
+                    <p style={{ fontSize: 15, color: "#a89a8c", lineHeight: 1.6, marginBottom: 36 }}>
+                      {currentSection.description}
+                    </p>
+                  )}
+
+                  {/* Questions */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+                    {currentSection.questions.map((question, qIdx) => (
+                      <div key={question.id} style={{ paddingTop: qIdx === 0 ? 0 : 0 }}>
+                        <div
+                          style={{ fontSize: 13, fontWeight: 500, color: "#f5f0eb", marginBottom: 12 }}
+                        >
+                          {question.question}
+                          {question.required && <span style={{ color: "#f0b65e", marginLeft: 4 }}>*</span>}
+                        </div>
+
+                        {surveyResponses[question.id] === "N/A" ? (
+                          <div
+                            style={{
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                              padding: "12px 16px",
+                              background: "rgba(200,180,160,0.04)",
+                              border: "1px solid rgba(200,180,160,0.08)",
+                              borderRadius: 8,
+                            }}
+                          >
+                            <span style={{ fontSize: 13, color: "#6b5d52" }}>Marked as N/A</span>
+                            <button
+                              onClick={() => handleSurveyResponseChange(question.id, "")}
+                              style={{
+                                background: "none", border: "none",
+                                color: "#a89a8c", fontSize: 12, cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                              data-testid={`button-undo-na-${question.id}`}
+                            >
+                              Undo
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Slider */}
+                            {question.type === "slider" && (
+                              <div>
+                                <Slider
+                                  value={[typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] as number : (question.min || 1)]}
+                                  onValueChange={([value]) => handleSurveyResponseChange(question.id, value)}
+                                  min={question.min || 1}
+                                  max={question.max || 5}
+                                  step={1}
+                                  className="w-full"
+                                  data-testid={`slider-${question.id}`}
+                                />
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b5d52", marginTop: 8 }}>
+                                  <span>{question.minLabel || question.min}</span>
+                                  <span style={{ color: "#f0b65e", fontWeight: 500 }}>
+                                    {typeof surveyResponses[question.id] === "number" ? surveyResponses[question.id] : "-"}
+                                  </span>
+                                  <span>{question.maxLabel || question.max}</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Single-select — radio cards */}
+                            {question.type === "single-select" && question.options && (
+                              <div
+                                style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                                data-testid={`radio-${question.id}`}
+                              >
+                                {question.options.map((option) => {
+                                  const selected = surveyResponses[question.id] === option;
+                                  return (
+                                    <button
+                                      key={option}
+                                      onClick={() => handleSurveyResponseChange(question.id, option)}
+                                      style={{
+                                        display: "flex", alignItems: "center", gap: 12,
+                                        padding: "12px 16px",
+                                        borderRadius: 8,
+                                        border: selected ? "1px solid rgba(240,182,94,0.30)" : "1px solid rgba(200,180,160,0.08)",
+                                        borderLeft: selected ? "2px solid #f0b65e" : undefined,
+                                        background: selected ? "rgba(240,182,94,0.05)" : "#1a1714",
+                                        color: selected ? "#f5f0eb" : "#a89a8c",
+                                        fontSize: 13,
+                                        fontFamily: "inherit",
+                                        cursor: "pointer",
+                                        textAlign: "left",
+                                        width: "100%",
+                                        position: "relative",
+                                      }}
+                                    >
+                                      {/* Radio dot */}
+                                      <div
+                                        style={{
+                                          width: 16, height: 16, borderRadius: "50%",
+                                          border: selected ? "1.5px solid #f0b65e" : "1.5px solid rgba(200,180,160,0.16)",
+                                          flexShrink: 0,
+                                          display: "flex", alignItems: "center", justifyContent: "center",
+                                        }}
+                                      >
+                                        {selected && (
+                                          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#f0b65e" }} />
+                                        )}
+                                      </div>
+                                      <span>{option}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Multi-select — chips */}
+                            {question.type === "multi-select" && question.options && (
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(3, 1fr)",
+                                  gap: 10,
+                                }}
+                                className="survey-chip-grid"
+                                data-testid={`checkbox-${question.id}`}
+                              >
+                                {question.options.map((option) => {
+                                  const currentValues = (surveyResponses[question.id] as string[]) || [];
+                                  const selected = currentValues.includes(option);
+                                  return (
+                                    <button
+                                      key={option}
+                                      onClick={() => {
+                                        if (selected) {
+                                          handleSurveyResponseChange(question.id, currentValues.filter(v => v !== option));
+                                        } else {
+                                          handleSurveyResponseChange(question.id, [...currentValues, option]);
+                                        }
+                                      }}
+                                      style={{
+                                        height: 44,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        borderRadius: 10,
+                                        border: selected ? "1px solid #f0b65e" : "1px solid rgba(200,180,160,0.08)",
+                                        background: selected ? "rgba(240,182,94,0.08)" : "#1a1714",
+                                        color: selected ? "#f0b65e" : "#a89a8c",
+                                        fontSize: 13,
+                                        fontWeight: selected ? 500 : 400,
+                                        fontFamily: "inherit",
+                                        cursor: "pointer",
+                                        padding: "0 16px",
+                                        textAlign: "center",
+                                        userSelect: "none",
+                                      }}
+                                    >
+                                      {option}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Text input */}
+                            {question.type === "text" && (
+                              <div>
+                                {question.helperText && (
+                                  <p style={{ fontSize: 11, color: "#6b5d52", marginBottom: 8 }}>
+                                    {question.helperText}
+                                  </p>
+                                )}
+                                <input
+                                  type="text"
+                                  value={(surveyResponses[question.id] as string) || ""}
+                                  onChange={(e) => handleSurveyResponseChange(question.id, e.target.value)}
+                                  placeholder="Type your answer..."
+                                  style={{
+                                    width: "100%", height: 44,
+                                    background: "#1a1714",
+                                    border: "1px solid rgba(200,180,160,0.08)",
+                                    borderRadius: 8,
+                                    color: "#f5f0eb",
+                                    fontFamily: "inherit",
+                                    fontSize: 13,
+                                    padding: "0 14px",
+                                    outline: "none",
+                                  }}
+                                  data-testid={`input-${question.id}`}
+                                />
+                              </div>
+                            )}
+
+                            {/* Fallback: textarea for any other type */}
+                            {question.type !== "slider" && question.type !== "single-select" && question.type !== "multi-select" && question.type !== "text" && (
+                              <textarea
+                                value={(surveyResponses[question.id] as string) || ""}
+                                onChange={(e) => handleSurveyResponseChange(question.id, e.target.value)}
+                                placeholder="Type your answer..."
+                                rows={3}
+                                style={{
+                                  width: "100%",
+                                  background: "#1a1714",
+                                  border: "1px solid rgba(200,180,160,0.08)",
+                                  borderRadius: 8,
+                                  color: "#f5f0eb",
+                                  fontFamily: "inherit",
+                                  fontSize: 13,
+                                  padding: "12px 14px",
+                                  outline: "none",
+                                  resize: "vertical",
+                                }}
+                                data-testid={`textarea-${question.id}`}
+                              />
+                            )}
+
+                            {/* N/A + notes row */}
+                            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(200,180,160,0.06)" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                <button
+                                  onClick={() => handleMarkNA(question.id)}
+                                  style={{
+                                    background: "none", border: "none",
+                                    color: "#6b5d52", fontSize: 11, cursor: "pointer",
+                                    fontFamily: "inherit", padding: 0,
+                                  }}
+                                  data-testid={`button-na-${question.id}`}
+                                >
+                                  Mark N/A
+                                </button>
+                              </div>
+                              <textarea
+                                value={(surveyResponses[`${question.id}_note`] as string) || ""}
+                                onChange={(e) => handleFreeformNoteChange(question.id, e.target.value)}
+                                placeholder="Additional notes (optional)..."
+                                rows={2}
+                                style={{
+                                  width: "100%",
+                                  background: "#1a1714",
+                                  border: "1px solid rgba(200,180,160,0.06)",
+                                  borderRadius: 6,
+                                  color: "#a89a8c",
+                                  fontFamily: "inherit",
+                                  fontSize: 12,
+                                  padding: "8px 10px",
+                                  outline: "none",
+                                  resize: "none",
+                                }}
+                                data-testid={`input-note-${question.id}`}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ── Bottom bar ── */}
+          {!isGeneratingDocs && (
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                borderTop: "1px solid rgba(200,180,160,0.08)",
+                background: "#231f1b",
+                padding: "14px 32px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+                zIndex: 10,
+              }}
+              className="survey-bottom-bar"
+            >
+              <button
+                onClick={() => setCurrentSectionIndex((prev) => Math.max(0, prev - 1))}
+                disabled={currentSectionIndex === 0}
+                style={{
+                  background: "none", border: "none",
+                  color: currentSectionIndex === 0 ? "#3d3530" : "#a89a8c",
+                  fontSize: 13, fontWeight: 500, fontFamily: "inherit",
+                  cursor: currentSectionIndex === 0 ? "default" : "pointer",
+                  padding: "6px 0",
+                }}
+                data-testid="button-prev-section"
+              >
+                Back
+              </button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {!isLastSection && (
+                  <button
+                    onClick={handleSkipSection}
+                    style={{
+                      background: "none", border: "none",
+                      color: "#6b5d52", fontSize: 12, fontFamily: "inherit",
+                      cursor: "pointer", padding: "6px 0",
+                    }}
+                    data-testid="button-skip-section"
+                  >
+                    Skip
+                  </button>
+                )}
+
+                {isLastSection ? (
+                  <button
+                    onClick={handleReadyToGenerate}
+                    disabled={autoSaveSurveyMutation.isPending}
+                    style={{
+                      height: 40, padding: "0 24px",
+                      borderRadius: 10, border: "none",
+                      background: "#f0b65e", color: "#1a1208",
+                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 6,
+                      opacity: autoSaveSurveyMutation.isPending ? 0.6 : 1,
+                    }}
+                    data-testid="button-submit-survey"
+                  >
+                    Generate Documents
+                    <ChevronRight size={14} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleNextSection}
+                    disabled={autoSaveSurveyMutation.isPending}
+                    style={{
+                      height: 40, padding: "0 24px",
+                      borderRadius: 10, border: "none",
+                      background: "#f0b65e", color: "#1a1208",
+                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                      cursor: autoSaveSurveyMutation.isPending ? "default" : "pointer",
+                      display: "flex", alignItems: "center", gap: 6,
+                      opacity: autoSaveSurveyMutation.isPending ? 0.6 : 1,
+                    }}
+                    data-testid="button-next-section"
+                  >
+                    {autoSaveSurveyMutation.isPending ? (
+                      <>
+                        <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        {nextSectionTitle ? `Next: ${nextSectionTitle}` : "Next"}
+                        <ChevronRight size={14} />
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
-            ))}
-          </div>
-
-          <div className="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentSectionIndex((prev) => Math.max(0, prev - 1))}
-              disabled={currentSectionIndex === 0}
-              data-testid="button-prev-section"
-            >
-              Previous
-            </Button>
-            
-            <div className="flex items-center gap-3">
-              {!isLastSection && (
-                <Button
-                  variant="ghost"
-                  onClick={handleSkipSection}
-                  className="text-contrast-medium"
-                  data-testid="button-skip-section"
-                >
-                  Skip Section
-                </Button>
-              )}
-              
-              {isLastSection ? (
-                <Button
-                  onClick={handleReadyToGenerate}
-                  disabled={isGeneratingDocs}
-                  className="btn-primary"
-                  data-testid="button-submit-survey"
-                >
-                  {isGeneratingDocs ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Generating Docs...
-                    </>
-                  ) : (
-                    "Review & Generate"
-                  )}
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleNextSection}
-                  disabled={autoSaveSurveyMutation.isPending}
-                  className="btn-primary"
-                  data-testid="button-next-section"
-                >
-                  {autoSaveSurveyMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      Next Section
-                      <ChevronRight className="w-4 h-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-              )}
             </div>
-          </div>
+          )}
         </div>
       </div>
     );
   };
 
-  const selectedCount = Object.values(documentSelections).filter(s => s.selected).length;
-  const progressPercent = generationProgress.total > 0 
-    ? Math.round((generationProgress.current / generationProgress.total) * 100) 
-    : 0;
-
+  // ── Root render ────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-surface-secondary flex flex-col">
-      <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocation("/")}
-              className="min-h-[44px] min-w-[44px]"
-              data-testid="button-back-home"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <h1 className="text-h3 font-medium text-contrast-high">Survey Mode</h1>
-              <p className="text-description text-contrast-medium">
-                {surveyPhase === "discovery" 
-                  ? "Quick discovery chat before your personalized survey"
-                  : "Complete the survey to generate your documentation"
-                }
-              </p>
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: surveyPhase === "survey" ? "#110f0d" : undefined,
+      }}
+      className={surveyPhase !== "survey" ? "min-h-screen bg-surface-secondary flex flex-col" : ""}
+    >
+      {/* Discovery phase uses original header; survey phase sidebar has back button */}
+      {surveyPhase === "discovery" && (
+        <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setLocation("/")}
+                className="min-h-[44px] min-w-[44px]"
+                data-testid="button-back-home"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+              <div>
+                <h1 className="text-h3 font-medium text-contrast-high">Survey Mode</h1>
+                <p className="text-description text-contrast-medium">
+                  Quick discovery chat before your personalized survey
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 shrink-0">
+              <Button
+                variant="outline"
+                onClick={() => setShowPromptsSection(true)}
+                className="min-h-[44px] shrink-0"
+                data-testid="button-manage-prompts"
+              >
+                <Sparkles className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Prompts</span>
+                {customPrompts.length > 0 && (
+                  <span className="ml-1 sm:ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
+                    {customPrompts.length}
+                  </span>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleSave}
+                className="min-h-[44px] shrink-0"
+                data-testid="button-save-project"
+              >
+                <Save className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Save Project</span>
+              </Button>
             </div>
           </div>
-          <div className="flex items-center space-x-2 shrink-0">
-            <Button
-              variant="outline"
-              onClick={() => setShowPromptsSection(true)}
-              className="min-h-[44px] shrink-0"
-              data-testid="button-manage-prompts"
-            >
-              <Sparkles className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Prompts</span>
-              {customPrompts.length > 0 && (
-                <span className="ml-1 sm:ml-2 bg-accent text-surface-primary text-xs px-2 py-0.5 rounded-full">
-                  {customPrompts.length}
-                </span>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleSave}
-              className="min-h-[44px] shrink-0"
-              data-testid="button-save-project"
-            >
-              <Save className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Save Project</span>
-            </Button>
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      {/* Project name bar - persistent context */}
-      {project && (
+      {surveyPhase === "discovery" && project && (
         <div className="bg-surface-tertiary border-b border-gray-100 px-6 py-2">
           <div className="max-w-4xl mx-auto">
             <p className="text-metadata text-contrast-medium" data-testid="text-project-name">
@@ -1091,37 +1545,42 @@ export default function SessionSurveyPage() {
         </div>
       )}
 
-      {/* Generation progress overlay */}
-      {isGeneratingDocs && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="generation-overlay">
-          <div className="bg-surface-primary rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl">
-            <div className="text-center mb-6">
-              <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-accent" />
-              <h3 className="text-h4 font-medium text-contrast-high mb-2">Generating Documentation</h3>
-              <p className="text-description text-contrast-medium">{generationProgress.stageName}</p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-metadata text-contrast-medium">
-                <span>Progress</span>
-                <span>{generationProgress.current} of {generationProgress.total} documents</span>
-              </div>
-              <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-accent transition-all duration-500 rounded-full"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-              <p className="text-metadata text-contrast-medium text-center mt-4">
-                This may take a minute...
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <main className="flex-1 flex flex-col max-w-4xl w-full mx-auto">
+      <main
+        style={{ flex: 1, display: "flex", flexDirection: "column" }}
+        className={surveyPhase !== "survey" ? "flex-1 flex flex-col max-w-4xl w-full mx-auto" : ""}
+      >
         {surveyPhase === "discovery" ? renderDiscoveryPhase() : renderSurveyPhase()}
       </main>
+
+      {/* Responsive CSS for survey wizard */}
+      <style>{`
+        @media (max-width: 768px) {
+          .survey-sidebar {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            bottom: 0 !important;
+            z-index: 101 !important;
+          }
+          .survey-mobile-topbar {
+            display: flex !important;
+          }
+          .survey-step-dots {
+            display: flex !important;
+          }
+          .survey-content-scroll {
+            padding: 28px 20px 110px !important;
+          }
+          .survey-chip-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .survey-bottom-bar {
+            padding: 12px 20px !important;
+          }
+        }
+      `}</style>
+
+      {/* ── Dialogs (all preserved) ── */}
 
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
         <DialogContent>
@@ -1158,7 +1617,7 @@ export default function SessionSurveyPage() {
               Define custom prompts to use throughout your app. These prompts can be used for requirements, features, architecture, coding, or testing.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="flex justify-between items-center">
               <span className="text-description text-contrast-medium">
@@ -1307,8 +1766,8 @@ export default function SessionSurveyPage() {
               <Button variant="ghost" onClick={() => setShowAddPromptDialog(false)}>
                 Cancel
               </Button>
-              <Button 
-                onClick={handleAddPrompt} 
+              <Button
+                onClick={handleAddPrompt}
                 disabled={!newPrompt.name?.trim() || !newPrompt.prompt?.trim()}
                 data-testid="button-save-prompt"
               >
@@ -1328,7 +1787,7 @@ export default function SessionSurveyPage() {
               Select which documents you want to generate and choose the detail level for each.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             <div className="flex justify-between items-center pb-2 border-b border-gray-200">
               <span className="text-description text-contrast-medium">
@@ -1341,9 +1800,9 @@ export default function SessionSurveyPage() {
                   onClick={() => {
                     const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
                     stages.forEach(stage => {
-                      newSelections[stage.id] = { 
-                        selected: true, 
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
+                      newSelections[stage.id] = {
+                        selected: true,
+                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed"
                       };
                     });
                     setDocumentSelections(newSelections);
@@ -1358,9 +1817,9 @@ export default function SessionSurveyPage() {
                   onClick={() => {
                     const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
                     stages.forEach(stage => {
-                      newSelections[stage.id] = { 
-                        selected: false, 
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed" 
+                      newSelections[stage.id] = {
+                        selected: false,
+                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed"
                       };
                     });
                     setDocumentSelections(newSelections);
@@ -1379,8 +1838,8 @@ export default function SessionSurveyPage() {
                   <div
                     key={stage.id}
                     className={`bg-surface-secondary rounded-lg p-4 border transition-colors ${
-                      documentSelections[stage.id]?.selected 
-                        ? "border-accent bg-accent/5" 
+                      documentSelections[stage.id]?.selected
+                        ? "border-accent bg-accent/5"
                         : "border-gray-200"
                     }`}
                     data-testid={`doc-selection-${stage.id}`}
@@ -1392,17 +1851,17 @@ export default function SessionSurveyPage() {
                         onCheckedChange={(checked) => {
                           setDocumentSelections(prev => ({
                             ...prev,
-                            [stage.id]: { 
-                              selected: !!checked, 
-                              detailLevel: prev[stage.id]?.detailLevel || "detailed" 
+                            [stage.id]: {
+                              selected: !!checked,
+                              detailLevel: prev[stage.id]?.detailLevel || "detailed"
                             }
                           }));
                         }}
                         className="mt-1"
                       />
                       <div className="flex-1">
-                        <Label 
-                          htmlFor={`doc-${stage.id}`} 
+                        <Label
+                          htmlFor={`doc-${stage.id}`}
                           className="text-description font-medium text-contrast-high cursor-pointer"
                         >
                           {stage.title}
@@ -1410,7 +1869,7 @@ export default function SessionSurveyPage() {
                         <p className="text-metadata text-contrast-medium mt-1">
                           {stage.description}
                         </p>
-                        
+
                         {documentSelections[stage.id]?.selected && (
                           <div className="mt-3 flex items-center gap-2">
                             <span className="text-metadata text-contrast-medium">Detail level:</span>
@@ -1419,9 +1878,9 @@ export default function SessionSurveyPage() {
                                 type="button"
                                 onClick={() => setDocumentSelections(prev => ({
                                   ...prev,
-                                  [stage.id]: { 
-                                    selected: prev[stage.id]?.selected ?? true, 
-                                    detailLevel: "summary" 
+                                  [stage.id]: {
+                                    selected: prev[stage.id]?.selected ?? true,
+                                    detailLevel: "summary"
                                   }
                                 }))}
                                 className={`px-3 py-1.5 text-sm transition-colors ${
@@ -1437,9 +1896,9 @@ export default function SessionSurveyPage() {
                                 type="button"
                                 onClick={() => setDocumentSelections(prev => ({
                                   ...prev,
-                                  [stage.id]: { 
-                                    selected: prev[stage.id]?.selected ?? true, 
-                                    detailLevel: "detailed" 
+                                  [stage.id]: {
+                                    selected: prev[stage.id]?.selected ?? true,
+                                    detailLevel: "detailed"
                                   }
                                 }))}
                                 className={`px-3 py-1.5 text-sm transition-colors ${
@@ -1464,7 +1923,7 @@ export default function SessionSurveyPage() {
               <Button variant="ghost" onClick={() => setShowDocumentSelection(false)}>
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleConfirmGenerate}
                 disabled={selectedCount === 0}
                 className="btn-primary"
