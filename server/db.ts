@@ -19,14 +19,18 @@ function getDatabaseUrl(): string {
     return process.env.DATABASE_URL;
   }
   
-  throw new Error("Database connection not configured. Please ensure PostgreSQL is provisioned.");
+  return null;
 }
 
-const pool = new Pool({
-  connectionString: getDatabaseUrl(),
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+const dbUrl = getDatabaseUrl();
 
-export const db = drizzle(pool, { schema });
+const pool = dbUrl
+  ? new Pool({
+      connectionString: dbUrl,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    })
+  : null;
+
+export const db = pool ? drizzle(pool, { schema }) : null;
