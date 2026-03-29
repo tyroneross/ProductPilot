@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Replit OIDC with Neon Auth. Add a demo account (default LLM key for unauthenticated users). Let signed-in users configure their own LLM provider + API key in a settings page.
+**Goal:** Replace Replit OIDC with Neon Auth. Groq (Llama 3.3 70B) as free demo LLM for all users. BYOK (Bring Your Own Key) for signed-in users who want Anthropic, OpenAI, or their own Groq key.
 
-**Architecture:** Neon Auth client SDK on frontend (`@neondatabase/neon-js/auth`), JWT verification via `jose` on Express backend. User LLM preferences stored in a `user_settings` table. AI service checks per-user key first, falls back to demo key.
+**Architecture:** Neon Auth client SDK on frontend (`@neondatabase/neon-js/auth`), JWT verification via `jose` on Express backend. User LLM preferences stored in a `user_settings` table. AI service routes to Groq by default, user's provider+key if BYOK configured.
 
-**Tech Stack:** `@neondatabase/neon-js` (auth client), `jose` (JWT verify), Drizzle ORM (user_settings table), existing Express + React.
+**Tech Stack:** `@neondatabase/neon-js` (auth client), `jose` (JWT verify), `groq-sdk` (demo LLM), Drizzle ORM (user_settings table), existing Express + React.
 
 **Design spec:** `docs/superpowers/specs/2026-03-29-warm-craft-ui-revamp-design.md` (Warm Craft tokens)
 
@@ -22,7 +22,7 @@
 
 ```bash
 cd ~/Desktop/git-folder/ProductPilot
-npm install @neondatabase/neon-js jose
+npm install @neondatabase/neon-js jose groq-sdk
 ```
 
 - [ ] **Step 2: Create .env.example with required variables**
@@ -36,10 +36,10 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmod
 VITE_NEON_AUTH_URL=https://ep-xxx.neonauth.us-east-2.aws.neon.build/neondb/auth
 NEON_AUTH_URL=https://ep-xxx.neonauth.us-east-2.aws.neon.build/neondb/auth
 
-# Demo LLM Key (used for unauthenticated users)
-DEMO_ANTHROPIC_API_KEY=sk-ant-xxx
+# Demo LLM — Groq (Llama 3.3 70B) for all unauthenticated users
+GROQ_API_KEY=gsk_xxx
 
-# Optional: User's own key overrides this
+# Optional: Anthropic key for admin/testing
 ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
@@ -202,48 +202,86 @@ Remove Replit OpenID Connect integration entirely."
 
 ---
 
-### Task 4: Per-User LLM Routing in AI Service
+### Task 4: Multi-Provider AI Service (Groq Default + BYOK)
 
 **Files:**
 - Modify: `server/services/ai.ts`
 - Modify: `server/routes.ts`
 
-- [ ] **Step 1: Add user settings lookup to AI service**
+- [ ] **Step 1: Add Groq support to AI service**
 
-Modify `server/services/ai.ts` to accept an optional API key override:
+Modify `server/services/ai.ts` to support multiple providers:
 
 ```typescript
+import Anthropic from "@anthropic-ai/sdk";
+import Groq from "groq-sdk";
+
+interface LLMConfig {
+  provider: 'groq' | 'anthropic' | 'openai';
+  apiKey: string;
+  model?: string;
+}
+
 export class AIService {
-  async chat(messages: AIMessage[], model: string = "claude-sonnet", apiKey?: string): Promise<AIResponse> {
-    const normalizedModel = this.normalizeModel(model);
-    if (normalizedModel.startsWith("claude-")) {
-      return this.chatWithClaude(messages, normalizedModel, apiKey);
+  // Default: Groq Llama 3.3 70B (demo)
+  private getDefaultConfig(): LLMConfig {
+    return {
+      provider: 'groq',
+      apiKey: process.env.GROQ_API_KEY || '',
+      model: 'llama-3.3-70b-versatile',
+    };
+  }
+
+  async chat(messages: AIMessage[], model?: string, userConfig?: LLMConfig | null): Promise<AIResponse> {
+    const config = userConfig || this.getDefaultConfig();
+
+    switch (config.provider) {
+      case 'groq':
+        return this.chatWithGroq(messages, config.model || 'llama-3.3-70b-versatile', config.apiKey);
+      case 'anthropic':
+        return this.chatWithClaude(messages, this.normalizeModel(model || config.model || 'claude-sonnet'), config.apiKey);
+      case 'openai':
+        return this.chatWithOpenAI(messages, config.model || 'gpt-4o', config.apiKey);
+      default:
+        return this.chatWithGroq(messages, 'llama-3.3-70b-versatile', this.getDefaultConfig().apiKey);
     }
-    throw new Error(`Unsupported model: ${model}`);
   }
 
-  private async chatWithClaude(messages: AIMessage[], model: string, apiKey?: string): Promise<AIResponse> {
-    const key = apiKey || process.env.DEMO_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("No API key configured");
-
-    const anthropic = new Anthropic({ apiKey: key });
-    // ... rest of existing logic
+  private async chatWithGroq(messages: AIMessage[], model: string, apiKey: string): Promise<AIResponse> {
+    const groq = new Groq({ apiKey });
+    const response = await groq.chat.completions.create({
+      model,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      max_tokens: 4096,
+      temperature: 0.7,
+    });
+    return { content: response.choices[0]?.message?.content || '' };
   }
+
+  // Keep existing chatWithClaude, add chatWithOpenAI similarly
 }
 ```
 
 - [ ] **Step 2: Add settings lookup in routes**
 
-In message-sending and doc-generation routes, look up user's settings:
+In message-sending and doc-generation routes, look up user's LLM config:
 
 ```typescript
-// In the message endpoint:
-let userApiKey: string | undefined;
-if (req.userId) {
+// Helper to get LLM config for request
+async function getLLMConfig(req: any): Promise<LLMConfig | null> {
+  if (!req.userId) return null; // Use demo (Groq)
   const settings = await storage.getUserSettings(req.userId);
-  if (settings?.llmApiKey) userApiKey = settings.llmApiKey;
+  if (!settings?.llmApiKey) return null; // Use demo
+  return {
+    provider: settings.llmProvider as any,
+    apiKey: settings.llmApiKey,
+    model: settings.llmModel || undefined,
+  };
 }
-const aiResponse = await aiService.chat(aiMessages, modelToUse, userApiKey);
+
+// In the message endpoint:
+const userConfig = await getLLMConfig(req);
+const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig);
 ```
 
 - [ ] **Step 3: Add storage methods for user settings**
@@ -531,3 +569,6 @@ Before running this plan, you need:
 - [React Quick Start](https://neon.com/docs/auth/quick-start/react)
 - [Custom Backend JWT Verification](https://neon.com/guides/react-neon-auth-hono)
 - [@neondatabase/neon-js on npm](https://www.npmjs.com/package/@neondatabase/neon-js)
+- [Groq Pricing](https://groq.com/pricing)
+- [Anthropic OAuth Ban (Feb 2026)](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/)
+- [LLM API Pricing Comparison 2026](https://www.tldl.io/resources/llm-api-pricing-2026)

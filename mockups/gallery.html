@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProductPilot — Design Direction Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --gallery-bg: #0a0a0c;
+    --gallery-surface: #141418;
+    --gallery-border: rgba(255,255,255,0.06);
+    --gallery-text: #e8e8ec;
+    --gallery-muted: #6b6b7b;
+    --gallery-accent: #818cf8;
+    --gallery-amber: #f0b65e;
+    --gallery-blue: #3b82f6;
+    --gallery-green: #34d399;
+    --radius: 16px;
+  }
+
+  body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--gallery-bg);
+    color: var(--gallery-text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Header ── */
+  .gallery-header {
+    text-align: center;
+    padding: 80px 24px 48px;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+
+  .gallery-header h1 {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+
+  .gallery-header h1 span {
+    background: linear-gradient(135deg, var(--gallery-accent), var(--gallery-amber));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .gallery-header p {
+    color: var(--gallery-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* ── Gallery Grid ── */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px 80px;
+  }
+
+  @media (max-width: 768px) {
+    .gallery-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Card ── */
+  .gallery-card {
+    border: 1px solid var(--gallery-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--gallery-surface);
+    transition: border-color 0.3s, transform 0.3s;
+    position: relative;
+  }
+
+  .gallery-card:hover {
+    border-color: rgba(255,255,255,0.12);
+    transform: translateY(-2px);
+  }
+
+  .gallery-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .gallery-card:hover::after { opacity: 1; }
+
+  .gallery-card[data-theme="deep"]::after {
+    background: radial-gradient(ellipse at 50% 0%, rgba(129,140,248,0.06), transparent 70%);
+  }
+  .gallery-card[data-theme="glass"]::after {
+    background: radial-gradient(ellipse at 50% 0%, rgba(250,250,250,0.03), transparent 70%);
+  }
+  .gallery-card[data-theme="light"]::after {
+    background: radial-gradient(ellipse at 50% 0%, rgba(59,130,246,0.04), transparent 70%);
+  }
+  .gallery-card[data-theme="warm"]::after {
+    background: radial-gradient(ellipse at 50% 0%, rgba(240,182,94,0.06), transparent 70%);
+  }
+
+  /* ── Preview iframe ── */
+  .preview-container {
+    position: relative;
+    height: 420px;
+    overflow: hidden;
+    background: #000;
+  }
+
+  .preview-container iframe {
+    width: 200%;
+    height: 200%;
+    transform: scale(0.5);
+    transform-origin: top left;
+    border: none;
+    pointer-events: none;
+  }
+
+  .preview-overlay {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .preview-overlay:hover + .preview-actions {
+    opacity: 1;
+  }
+
+  .preview-actions {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 0.25s;
+    display: flex;
+    gap: 8px;
+  }
+
+  .gallery-card:hover .preview-actions { opacity: 1; }
+
+  .preview-actions a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .preview-actions a:hover {
+    background: rgba(0,0,0,0.85);
+    border-color: rgba(255,255,255,0.3);
+  }
+
+  /* ── Card Info ── */
+  .card-info {
+    padding: 20px 24px 24px;
+  }
+
+  .card-info .card-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 4px 10px;
+    border-radius: 100px;
+    margin-bottom: 12px;
+  }
+
+  .card-info .card-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  [data-theme="deep"] .card-badge {
+    background: rgba(129,140,248,0.12);
+    color: var(--gallery-accent);
+  }
+  [data-theme="deep"] .card-badge .dot { background: var(--gallery-accent); }
+
+  [data-theme="glass"] .card-badge {
+    background: rgba(250,250,250,0.06);
+    color: #d4d4d8;
+  }
+  [data-theme="glass"] .card-badge .dot { background: #d4d4d8; }
+
+  [data-theme="light"] .card-badge {
+    background: rgba(59,130,246,0.1);
+    color: var(--gallery-blue);
+  }
+  [data-theme="light"] .card-badge .dot { background: var(--gallery-blue); }
+
+  [data-theme="warm"] .card-badge {
+    background: rgba(240,182,94,0.12);
+    color: var(--gallery-amber);
+  }
+  [data-theme="warm"] .card-badge .dot { background: var(--gallery-amber); }
+
+  .card-info h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+
+  .card-info p {
+    color: var(--gallery-muted);
+    font-size: 14px;
+    line-height: 1.55;
+    margin-bottom: 16px;
+  }
+
+  .card-traits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .card-traits span {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--gallery-border);
+    color: var(--gallery-muted);
+  }
+
+  /* ── Vote Section ── */
+  .vote-section {
+    text-align: center;
+    padding: 40px 24px 80px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .vote-section p {
+    color: var(--gallery-muted);
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+
+  .vote-section .vote-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--gallery-muted);
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+
+<header class="gallery-header">
+  <h1>ProductPilot <span>Design Directions</span></h1>
+  <p>Four aesthetic approaches for the full UI/UX revamp. Open each mockup full-screen to evaluate, then choose a direction.</p>
+</header>
+
+<div class="gallery-grid">
+
+  <!-- 1. Aurora Deep -->
+  <div class="gallery-card" data-theme="deep">
+    <div class="preview-container">
+      <iframe src="1-aurora-deep.html" loading="lazy" sandbox></iframe>
+      <div class="preview-overlay" onclick="window.open('1-aurora-deep.html','_blank')"></div>
+      <div class="preview-actions">
+        <a href="1-aurora-deep.html" target="_blank">Open Full Screen &rarr;</a>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-badge"><span class="dot"></span> Direction 1</div>
+      <h2>Aurora Deep</h2>
+      <p>Immersive dark with indigo glow and glassmorphism. Feels like Linear or Raycast — for users who live in dark mode.</p>
+      <div class="card-traits">
+        <span>#060611</span>
+        <span>indigo accent</span>
+        <span>glass panels</span>
+        <span>ambient glow</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Aurora Glass -->
+  <div class="gallery-card" data-theme="glass">
+    <div class="preview-container">
+      <iframe src="2-aurora-glass.html" loading="lazy" sandbox></iframe>
+      <div class="preview-overlay" onclick="window.open('2-aurora-glass.html','_blank')"></div>
+      <div class="preview-actions">
+        <a href="2-aurora-glass.html" target="_blank">Open Full Screen &rarr;</a>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-badge"><span class="dot"></span> Direction 2</div>
+      <h2>Aurora Glass</h2>
+      <p>Dark but restrained — clean borders, no glow, confident without being flashy. Vercel or GitHub energy.</p>
+      <div class="card-traits">
+        <span>#09090b</span>
+        <span>zinc tones</span>
+        <span>flat panels</span>
+        <span>inverted CTA</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Clean Light -->
+  <div class="gallery-card" data-theme="light">
+    <div class="preview-container">
+      <iframe src="3-clean-light.html" loading="lazy" sandbox></iframe>
+      <div class="preview-overlay" onclick="window.open('3-clean-light.html','_blank')"></div>
+      <div class="preview-actions">
+        <a href="3-clean-light.html" target="_blank">Open Full Screen &rarr;</a>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-badge"><span class="dot"></span> Direction 3</div>
+      <h2>Clean Light</h2>
+      <p>Bright, trustworthy, generous whitespace. Stripe documentation meets Notion. Broadest audience appeal.</p>
+      <div class="card-traits">
+        <span>#ffffff</span>
+        <span>blue-500</span>
+        <span>gray-50 cards</span>
+        <span>editorial</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Warm Craft -->
+  <div class="gallery-card" data-theme="warm">
+    <div class="preview-container">
+      <iframe src="4-warm-craft.html" loading="lazy" sandbox></iframe>
+      <div class="preview-overlay" onclick="window.open('4-warm-craft.html','_blank')"></div>
+      <div class="preview-actions">
+        <a href="4-warm-craft.html" target="_blank">Open Full Screen &rarr;</a>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-badge"><span class="dot"></span> Direction 4</div>
+      <h2>Warm Craft</h2>
+      <p>Dark earthy tones with amber/gold accents. Premium, hand-crafted feel. For builders who appreciate quality tools.</p>
+      <div class="card-traits">
+        <span>#110f0d</span>
+        <span>amber accent</span>
+        <span>warm glass</span>
+        <span>artisanal</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="vote-section">
+  <p>Click any card to open the full mockup. Compare in separate tabs, then tell me which direction to build.</p>
+  <div class="vote-hint">mockups/gallery.html &middot; prototype &middot; not production code</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductPilot — Warm Craft</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #110f0d;
+      --surface: rgba(255, 255, 255, 0.03);
+      --surface-border: rgba(200, 180, 160, 0.08);
+      --surface-border-hover: rgba(240, 182, 94, 0.22);
+      --text-primary: #f5f0eb;
+      --text-secondary: #a89a8c;
+      --text-muted: #6b5d52;
+      --accent: #f0b65e;
+      --accent-hover: #d4a04e;
+      --accent-glow: rgba(240, 182, 94, 0.12);
+      --radius: 10px;
+    }
+
+    html {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      /* Subtle warm noise texture via radial gradients */
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(240, 182, 94, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(180, 120, 60, 0.04) 0%, transparent 50%);
+    }
+
+    /* ── Nav ─────────────────────────────────────────── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 32px;
+    }
+
+    .nav-logo {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+
+    .nav-logo span {
+      color: var(--accent);
+    }
+
+    .nav-signin {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent);
+      text-decoration: none;
+      letter-spacing: 0.01em;
+      transition: color 0.18s ease, opacity 0.18s ease;
+    }
+
+    .nav-signin:hover {
+      color: var(--accent-hover);
+      opacity: 0.9;
+    }
+
+    /* ── Hero ────────────────────────────────────────── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 72px 24px 80px;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(240, 182, 94, 0.35);
+      border-radius: 100px;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 32px;
+      background: rgba(240, 182, 94, 0.05);
+    }
+
+    .hero-badge::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.8;
+    }
+
+    .hero-h1 {
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      font-weight: 700;
+      line-height: 1.18;
+      letter-spacing: -0.03em;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+      /* Subtle amber glow on text */
+      text-shadow:
+        0 0 40px rgba(240, 182, 94, 0.18),
+        0 0 80px rgba(240, 182, 94, 0.08);
+    }
+
+    .hero-h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .hero-subtitle {
+      font-size: 17px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      max-width: 520px;
+      margin-bottom: 40px;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn-primary {
+      display: inline-block;
+      background: var(--accent);
+      color: #1a1208;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 13px 28px;
+      border-radius: var(--radius);
+      text-decoration: none;
+      letter-spacing: -0.01em;
+      transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+      box-shadow: 0 2px 16px rgba(240, 182, 94, 0.22), 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 24px rgba(240, 182, 94, 0.30), 0 1px 4px rgba(0,0,0,0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .hero-sub-cta {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Features ────────────────────────────────────── */
+    .features {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 32px 96px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: var(--radius);
+      padding: 28px 26px 26px;
+      transition: border-color 0.22s ease, background 0.22s ease, transform 0.18s ease;
+      /* Warm inner warmth */
+      background-image: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(200, 160, 90, 0.04) 0%, transparent 70%);
+    }
+
+    .feature-card:hover {
+      border-color: var(--surface-border-hover);
+      background: rgba(255, 255, 255, 0.045);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: rgba(240, 182, 94, 0.10);
+      border: 1px solid rgba(240, 182, 94, 0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      font-size: 17px;
+    }
+
+    .feature-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-desc {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .feature-tag {
+      display: inline-block;
+      margin-top: 14px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.7;
+    }
+
+    /* ── Divider ─────────────────────────────────────── */
+    .section-divider {
+      max-width: 1100px;
+      margin: 0 auto 72px;
+      padding: 0 32px;
+    }
+
+    .section-divider hr {
+      border: none;
+      border-top: 1px solid var(--surface-border);
+    }
+
+    /* ── Footer ──────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--surface-border);
+      padding: 28px 32px;
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .footer-brand {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.16s ease;
+    }
+
+    .footer-links a:hover {
+      color: var(--text-secondary);
+    }
+
+    /* ── Responsive ──────────────────────────────────── */
+    @media (max-width: 600px) {
+      nav {
+        padding: 20px 20px;
+      }
+
+      .hero {
+        padding: 56px 20px 64px;
+      }
+
+      .features {
+        padding: 0 20px 72px;
+      }
+
+      footer {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 24px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <a href="#" class="nav-logo">Product<span>Pilot</span></a>
+    <a href="#" class="nav-signin">Sign In</a>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge">Early Access</div>
+    <h1 class="hero-h1">From idea to <em>implementation docs</em> in minutes</h1>
+    <p class="hero-subtitle">
+      Describe what you're building. ProductPilot generates PRDs, wireframes, architecture docs, and coding prompts — everything your team needs to ship.
+    </p>
+    <div class="hero-cta-group">
+      <a href="#" class="btn-primary">Start Building &rarr;</a>
+      <span class="hero-sub-cta">No account needed to explore &mdash; just start talking.</span>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features">
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">&#128196;</div>
+        <div class="feature-title">Product Requirements Docs</div>
+        <p class="feature-desc">
+          Turn a rough idea into a structured PRD. Scope, goals, user stories, and edge cases — written in plain language your whole team understands.
+        </p>
+        <span class="feature-tag">PRD Generation</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">&#9998;</div>
+        <div class="feature-title">Wireframes &amp; Flow Diagrams</div>
+        <p class="feature-desc">
+          Sketch-quality layouts for every key screen, with annotated user flows. Shareable references before a single line of UI code is written.
+        </p>
+        <span class="feature-tag">Visual Artifacts</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">&#128274;</div>
+        <div class="feature-title">Architecture &amp; Coding Prompts</div>
+        <p class="feature-desc">
+          System design diagrams, API contracts, and ready-to-paste prompts tuned for your stack. Hand off to your engineers or feed straight into an AI code assistant.
+        </p>
+        <span class="feature-tag">Engineering Handoff</span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <span class="footer-brand">ProductPilot &mdash; Prototype</span>
+    <nav class="footer-links">
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+      <a href="#">Contact</a>
+    </nav>
+  </footer>
+
+</body>
+</html>

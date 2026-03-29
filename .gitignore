@@ -7,3 +7,4 @@ vite.config.ts.*
 .navgator/
 .bookmark/
 .env*.local
+.vercel

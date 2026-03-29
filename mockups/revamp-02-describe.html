@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductPilot — Describe & Style [Prototype]</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #110f0d;
+      --surface: #1a1714;
+      --surface-elevated: #231f1b;
+      --border: rgba(200,180,160,0.08);
+      --border-hover: rgba(200,180,160,0.16);
+      --text-primary: #f5f0eb;
+      --text-secondary: #a89a8c;
+      --text-muted: #6b5d52;
+      --accent: #f0b65e;
+      --accent-hover: #d4a04e;
+      --accent-glow: rgba(240,182,94,0.14);
+    }
+
+    html {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: 'DM Sans', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(240,182,94,0.05) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(180,120,60,0.04) 0%, transparent 50%);
+      padding-bottom: 120px; /* space for sticky CTA */
+    }
+
+    /* ── Prototype banner ──────────────────────────────── */
+    .proto-banner {
+      background: rgba(240,182,94,0.08);
+      border-bottom: 1px solid rgba(240,182,94,0.18);
+      text-align: center;
+      padding: 7px 16px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ── Nav ─────────────────────────────────────────── */
+    .nav-wrap {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(17,15,13,0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 18px 32px;
+    }
+
+    .nav-logo {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      text-decoration: none;
+    }
+
+    .nav-logo span {
+      color: var(--accent);
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .nav-step {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+    }
+
+    .nav-step strong {
+      color: var(--text-secondary);
+    }
+
+    .nav-signin {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent);
+      text-decoration: none;
+      transition: color 0.18s;
+    }
+
+    .nav-signin:hover {
+      color: var(--accent-hover);
+    }
+
+    /* ── Main content ────────────────────────────────── */
+    .page-content {
+      max-width: 672px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Page header ─────────────────────────────────── */
+    .page-header {
+      padding-top: 48px;
+      padding-bottom: 32px;
+    }
+
+    .page-header h2 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.03em;
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    .page-header p {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    /* ── Textarea ────────────────────────────────────── */
+    .main-input-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .main-textarea {
+      width: 100%;
+      rows: 5;
+      min-height: 140px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 16px;
+      line-height: 1.6;
+      padding: 16px 18px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.18s, box-shadow 0.18s;
+      caret-color: var(--accent);
+    }
+
+    .main-textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .main-textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .input-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Section label ───────────────────────────────── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    /* ── Style selector ──────────────────────────────── */
+    .style-section {
+      padding-top: 36px;
+    }
+
+    .style-scroll-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      margin: 0 -4px;
+      padding: 4px 4px 8px;
+    }
+
+    .style-scroll-wrap::-webkit-scrollbar {
+      display: none;
+    }
+
+    .style-row {
+      display: flex;
+      gap: 10px;
+      width: max-content;
+    }
+
+    .style-card {
+      width: 116px;
+      height: 82px;
+      border-radius: 8px;
+      border: 1.5px solid var(--border);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: relative;
+      user-select: none;
+    }
+
+    .style-card:hover {
+      border-color: var(--border-hover);
+    }
+
+    .style-card.selected {
+      border-color: var(--accent);
+      transform: scale(1.02);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .style-card-swatch {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .style-card-label {
+      padding: 5px 6px;
+      font-size: 11px;
+      font-weight: 500;
+      text-align: center;
+      color: var(--text-secondary);
+      background: var(--surface);
+      letter-spacing: 0.01em;
+    }
+
+    .style-card.selected .style-card-label {
+      color: var(--accent);
+    }
+
+    /* Swatch colors per style */
+    .swatch-minimal { background: linear-gradient(145deg, #f8f8f6 0%, #e8e6e2 100%); }
+    .swatch-bold    { background: linear-gradient(145deg, #1a0a2e 0%, #6d28d9 60%, #f59e0b 100%); }
+    .swatch-playful { background: linear-gradient(145deg, #fef3c7 0%, #fbcfe8 50%, #bfdbfe 100%); }
+    .swatch-corporate { background: linear-gradient(145deg, #1e3a5f 0%, #2563eb 60%, #f1f5f9 100%); }
+    .swatch-retro   { background: linear-gradient(145deg, #fef08a 0%, #fb923c 50%, #84cc16 100%); }
+    .swatch-organic { background: linear-gradient(145deg, #d4edda 0%, #6aab76 50%, #3d7a46 100%); }
+
+    .style-hint {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Core details ────────────────────────────────── */
+    .core-section {
+      padding-top: 36px;
+    }
+
+    .field-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .field-input {
+      width: 100%;
+      height: 44px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 0 14px;
+      outline: none;
+      transition: border-color 0.18s, box-shadow 0.18s;
+      caret-color: var(--accent);
+    }
+
+    .field-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .field-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* ── Optional details ────────────────────────────── */
+    .optional-section {
+      padding-top: 24px;
+    }
+
+    .optional-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 6px 0;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      transition: color 0.18s;
+    }
+
+    .optional-toggle:hover {
+      color: var(--text-primary);
+    }
+
+    .toggle-chevron {
+      width: 16px;
+      height: 16px;
+      transition: transform 0.22s ease;
+      flex-shrink: 0;
+    }
+
+    .optional-toggle.open .toggle-chevron {
+      transform: rotate(180deg);
+    }
+
+    .optional-fields {
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height 0.28s ease, opacity 0.22s ease;
+      opacity: 0;
+    }
+
+    .optional-fields.open {
+      max-height: 220px;
+      opacity: 1;
+    }
+
+    .optional-fields-inner {
+      padding-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* ── Sticky CTA bar ──────────────────────────────── */
+    .cta-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      background: rgba(17,15,13,0.96);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border);
+      padding: 14px 24px;
+    }
+
+    .cta-inner {
+      max-width: 672px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .btn-continue {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 48px;
+      padding: 0 28px;
+      background: var(--accent);
+      color: #1a0f00;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      letter-spacing: -0.01em;
+      transition: background 0.18s, opacity 0.18s, transform 0.12s;
+      flex: 1 1 auto;
+    }
+
+    .btn-continue:hover:not(:disabled) {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-continue:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn-continue:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .cta-separator {
+      font-size: 13px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .btn-skip {
+      background: none;
+      border: none;
+      padding: 0;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      white-space: nowrap;
+      text-decoration: none;
+      transition: color 0.18s;
+      flex-shrink: 0;
+    }
+
+    .btn-skip:hover {
+      color: var(--text-primary);
+    }
+
+    /* ── Responsive ──────────────────────────────────── */
+    @media (max-width: 600px) {
+      nav {
+        padding: 16px 20px;
+      }
+
+      .nav-step {
+        display: none;
+      }
+
+      .page-content {
+        padding: 0 16px;
+      }
+
+      .page-header {
+        padding-top: 32px;
+        padding-bottom: 24px;
+      }
+
+      .page-header h2 {
+        font-size: 22px;
+      }
+
+      .cta-inner {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .btn-continue {
+        width: 100%;
+        flex: unset;
+      }
+
+      .cta-separator {
+        display: none;
+      }
+
+      .btn-skip {
+        font-size: 13px;
+        text-align: center;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Prototype banner -->
+  <div class="proto-banner">Prototype — non-functional mockup</div>
+
+  <!-- Nav -->
+  <div class="nav-wrap">
+    <nav>
+      <a href="#" class="nav-logo">Product<span>Pilot</span></a>
+      <div class="nav-right">
+        <span class="nav-step">Step <strong>1 of 3</strong></span>
+        <a href="#" class="nav-signin">Sign in</a>
+      </div>
+    </nav>
+  </div>
+
+  <!-- Main content -->
+  <div class="page-content">
+
+    <!-- Page header -->
+    <div class="page-header">
+      <h2>What are you building?</h2>
+      <p>Tell us about your product idea. We'll generate docs tailored to your vision.</p>
+    </div>
+
+    <!-- Main textarea -->
+    <div class="main-input-wrap">
+      <textarea
+        id="description"
+        class="main-textarea"
+        rows="5"
+        placeholder="Describe your product idea..."
+        aria-label="Product description"
+      ></textarea>
+      <p class="input-hint">Be as detailed as you like — more context means better docs</p>
+    </div>
+
+    <!-- Style selector -->
+    <div class="style-section">
+      <p class="section-label">Visual Direction</p>
+      <div class="style-scroll-wrap">
+        <div class="style-row" role="radiogroup" aria-label="Visual style">
+
+          <div class="style-card selected" data-style="minimal" role="radio" aria-checked="true" tabindex="0">
+            <div class="style-card-swatch swatch-minimal"></div>
+            <div class="style-card-label">Minimal</div>
+          </div>
+
+          <div class="style-card" data-style="bold" role="radio" aria-checked="false" tabindex="0">
+            <div class="style-card-swatch swatch-bold"></div>
+            <div class="style-card-label">Bold</div>
+          </div>
+
+          <div class="style-card" data-style="playful" role="radio" aria-checked="false" tabindex="0">
+            <div class="style-card-swatch swatch-playful"></div>
+            <div class="style-card-label">Playful</div>
+          </div>
+
+          <div class="style-card" data-style="corporate" role="radio" aria-checked="false" tabindex="0">
+            <div class="style-card-swatch swatch-corporate"></div>
+            <div class="style-card-label">Corporate</div>
+          </div>
+
+          <div class="style-card" data-style="retro" role="radio" aria-checked="false" tabindex="0">
+            <div class="style-card-swatch swatch-retro"></div>
+            <div class="style-card-label">Retro</div>
+          </div>
+
+          <div class="style-card" data-style="organic" role="radio" aria-checked="false" tabindex="0">
+            <div class="style-card-swatch swatch-organic"></div>
+            <div class="style-card-label">Organic</div>
+          </div>
+
+        </div>
+      </div>
+      <p class="style-hint">Style influences wireframe aesthetics and color suggestions</p>
+    </div>
+
+    <!-- Core details -->
+    <div class="core-section">
+      <p class="section-label">Core Details</p>
+      <div class="field-stack">
+        <input
+          id="problem"
+          type="text"
+          class="field-input"
+          placeholder="What problem does this solve?"
+          aria-label="Problem statement"
+        />
+        <input
+          id="users"
+          type="text"
+          class="field-input"
+          placeholder="Who are the primary users?"
+          aria-label="Primary users"
+        />
+        <input
+          id="v1"
+          type="text"
+          class="field-input"
+          placeholder="What does v1 look like?"
+          aria-label="Version 1 scope"
+        />
+      </div>
+    </div>
+
+    <!-- Optional details -->
+    <div class="optional-section">
+      <button
+        class="optional-toggle"
+        id="optionalToggle"
+        aria-expanded="false"
+        aria-controls="optionalFields"
+        type="button"
+      >
+        <svg class="toggle-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6l5 5 5-5" />
+        </svg>
+        More details (optional)
+      </button>
+      <div class="optional-fields" id="optionalFields" aria-hidden="true">
+        <div class="optional-fields-inner">
+          <input
+            type="text"
+            class="field-input"
+            placeholder="Main features (comma-separated)"
+            aria-label="Main features"
+          />
+          <input
+            type="text"
+            class="field-input"
+            placeholder="Tech constraints (e.g. no-code, React, iOS only)"
+            aria-label="Tech constraints"
+          />
+          <input
+            type="url"
+            class="field-input"
+            placeholder="Inspiration link (optional URL)"
+            aria-label="Inspiration link"
+          />
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page-content -->
+
+  <!-- Sticky CTA bar -->
+  <div class="cta-bar">
+    <div class="cta-inner">
+      <button class="btn-continue" id="continueBtn" disabled type="button">
+        Continue to Survey &rarr;
+      </button>
+      <span class="cta-separator">or</span>
+      <button class="btn-skip" type="button">Build Docs Now &rarr;</button>
+    </div>
+  </div>
+
+  <script>
+    // ── Style card selection ──────────────────────────
+    const styleCards = document.querySelectorAll('.style-card');
+    styleCards.forEach(card => {
+      function selectCard() {
+        styleCards.forEach(c => {
+          c.classList.remove('selected');
+          c.setAttribute('aria-checked', 'false');
+        });
+        card.classList.add('selected');
+        card.setAttribute('aria-checked', 'true');
+      }
+      card.addEventListener('click', selectCard);
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectCard(); }
+      });
+    });
+
+    // ── Optional details toggle ───────────────────────
+    const toggleBtn = document.getElementById('optionalToggle');
+    const optionalFields = document.getElementById('optionalFields');
+
+    toggleBtn.addEventListener('click', () => {
+      const isOpen = optionalFields.classList.contains('open');
+      optionalFields.classList.toggle('open');
+      toggleBtn.classList.toggle('open');
+      toggleBtn.setAttribute('aria-expanded', String(!isOpen));
+      optionalFields.setAttribute('aria-hidden', String(isOpen));
+    });
+
+    // ── CTA enable/disable logic ──────────────────────
+    const descriptionEl = document.getElementById('description');
+    const problemEl     = document.getElementById('problem');
+    const usersEl       = document.getElementById('users');
+    const v1El          = document.getElementById('v1');
+    const continueBtn   = document.getElementById('continueBtn');
+
+    function checkFormValidity() {
+      const filled =
+        descriptionEl.value.trim().length > 0 &&
+        problemEl.value.trim().length > 0 &&
+        usersEl.value.trim().length > 0 &&
+        v1El.value.trim().length > 0;
+      continueBtn.disabled = !filled;
+    }
+
+    [descriptionEl, problemEl, usersEl, v1El].forEach(el => {
+      el.addEventListener('input', checkFormValidity);
+    });
+  </script>
+</body>
+</html>
