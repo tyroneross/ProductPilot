@@ -4,7 +4,7 @@ import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage } from "./services/ai";
 import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema, INTERCEPTOR_PROMPTS } from "@shared/schema";
 import { z } from "zod";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { extractUser, requireAuth } from "./auth/neon-auth";
 
 // Admin usernames allowed to access the admin panel (can be expanded)
 const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
@@ -13,56 +13,28 @@ const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add 
 const getInterceptorPrompt = (targetKey: string) =>
   INTERCEPTOR_PROMPTS.find(p => p.targetKey === targetKey);
 
-// Middleware to check if user is an admin
 const isAdmin: RequestHandler = (req: any, res, next) => {
-  const user = req.user;
-  if (!user || !user.claims) {
-    return res.status(401).json({ message: "Unauthorized" });
+  if (!req.userId || !ADMIN_USERS.includes(req.userId)) {
+    return res.status(403).json({ message: "Forbidden" });
   }
-
-  // Check if user email or ID matches admin list
-  const userEmail = user.claims.email || "";
-  const userId = user.claims.sub || "";
-
-  // Check against allowlist - user ID or email must match
-  const isAllowed = ADMIN_USERS.includes(userId) || ADMIN_USERS.includes(userEmail);
-
-  if (!isAllowed) {
-    return res.status(403).json({ message: "Forbidden: Admin access required" });
-  }
-
   next();
 };
 
-// Passthrough middleware for non-Replit environments where auth is unavailable
-const noAuth: RequestHandler = (_req, _res, next) => next();
-const authMiddleware: RequestHandler = process.env.REPL_ID ? isAuthenticated : noAuth;
-const adminMiddleware: RequestHandler = process.env.REPL_ID ? isAdmin : noAuth;
-
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup authentication BEFORE other routes (Replit only — REPL_ID absent on Vercel/local)
-  if (process.env.REPL_ID) {
-    await setupAuth(app);
-    registerAuthRoutes(app);
-  }
+  app.use(extractUser);
 
   // Admin check endpoint
-  app.get("/api/admin/check", authMiddleware, (req: any, res) => {
-    const user = req.user?.claims;
-    res.json({ 
-      isAdmin: true, // All authenticated users are admins for now
-      user: {
-        id: user?.sub,
-        email: user?.email,
-        name: `${user?.first_name || ""} ${user?.last_name || ""}`.trim(),
-      }
+  app.get("/api/admin/check", requireAuth, (req: any, res) => {
+    res.json({
+      isAdmin: ADMIN_USERS.includes(req.userId),
+      user: { id: req.userId }
     });
   });
 
   // Get user's in-progress draft project (for session persistence)
-  app.get("/api/user/draft", authMiddleware, async (req: any, res) => {
+  app.get("/api/user/draft", requireAuth, async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
+      const userId = req.userId;
       if (!userId) {
         return res.status(401).json({ message: "Not authenticated" });
       }
@@ -75,9 +47,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Link a project to the current user
-  app.post("/api/projects/:id/claim", authMiddleware, async (req: any, res) => {
+  app.post("/api/projects/:id/claim", requireAuth, async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
+      const userId = req.userId;
       if (!userId) {
         return res.status(401).json({ message: "Not authenticated" });
       }
@@ -806,7 +778,7 @@ Generate practical, actionable documentation based on the information provided. 
   });
 
   // Admin Prompts CRUD (protected by isAdmin middleware)
-  app.get("/api/admin/prompts", authMiddleware, adminMiddleware, async (req, res) => {
+  app.get("/api/admin/prompts", requireAuth, isAdmin, async (req, res) => {
     try {
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
@@ -816,7 +788,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  app.get("/api/admin/prompts/:id", requireAuth, isAdmin, async (req, res) => {
     try {
       const prompt = await storage.getAdminPrompt(req.params.id);
       if (!prompt) {
@@ -828,10 +800,10 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.post("/api/admin/prompts", authMiddleware, adminMiddleware, async (req: any, res) => {
+  app.post("/api/admin/prompts", requireAuth, isAdmin, async (req: any, res) => {
     try {
       const promptData = insertAdminPromptSchema.parse(req.body);
-      const userId = req.user?.claims?.sub || "unknown";
+      const userId = req.userId || "unknown";
       const prompt = await storage.createAdminPrompt({
         ...promptData,
         updatedBy: userId,
@@ -846,10 +818,10 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.put("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req: any, res) => {
+  app.put("/api/admin/prompts/:id", requireAuth, isAdmin, async (req: any, res) => {
     try {
       const updates = insertAdminPromptSchema.partial().parse(req.body);
-      const userId = req.user?.claims?.sub || "unknown";
+      const userId = req.userId || "unknown";
       const prompt = await storage.updateAdminPrompt(req.params.id, {
         ...updates,
         updatedBy: userId,
@@ -866,7 +838,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.delete("/api/admin/prompts/:id", authMiddleware, adminMiddleware, async (req, res) => {
+  app.delete("/api/admin/prompts/:id", requireAuth, isAdmin, async (req, res) => {
     try {
       const deleted = await storage.deleteAdminPrompt(req.params.id);
       if (!deleted) {
@@ -879,14 +851,14 @@ Generate practical, actionable documentation based on the information provided. 
   });
 
   // Seed default prompts if none exist
-  app.post("/api/admin/prompts/seed", authMiddleware, adminMiddleware, async (req: any, res) => {
+  app.post("/api/admin/prompts/seed", requireAuth, isAdmin, async (req: any, res) => {
     try {
       const existingPrompts = await storage.getAllAdminPrompts();
       if (existingPrompts.length > 0) {
         return res.json({ message: "Prompts already exist", count: existingPrompts.length });
       }
       
-      const userId = req.user?.claims?.sub || "system";
+      const userId = req.userId || "system";
       await storage.seedDefaultPrompts(userId);
       const prompts = await storage.getAllAdminPrompts();
       res.json({ message: "Default prompts seeded", count: prompts.length });
@@ -896,7 +868,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/default-stages", authMiddleware, adminMiddleware, async (req, res) => {
+  app.get("/api/admin/default-stages", requireAuth, isAdmin, async (req, res) => {
     try {
       const { DEFAULT_STAGES } = await import("@shared/schema");
       res.json(DEFAULT_STAGES);
@@ -905,7 +877,7 @@ Generate practical, actionable documentation based on the information provided. 
     }
   });
 
-  app.get("/api/admin/interceptor-prompts", authMiddleware, adminMiddleware, async (req, res) => {
+  app.get("/api/admin/interceptor-prompts", requireAuth, isAdmin, async (req, res) => {
     try {
       const { INTERCEPTOR_PROMPTS } = await import("@shared/schema");
       res.json(INTERCEPTOR_PROMPTS);
