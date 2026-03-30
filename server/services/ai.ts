@@ -120,9 +120,9 @@ export class AIService {
     const config = userConfig || this.getDefaultConfig();
 
     if (config.provider === 'groq') {
-      // Use Groq for structured output — parse JSON from response
+      // Use Groq for structured output — extract JSON from response
       const response = await this.chatWithGroq(messages, config.model || 'llama-3.3-70b-versatile', config.apiKey);
-      try { return JSON.parse(response.content); } catch { return {}; }
+      try { return this.extractJSON(response.content); } catch { return {}; }
     }
 
     // Existing Anthropic path
@@ -162,6 +162,26 @@ export class AIService {
     } catch (error) {
       throw new Error(`Claude structured output error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Extract JSON from LLM response that may include markdown fences or extra text.
+   */
+  private extractJSON(text: string): any {
+    // Try direct parse first
+    try { return JSON.parse(text); } catch {}
+    // Try extracting from ```json ... ``` fences
+    const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (fenceMatch) {
+      try { return JSON.parse(fenceMatch[1]); } catch {}
+    }
+    // Try finding first { ... } block
+    const braceStart = text.indexOf('{');
+    const braceEnd = text.lastIndexOf('}');
+    if (braceStart !== -1 && braceEnd > braceStart) {
+      try { return JSON.parse(text.slice(braceStart, braceEnd + 1)); } catch {}
+    }
+    throw new Error("Could not extract JSON from response");
   }
 
   private normalizeModel(model: string): string {
