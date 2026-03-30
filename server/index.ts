@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { runMigrations } from "./migrate";
+import fs from "fs";
+import https from "https";
+import path from "path";
 
 const app = express();
 app.use(express.json());
@@ -54,7 +57,23 @@ app.use((req, res, next) => {
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '3000', 10);
   const host = process.env.HOST || '127.0.0.1';
-  server.listen(port, host, () => {
-    log(`serving on http://${host}:${port}`);
-  });
+
+  // Use HTTPS if local certs exist (required for Neon Auth cookies)
+  const certPath = path.resolve('.certs/localhost.pem');
+  const keyPath = path.resolve('.certs/localhost-key.pem');
+  const useHttps = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
+  if (useHttps) {
+    const httpsServer = https.createServer({
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    }, app);
+    httpsServer.listen(port, host, () => {
+      log(`serving on https://${host}:${port}`);
+    });
+  } else {
+    server.listen(port, host, () => {
+      log(`serving on http://${host}:${port}`);
+    });
+  }
 })();
