@@ -1,47 +1,53 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { User } from "@shared/models/auth";
-
-async function fetchUser(): Promise<User | null> {
-  const response = await fetch("/api/auth/user", {
-    credentials: "include",
-  });
-
-  if (response.status === 401) {
-    return null;
-  }
-
-  if (!response.ok) {
-    throw new Error(`${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function logout(): Promise<void> {
-  window.location.href = "/api/logout";
-}
+import { useState, useEffect, useCallback } from 'react';
+import { authClient } from '@/lib/auth';
 
 export function useAuth() {
-  const queryClient = useQueryClient();
-  const { data: user, isLoading } = useQuery<User | null>({
-    queryKey: ["/api/auth/user"],
-    queryFn: fetchUser,
-    retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(null);
 
-  const logoutMutation = useMutation({
-    mutationFn: logout,
-    onSuccess: () => {
-      queryClient.setQueryData(["/api/auth/user"], null);
-    },
-  });
+  const refreshSession = useCallback(async () => {
+    try {
+      const result = await authClient.getSession();
+      const session = result?.data || result;
+      setUser(session?.user || null);
+      setToken(session?.session?.token || session?.token || null);
+    } catch {
+      setUser(null);
+      setToken(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refreshSession(); }, [refreshSession]);
+
+  const signIn = async (email: string, password: string) => {
+    const result = await authClient.signIn.email({ email, password });
+    await refreshSession();
+    return result;
+  };
+
+  const signUp = async (email: string, password: string, name: string) => {
+    const result = await authClient.signUp.email({ email, password, name });
+    await refreshSession();
+    return result;
+  };
+
+  const signOut = async () => {
+    await authClient.signOut();
+    setUser(null);
+    setToken(null);
+  };
 
   return {
     user,
     isLoading,
     isAuthenticated: !!user,
-    logout: logoutMutation.mutate,
-    isLoggingOut: logoutMutation.isPending,
+    token,
+    signIn,
+    signUp,
+    signOut,
+    logout: signOut, // backwards compat with admin page
   };
 }
