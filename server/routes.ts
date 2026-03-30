@@ -449,11 +449,13 @@ Rules:
 - Every question must be answerable without needing context from other questions
 - It's OK for the user to not know the answer — make questions approachable
 - Skip obvious questions the user already answered in their description
+- Do NOT ask about development teams, hiring, agencies, or resource allocation — users build with AI coding tools
+- Focus on WHAT to build, not HOW it gets built
 
 Sections should cover:
 1. What they're building (users, core features)
 2. How it should work (platform, key interactions)
-3. Scope & timeline (MVP vs full, urgency)
+3. Scope & priorities (MVP features, what to build first, launch goals)
 
 Respond with ONLY valid JSON:
 {

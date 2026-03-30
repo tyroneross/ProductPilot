@@ -383,93 +383,46 @@ export default function SessionSurveyPage() {
 
   const handleReadyToGenerate = async () => {
     autoSaveSurveyMutation.mutate(surveyResponses);
-    setShowDocumentSelection(true);
-  };
-
-  const handleConfirmGenerate = async () => {
-    setShowDocumentSelection(false);
     setIsGeneratingDocs(true);
+    setGenerationProgress({ current: 0, total: stages.length, stageName: "Starting..." });
 
-    const selectedStageIds = new Set(
-      stages.filter(s => documentSelections[s.id]?.selected).map(s => s.id)
-    );
-    const totalSelected = selectedStageIds.size;
-    setGenerationProgress({ current: 0, total: totalSelected, stageName: "Starting..." });
-
+    // Start polling for completion
     let generationComplete = false;
-
-    const checkAndNavigate = async () => {
+    const checkProgress = async () => {
       if (generationComplete) return;
       try {
         const res = await fetch(`/api/projects/${projectId}/stages`);
         if (res.ok) {
-          const updatedStages: Stage[] = await res.json();
-          const completedCount = updatedStages.filter(s =>
-            selectedStageIds.has(s.id) && s.progress === 100
-          ).length;
-          const inProgressStage = updatedStages.find(s =>
-            selectedStageIds.has(s.id) && s.progress > 0 && s.progress < 100
-          );
-          const nextStage = updatedStages.find(s =>
-            selectedStageIds.has(s.id) && s.progress === 0
-          );
-
+          const updatedStages = await res.json();
+          const completedCount = updatedStages.filter((s: any) => s.progress === 100).length;
+          const inProgress = updatedStages.find((s: any) => s.progress > 0 && s.progress < 100);
+          const next = updatedStages.find((s: any) => s.progress === 0);
           setGenerationProgress({
             current: completedCount,
-            total: totalSelected,
-            stageName: inProgressStage?.title || nextStage?.title || "Finishing up...",
+            total: stages.length,
+            stageName: inProgress?.title || next?.title || "Finishing up...",
           });
-
-          if (completedCount === totalSelected && totalSelected > 0) {
+          if (completedCount === stages.length) {
             generationComplete = true;
             if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
             setIsGeneratingDocs(false);
-            setGenerationProgress({ current: 0, total: 0, stageName: "" });
-            refetchProject();
-            toast({
-              title: "Documentation generated!",
-              description: "Your complete product documentation is ready.",
-            });
+            toast({ title: "Documentation generated!", description: "Your product docs are ready." });
             setLocation(`/documents/${projectId}`);
           }
         }
-      } catch (e) {
-        // Ignore polling errors
-      }
+      } catch {}
     };
 
-    pollIntervalRef.current = setInterval(checkAndNavigate, 2000);
+    pollIntervalRef.current = setInterval(checkProgress, 2000);
 
     try {
-      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, {
-        responses: surveyResponses,
-      });
-
-      const preferences = Object.entries(documentSelections)
-        .filter(([_, pref]) => pref.selected)
-        .map(([stageId, pref]) => ({
-          stageId,
-          detailLevel: pref.detailLevel,
-        }));
-
+      await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, { responses: surveyResponses });
       await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {});
-
-      // Polling will handle navigation when generation completes
-      await checkAndNavigate();
+      await checkProgress();
     } catch (error) {
-      if (!generationComplete) {
-        toast({
-          title: "Failed to generate documentation",
-          description: "Please try again.",
-          variant: "destructive",
-        });
-      }
-    } finally {
+      toast({ title: "Generation failed", description: "Please try again.", variant: "destructive" });
+      setIsGeneratingDocs(false);
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
-      if (!generationComplete) {
-        setIsGeneratingDocs(false);
-        setGenerationProgress({ current: 0, total: 0, stageName: "" });
-      }
     }
   };
 
