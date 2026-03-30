@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductPilot — Aurora Deep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #060611;
+      --surface: rgba(255, 255, 255, 0.025);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --text-primary: #f0f0f5;
+      --text-secondary: #9d9db5;
+      --text-muted: #5a5a72;
+      --accent: #818cf8;
+      --accent-dim: rgba(129, 140, 248, 0.15);
+      --accent-glow: 0 0 24px rgba(129, 140, 248, 0.25);
+      --accent-glow-sm: 0 0 12px rgba(129, 140, 248, 0.18);
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-primary);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Ambient background aurora */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      height: 600px;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(99, 102, 241, 0.10) 0%,
+        rgba(129, 140, 248, 0.05) 40%,
+        transparent 70%
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 40px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-logo-mark {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, var(--accent), #a5b4fc);
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      box-shadow: var(--accent-glow-sm);
+    }
+
+    .nav-signin {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-decoration: none;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .nav-signin:hover {
+      color: var(--text-primary);
+      border-color: var(--border-hover);
+    }
+
+    /* ── Main ── */
+    main {
+      position: relative;
+      z-index: 1;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 88px 24px 72px;
+      max-width: 680px;
+      width: 100%;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      border-radius: 100px;
+      padding: 5px 12px;
+      margin-bottom: 28px;
+    }
+
+    .badge-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px rgba(129, 140, 248, 0.7);
+    }
+
+    h1 {
+      font-size: clamp(28px, 5vw, 42px);
+      font-weight: 700;
+      line-height: 1.18;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, var(--accent) 0%, #c7d2fe 45%, var(--text-primary) 80%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      font-size: 17px;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      max-width: 520px;
+      margin-bottom: 40px;
+    }
+
+    .cta-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(135deg, #6366f1, #818cf8);
+      border: none;
+      border-radius: 10px;
+      padding: 14px 28px;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.12);
+      transition: transform 0.15s, box-shadow 0.15s;
+      letter-spacing: -0.01em;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 36px rgba(129, 140, 248, 0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+
+    .cta-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+
+    .cta-hint span {
+      margin: 0 4px;
+      color: rgba(90, 90, 114, 0.5);
+    }
+
+    /* ── Features ── */
+    .features {
+      width: 100%;
+      max-width: 960px;
+      padding: 0 24px 80px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-icon {
+      font-size: 22px;
+      line-height: 1;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent-dim);
+      border: 1px solid rgba(129, 140, 248, 0.15);
+      border-radius: 10px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* ── Footer ── */
+    footer {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 20px 24px 28px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 720px) {
+      nav {
+        padding: 16px 20px;
+      }
+
+      .hero {
+        padding: 60px 20px 52px;
+      }
+
+      .features {
+        grid-template-columns: 1fr;
+        padding: 0 20px 60px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .subtitle {
+        font-size: 15px;
+      }
+
+      .btn-primary {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <a href="#" class="nav-logo">
+      <span class="nav-logo-mark">P</span>
+      ProductPilot
+    </a>
+    <a href="#" class="nav-signin">Sign In</a>
+  </nav>
+
+  <main>
+
+    <!-- Hero -->
+    <section class="hero">
+      <span class="badge">
+        <span class="badge-dot"></span>
+        AI-Powered Product Development
+      </span>
+
+      <h1>From idea to implementation docs in minutes</h1>
+
+      <p class="subtitle">
+        Describe your product. Get a complete PRD, wireframes, architecture, and dev guide.
+      </p>
+
+      <div class="cta-group">
+        <a href="#" class="btn-primary">
+          Start Building &rarr;
+        </a>
+        <p class="cta-hint">
+          No account required <span>&middot;</span> Free to try
+        </p>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features">
+
+      <div class="card">
+        <div class="card-icon">&#x1F4AC;</div>
+        <div class="card-title">Conversational Discovery</div>
+        <p class="card-desc">Answer a few questions. AI builds your requirements.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">&#x26A1;</div>
+        <div class="card-title">6-Stage Pipeline</div>
+        <p class="card-desc">Requirements &rarr; PRD &rarr; Wireframes &rarr; Architecture &rarr; Prompts &rarr; Guide</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">&#x1F4C4;</div>
+        <div class="card-title">Instant Documents</div>
+        <p class="card-desc">Generate all docs at once or refine stage-by-stage.</p>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    Built with Claude AI
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductPilot — Your Documents</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:               #110f0d;
+      --surface:          #1a1714;
+      --surface-elevated: #231f1b;
+      --border:           rgba(200,180,160,0.08);
+      --border-hover:     rgba(200,180,160,0.16);
+      --text-primary:     #f5f0eb;
+      --text-secondary:   #a89a8c;
+      --text-muted:       #6b5d52;
+      --accent:           #f0b65e;
+      --accent-hover:     #d4a04e;
+      --success:          #7bc67e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      background: rgba(17,15,13,0.80);
+      -webkit-backdrop-filter: blur(12px) saturate(1.2);
+      backdrop-filter: blur(12px) saturate(1.2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      max-width: 56rem;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .wordmark-diamond {
+      width: 10px;
+      height: 10px;
+      background: var(--accent);
+      transform: rotate(45deg);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--accent); }
+
+    /* ── Main layout ── */
+    main {
+      flex: 1;
+      position: relative;
+      z-index: 1;
+    }
+
+    .page-inner {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 3rem;
+    }
+
+    /* ── Prototype banner ── */
+    .prototype-banner {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(240,182,94,0.07);
+      border: 1px solid rgba(240,182,94,0.18);
+      border-radius: 5px;
+      padding: 5px 10px;
+      margin-bottom: 1.5rem;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .prototype-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+
+    /* ── Breadcrumb ── */
+    .breadcrumb {
+      margin-bottom: 10px;
+    }
+
+    .breadcrumb-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 13px;
+      transition: color 0.15s;
+    }
+
+    .breadcrumb-back:hover { color: var(--text-primary); }
+
+    .breadcrumb-arrow {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.6;
+    }
+
+    /* ── Page header ── */
+    .page-header {
+      margin-bottom: 1.75rem;
+    }
+
+    .page-header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .page-stat {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ── Generation progress ── */
+    .generation-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 1.5rem;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+    }
+
+    .gen-spinner {
+      width: 11px;
+      height: 11px;
+      border: 1.5px solid rgba(240,182,94,0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .gen-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      flex: 1;
+    }
+
+    .gen-count {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .gen-track {
+      width: 80px;
+      height: 2px;
+      background: rgba(200,180,160,0.08);
+      border-radius: 9999px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .gen-fill {
+      height: 100%;
+      width: 66%;
+      background: var(--accent);
+      border-radius: 9999px;
+      animation: glow-pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes glow-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.6; }
+    }
+
+    /* ── Document list ── */
+    .doc-list {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+    }
+
+    .doc-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.12s;
+    }
+
+    .doc-row:last-child { border-bottom: none; }
+
+    .doc-row:hover { background: rgba(200,180,160,0.03); }
+
+    /* Completed: amber left border */
+    .doc-row.complete {
+      border-left: 2px solid var(--accent);
+      padding-left: 16px;
+    }
+
+    /* Pending: no left accent */
+    .doc-row.pending {
+      border-left: 2px solid transparent;
+      padding-left: 16px;
+    }
+
+    .doc-icon {
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+      width: 20px;
+      text-align: center;
+    }
+
+    .doc-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .doc-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .doc-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Skeleton shimmer for pending description */
+    .doc-desc-skeleton {
+      display: inline-block;
+      margin-top: 3px;
+      width: 220px;
+      height: 11px;
+      border-radius: 4px;
+      background-image: linear-gradient(
+        90deg,
+        rgba(200,180,160,0.05) 0%,
+        rgba(200,180,160,0.10) 40%,
+        rgba(200,180,160,0.05) 80%
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1.8s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% center; }
+      100% { background-position: -200% center; }
+    }
+
+    .doc-view {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      text-decoration: none;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+
+    .doc-view:hover { color: var(--accent-hover); }
+
+    .doc-view.disabled {
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    /* ── Bottom actions ── */
+    .bottom-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 1.25rem;
+    }
+
+    .btn-amber-outline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: 1px solid rgba(240,182,94,0.30);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .btn-amber-outline:hover {
+      border-color: rgba(240,182,94,0.55);
+      background: rgba(240,182,94,0.05);
+    }
+
+    .btn-text-link {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.2s;
+      padding: 0;
+    }
+
+    .btn-text-link:hover { color: var(--text-secondary); }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .doc-desc { display: none; }
+      .gen-track { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav aria-label="Main navigation">
+    <div class="nav-inner">
+      <a class="wordmark" href="#">
+        <span class="wordmark-diamond" aria-hidden="true"></span>
+        ProductPilot
+      </a>
+      <ul class="nav-links">
+        <li><a href="#">Dashboard</a></li>
+        <li><a href="#">Projects</a></li>
+        <li><a href="#">Docs</a></li>
+        <li><a href="#">Account</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main>
+    <div class="page-inner">
+
+      <!-- Prototype notice -->
+      <div class="prototype-banner" role="note">
+        <span class="prototype-dot" aria-hidden="true"></span>
+        PROTOTYPE — Static mockup. No data is real.
+      </div>
+
+      <!-- Breadcrumb -->
+      <div class="breadcrumb">
+        <a class="breadcrumb-back" href="#">
+          <svg class="breadcrumb-arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 12L6 8l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          My Fitness App
+        </a>
+      </div>
+
+      <!-- Page header -->
+      <header class="page-header">
+        <h1>Your Documents</h1>
+        <p class="page-stat">6 documents · Generated 2 min ago</p>
+      </header>
+
+      <!-- Generation in-progress -->
+      <div class="generation-bar" role="status" aria-label="Generating System Architecture, 4 of 6">
+        <span class="gen-spinner" aria-hidden="true"></span>
+        <span class="gen-text">Generating Architecture…</span>
+        <span class="gen-count">4 of 6</span>
+        <div class="gen-track" aria-hidden="true">
+          <div class="gen-fill"></div>
+        </div>
+      </div>
+
+      <!-- Document list -->
+      <section aria-label="Generated documents">
+        <div class="doc-list">
+
+          <!-- 1. Requirements Definition — complete -->
+          <div class="doc-row complete">
+            <span class="doc-icon" aria-hidden="true">📋</span>
+            <div class="doc-body">
+              <div class="doc-title">Requirements Definition</div>
+              <div class="doc-desc">Core users, problem space, and success metrics</div>
+            </div>
+            <a class="doc-view" href="#">View</a>
+          </div>
+
+          <!-- 2. Product Requirements — complete -->
+          <div class="doc-row complete">
+            <span class="doc-icon" aria-hidden="true">📄</span>
+            <div class="doc-body">
+              <div class="doc-title">Product Requirements</div>
+              <div class="doc-desc">Feature scope, user stories, and acceptance criteria</div>
+            </div>
+            <a class="doc-view" href="#">View</a>
+          </div>
+
+          <!-- 3. UI Wireframes — complete -->
+          <div class="doc-row complete">
+            <span class="doc-icon" aria-hidden="true">🖼️</span>
+            <div class="doc-body">
+              <div class="doc-title">UI Wireframes</div>
+              <div class="doc-desc">Page layouts, navigation flow, and interaction patterns</div>
+            </div>
+            <a class="doc-view" href="#">View</a>
+          </div>
+
+          <!-- 4. System Architecture — generating -->
+          <div class="doc-row pending" aria-busy="true">
+            <span class="doc-icon" aria-hidden="true">🗄️</span>
+            <div class="doc-body">
+              <div class="doc-title">System Architecture</div>
+              <div class="doc-desc-skeleton" aria-hidden="true"></div>
+            </div>
+            <a class="doc-view disabled" href="#" tabindex="-1" aria-disabled="true">View</a>
+          </div>
+
+          <!-- 5. Coding Prompts — pending -->
+          <div class="doc-row pending" aria-busy="true">
+            <span class="doc-icon" aria-hidden="true">💻</span>
+            <div class="doc-body">
+              <div class="doc-title">Coding Prompts</div>
+              <div class="doc-desc-skeleton" aria-hidden="true"></div>
+            </div>
+            <a class="doc-view disabled" href="#" tabindex="-1" aria-disabled="true">View</a>
+          </div>
+
+          <!-- 6. Development Guide — pending -->
+          <div class="doc-row pending" aria-busy="true">
+            <span class="doc-icon" aria-hidden="true">🚀</span>
+            <div class="doc-body">
+              <div class="doc-title">Development Guide</div>
+              <div class="doc-desc-skeleton" aria-hidden="true"></div>
+            </div>
+            <a class="doc-view disabled" href="#" tabindex="-1" aria-disabled="true">View</a>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Bottom actions -->
+      <div class="bottom-actions">
+        <a class="btn-amber-outline" href="#">Refine with AI</a>
+        <a class="btn-text-link" href="#">Export All</a>
+      </div>
+
+    </div>
+  </main>
+
+</body>
+</html>

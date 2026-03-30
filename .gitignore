@@ -8,3 +8,4 @@ vite.config.ts.*
 .bookmark/
 .env*.local
 .vercel
+.ibr/

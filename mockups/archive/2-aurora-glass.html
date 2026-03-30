@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductPilot — Aurora Glass</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Tokens ─────────────────────────────────────────────── */
+    :root {
+      --bg:           #09090b;
+      --surface:      rgba(255,255,255,0.03);
+      --border:       rgba(255,255,255,0.08);
+      --border-hover: rgba(255,255,255,0.18);
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted:   #52525b;
+      --accent:       #818cf8;
+      --radius:       8px;
+      --font:         'Inter', system-ui, sans-serif;
+    }
+
+    /* ── Base ───────────────────────────────────────────────── */
+    html { font-size: 16px; }
+    body {
+      background-color: var(--bg);
+      color: var(--text-primary);
+      font-family: var(--font);
+      line-height: 1.6;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Nav ────────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 56px;
+      border-bottom: 1px solid var(--border);
+      background-color: rgba(9,9,11,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .nav-logo {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+    .nav-sign-in {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+    .nav-sign-in:hover { color: var(--text-primary); }
+
+    /* ── Layout wrapper ─────────────────────────────────────── */
+    .page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 24px 80px;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 88px 0 72px;
+      max-width: 560px;
+      width: 100%;
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--surface);
+      margin-bottom: 24px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+
+    /* H1 */
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 36px);
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+      letter-spacing: -0.025em;
+      margin-bottom: 16px;
+    }
+
+    /* Subtitle */
+    .hero p {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      margin-bottom: 32px;
+      max-width: 440px;
+    }
+
+    /* CTA group */
+    .cta-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 10px 22px;
+      background: var(--text-primary);
+      color: #09090b;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius);
+      text-decoration: none;
+      letter-spacing: -0.01em;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-primary:hover { background: #e4e4e7; }
+    .cta-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ── Features ───────────────────────────────────────────── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      max-width: 840px;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) + 1px);
+      overflow: hidden;
+      background: var(--border);
+    }
+
+    .feature-card {
+      background: var(--bg);
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: background 0.15s ease;
+    }
+    .feature-card:hover {
+      background: rgba(255,255,255,0.025);
+    }
+
+    .feature-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      margin-bottom: 2px;
+    }
+    .feature-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+    .feature-card p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    .feature-tag {
+      margin-top: auto;
+      padding-top: 14px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    footer {
+      margin-top: 72px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border);
+      max-width: 840px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-logo {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+    .footer-links a {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+    .footer-links a:hover { color: var(--text-secondary); }
+
+    /* ── Responsive ─────────────────────────────────────────── */
+    @media (max-width: 720px) {
+      .features {
+        grid-template-columns: 1fr;
+        background: transparent;
+        border: none;
+        gap: 1px;
+      }
+      .feature-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+      }
+      footer {
+        flex-direction: column;
+        gap: 16px;
+        align-items: flex-start;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .hero { padding: 56px 0 48px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <a class="nav-logo" href="#">ProductPilot</a>
+    <a class="nav-sign-in" href="#">Sign In</a>
+  </nav>
+
+  <div class="page">
+
+    <!-- Hero -->
+    <section class="hero">
+      <span class="badge">
+        <span class="badge-dot"></span>
+        AI-Powered
+      </span>
+
+      <h1>From idea to implementation docs in minutes</h1>
+
+      <p>
+        Describe your product in plain language. ProductPilot generates PRDs,
+        wireframes, architecture docs, and coding prompts — ready to hand off.
+      </p>
+
+      <div class="cta-group">
+        <a class="btn-primary" href="#">Start Building &rarr;</a>
+        <span class="cta-sub">No account required to try</span>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <div class="features">
+
+      <div class="feature-card">
+        <div class="feature-icon">&#128196;</div>
+        <h3>Product Requirements</h3>
+        <p>
+          Generate structured PRDs with user stories, acceptance criteria,
+          and edge cases from a short brief.
+        </p>
+        <span class="feature-tag">PRD</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">&#9707;</div>
+        <h3>Wireframes &amp; Flows</h3>
+        <p>
+          Produce annotated wireframe descriptions and user flow diagrams
+          that designers can work from immediately.
+        </p>
+        <span class="feature-tag">Design</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">&#128736;</div>
+        <h3>Architecture &amp; Prompts</h3>
+        <p>
+          Output system architecture, data models, and ready-to-use coding
+          prompts tuned for your stack.
+        </p>
+        <span class="feature-tag">Engineering</span>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <a class="footer-logo" href="#">ProductPilot</a>
+      <ul class="footer-links">
+        <li><a href="#">Docs</a></li>
+        <li><a href="#">Changelog</a></li>
+        <li><a href="#">Privacy</a></li>
+      </ul>
+    </footer>
+
+  </div>
+
+</body>
+</html>
