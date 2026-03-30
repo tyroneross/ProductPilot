@@ -238,11 +238,21 @@ export default function SettingsPage() {
                 {/* Google OAuth */}
                 <button
                   type="button"
-                  onClick={() => {
-                    authClient.signIn.social({
-                      provider: "google",
-                      callbackURL: window.location.origin + "/settings",
-                    });
+                  onClick={async () => {
+                    try {
+                      const result = await authClient.signIn.social({
+                        provider: "google",
+                        callbackURL: window.location.origin + "/settings",
+                      });
+                      // SDK returns { url, redirect: true } — navigate to the OAuth URL
+                      if (result?.data?.url) {
+                        window.location.href = result.data.url;
+                      } else if (result?.url) {
+                        window.location.href = result.url;
+                      }
+                    } catch (err) {
+                      setAuthError("Failed to start Google sign-in. Please try again.");
+                    }
                   }}
                   style={{
                     width: "100%",
