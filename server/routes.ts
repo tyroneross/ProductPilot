@@ -1,10 +1,23 @@
 import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
-import { aiService, type AIMessage } from "./services/ai";
+import { aiService, type AIMessage, type LLMConfig } from "./services/ai";
 import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema, INTERCEPTOR_PROMPTS } from "@shared/schema";
 import { z } from "zod";
 import { extractUser, requireAuth } from "./auth/neon-auth";
+
+// Helper to resolve per-user LLM config from stored settings
+async function getLLMConfig(req: any): Promise<LLMConfig | null> {
+  if (!req.userId) return null;
+  const settings = await storage.getUserSettings(req.userId);
+  const apiKey = settings?.llm_api_key || settings?.llmApiKey;
+  if (!apiKey) return null;
+  return {
+    provider: (settings.llm_provider || settings.llmProvider || 'groq') as LLMConfig['provider'],
+    apiKey,
+    model: settings.llm_model || settings.llmModel || undefined,
+  };
+}
 
 // Admin usernames allowed to access the admin panel (can be expanded)
 const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
@@ -366,7 +379,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
-          const aiResponse = await aiService.chat(aiMessages, modelToUse);
+          const userConfig = await getLLMConfig(req);
+          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig);
 
           // Create AI response message
           const aiMessage = await storage.createMessage({
@@ -577,6 +591,8 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
       const allAdminPrompts = await storage.getAllAdminPrompts();
       const adminPromptMap = new Map(allAdminPrompts.map(p => [p.targetKey, p]));
 
+      const userConfig = await getLLMConfig(req);
+
       await Promise.allSettled(stages.map(async (stage) => {
         // Get detail level for this stage (default to detailed)
         const detailLevel = preferencesMap.get(stage.id) || "detailed";
@@ -618,7 +634,7 @@ Be thorough and specific based on the survey answers provided.`;
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet");
+          ], "claude-sonnet", userConfig);
 
           // Create a message in the stage with the generated content
           await storage.createMessage({
@@ -718,6 +734,8 @@ Be thorough and specific based on the survey answers provided.`;
       const allAdminPrompts = await storage.getAllAdminPrompts();
       const adminPromptMap = new Map(allAdminPrompts.map(p => [p.targetKey, p]));
 
+      const userConfig = await getLLMConfig(req);
+
       await Promise.allSettled(coreStagesToGenerate.map(async (stage) => {
         const docPrompt = `Based on this minimal product context, generate content for the "${stage.title}" section.
 
@@ -732,7 +750,7 @@ Generate practical, actionable documentation based on the information provided. 
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet");
+          ], "claude-sonnet", userConfig);
 
           await storage.createMessage({
             stageId: stage.id,
@@ -883,6 +901,49 @@ Generate practical, actionable documentation based on the information provided. 
       res.json(INTERCEPTOR_PROMPTS);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch interceptor prompts" });
+    }
+  });
+
+  // ── Settings routes (require auth) ──
+
+  // GET /api/settings — get current user's LLM settings
+  app.get("/api/settings", requireAuth, async (req: any, res) => {
+    try {
+      const settings = await storage.getUserSettings(req.userId);
+      const result = settings || { llmProvider: 'groq', llmModel: 'llama-3.3-70b-versatile', llmApiKey: null };
+      // Mask API key in response
+      const rawKey = result.llm_api_key || result.llmApiKey;
+      if (rawKey) {
+        result.llmApiKeyMasked = rawKey.slice(0, 7) + '...' + rawKey.slice(-4);
+        delete result.llm_api_key;
+        delete result.llmApiKey;
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get settings" });
+    }
+  });
+
+  // PUT /api/settings — update LLM settings
+  app.put("/api/settings", requireAuth, async (req: any, res) => {
+    try {
+      const { llmProvider, llmApiKey, llmModel } = req.body;
+      const settings = await storage.upsertUserSettings(req.userId, {
+        llmProvider, llmApiKey, llmModel,
+      });
+      res.json({ message: 'Settings updated', provider: settings.llm_provider || settings.llmProvider });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update settings" });
+    }
+  });
+
+  // DELETE /api/settings/key — remove custom API key (revert to demo)
+  app.delete("/api/settings/key", requireAuth, async (req: any, res) => {
+    try {
+      await storage.upsertUserSettings(req.userId, { llmApiKey: null });
+      res.json({ message: 'API key removed. Using demo key.' });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove key" });
     }
   });
 

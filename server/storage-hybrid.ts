@@ -1,6 +1,6 @@
 import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
 import { projects, stages, messages, adminPrompts, DEFAULT_STAGES } from "@shared/schema";
-import { eq, and, ne, desc, asc } from "drizzle-orm";
+import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
 import { db } from "./db";
 
 interface IStorage {
@@ -33,6 +33,10 @@ interface IStorage {
   updateAdminPrompt(id: string, updates: Partial<AdminPrompt>): Promise<AdminPrompt | undefined>;
   deleteAdminPrompt(id: string): Promise<boolean>;
   seedDefaultPrompts(userId: string): Promise<void>;
+
+  // User Settings
+  getUserSettings(userId: string): Promise<any | undefined>;
+  upsertUserSettings(userId: string, updates: Record<string, any>): Promise<any>;
 }
 
 // In-memory storage fallback
@@ -40,6 +44,7 @@ class MemStorage implements IStorage {
   private projects: Map<string, Project> = new Map();
   private stages: Map<string, Stage> = new Map();
   private messages: Map<string, Message> = new Map();
+  private userSettingsMap = new Map<string, any>();
 
   private generateId(): string {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -417,6 +422,18 @@ Be conversational and encouraging. After 4-5 exchanges, you'll have enough conte
       updatedBy: userId,
     });
   }
+
+  // User Settings - MemStorage implementation
+  async getUserSettings(userId: string) {
+    return this.userSettingsMap.get(userId);
+  }
+
+  async upsertUserSettings(userId: string, updates: Record<string, any>) {
+    const existing = this.userSettingsMap.get(userId) || { userId, llmProvider: 'groq', llmModel: 'llama-3.3-70b-versatile' };
+    const merged = { ...existing, ...updates, userId, updatedAt: new Date() };
+    this.userSettingsMap.set(userId, merged);
+    return merged;
+  }
 }
 
 // PostgreSQL storage using Drizzle
@@ -638,6 +655,35 @@ Be conversational and encouraging. After 4-5 exchanges, you'll have enough conte
       isDefault: true,
       updatedBy: userId,
     });
+  }
+
+  // User Settings - PostgresStorage implementation
+  async getUserSettings(userId: string) {
+    const result = await this.db.execute(
+      sql`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`
+    );
+    return result.rows?.[0] || undefined;
+  }
+
+  async upsertUserSettings(userId: string, updates: Record<string, any>) {
+    const existing = await this.getUserSettings(userId);
+    if (existing) {
+      await this.db.execute(
+        sql`UPDATE user_settings SET
+          llm_provider = COALESCE(${updates.llmProvider ?? null}, llm_provider),
+          llm_api_key = ${updates.llmApiKey !== undefined ? updates.llmApiKey : sql`llm_api_key`},
+          llm_model = COALESCE(${updates.llmModel ?? null}, llm_model),
+          updated_at = NOW()
+        WHERE user_id = ${userId}`
+      );
+      return this.getUserSettings(userId);
+    } else {
+      await this.db.execute(
+        sql`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
+        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || 'groq'}, ${updates.llmApiKey || null}, ${updates.llmModel || 'llama-3.3-70b-versatile'})`
+      );
+      return this.getUserSettings(userId);
+    }
   }
 }
 
