@@ -34,6 +34,106 @@ const isAdmin: RequestHandler = (req: any, res, next) => {
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ── Auth proxy routes (forward to Neon Auth API) ──
+  // These must be registered BEFORE extractUser middleware so they don't require auth.
+  const NEON_AUTH_URL = process.env.NEON_AUTH_URL || process.env.NEON_AUTH_BASE_URL;
+
+  // Proxy: GET /api/auth/google — initiate Google OAuth
+  app.get("/api/auth/google", async (_req, res) => {
+    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
+    try {
+      const response = await fetch(`${NEON_AUTH_URL}/sign-in/social`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Origin": "http://localhost:3001" },
+        body: JSON.stringify({ provider: "google", callbackURL: `http://localhost:3001/api/auth/callback` }),
+      });
+      const data = await response.json();
+      if (data.url) {
+        res.redirect(data.url);
+      } else {
+        res.status(400).json({ message: "Failed to initiate OAuth", data });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Auth service error" });
+    }
+  });
+
+  // Proxy: GET /api/auth/callback — handle OAuth callback, set local session cookie
+  app.get("/api/auth/callback", async (_req, res) => {
+    // The OAuth flow will redirect here with tokens/session info
+    // For now, redirect to settings page — the session should be set by Neon Auth
+    res.redirect("/settings");
+  });
+
+  // Proxy: POST /api/auth/signup — email sign-up
+  app.post("/api/auth/signup", async (req, res) => {
+    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
+    try {
+      const response = await fetch(`${NEON_AUTH_URL}/sign-up/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await response.json();
+      // Forward any set-cookie headers from Neon Auth
+      const setCookie = response.headers.get("set-cookie");
+      if (setCookie) res.setHeader("set-cookie", setCookie);
+      res.status(response.status).json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Sign-up failed" });
+    }
+  });
+
+  // Proxy: POST /api/auth/signin — email sign-in
+  app.post("/api/auth/signin", async (req, res) => {
+    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
+    try {
+      const response = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await response.json();
+      const setCookie = response.headers.get("set-cookie");
+      if (setCookie) res.setHeader("set-cookie", setCookie);
+      res.status(response.status).json(data);
+    } catch (error) {
+      res.status(500).json({ message: "Sign-in failed" });
+    }
+  });
+
+  // Proxy: GET /api/auth/session — get current session
+  app.get("/api/auth/session", async (req, res) => {
+    if (!NEON_AUTH_URL) return res.json(null);
+    try {
+      const response = await fetch(`${NEON_AUTH_URL}/get-session`, {
+        headers: {
+          "Cookie": req.headers.cookie || "",
+        },
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch {
+      res.json(null);
+    }
+  });
+
+  // Proxy: POST /api/auth/signout — clear session
+  app.post("/api/auth/signout", async (req, res) => {
+    if (!NEON_AUTH_URL) return res.json({ success: true });
+    try {
+      const response = await fetch(`${NEON_AUTH_URL}/sign-out`, {
+        method: "POST",
+        headers: { "Cookie": req.headers.cookie || "" },
+      });
+      const setCookie = response.headers.get("set-cookie");
+      if (setCookie) res.setHeader("set-cookie", setCookie);
+      res.json({ success: true });
+    } catch {
+      res.json({ success: true });
+    }
+  });
+
   app.use(extractUser);
 
   // Admin check endpoint
