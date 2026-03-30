@@ -1,7 +1,9 @@
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function WelcomePage() {
   const [, setLocation] = useLocation();
+  const { user, isAuthenticated } = useAuth();
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" }}>
@@ -71,12 +73,25 @@ export default function WelcomePage() {
 
           {/* Nav links */}
           <ul style={{ display: "flex", alignItems: "center", gap: "1.5rem", listStyle: "none", margin: 0, padding: 0 }}>
-            <li>
-              <NavLink onClick={() => setLocation("/projects")}>Projects</NavLink>
-            </li>
-            <li>
-              <NavLink onClick={() => setLocation("/auth")}>Sign In</NavLink>
-            </li>
+            {isAuthenticated ? (
+              <>
+                <li>
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#a89a8c" }}>
+                    {user?.name || user?.email}
+                  </span>
+                </li>
+                <li>
+                  <NavLink onClick={() => setLocation("/settings")}>Settings</NavLink>
+                </li>
+                <li>
+                  <NavLink onClick={() => setLocation("/projects")}>Projects</NavLink>
+                </li>
+              </>
+            ) : (
+              <li>
+                <NavLink onClick={() => setLocation("/settings")}>Sign In</NavLink>
+              </li>
+            )}
           </ul>
         </div>
       </nav>

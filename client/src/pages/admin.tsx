@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -495,6 +496,7 @@ function SectionHeader({
 export default function AdminPage() {
   const { user, isLoading: authLoading, isAuthenticated, logout } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [pendingUpdateData, setPendingUpdateData] = useState<{ id: string; data: Partial<AdminPrompt> } | null>(null);
@@ -673,17 +675,17 @@ export default function AdminPage() {
             </div>
             <CardTitle className="text-[16px] font-semibold text-[#f5f0eb]">Admin Panel</CardTitle>
             <p className="text-[13px] text-[#a89a8c] mt-1">
-              Sign in with your GitHub account to access the admin panel.
+              Sign in to access the admin panel.
             </p>
           </CardHeader>
           <CardContent className="flex justify-center pb-6">
             <Button
-              onClick={() => (window.location.href = "/api/login")}
+              onClick={() => setLocation("/settings")}
               className="btn-primary h-9 px-5 text-[13px]"
               data-testid="button-admin-login"
             >
               <LogIn className="w-3.5 h-3.5 mr-2" />
-              Sign in with GitHub
+              Sign In
             </Button>
           </CardContent>
         </Card>
