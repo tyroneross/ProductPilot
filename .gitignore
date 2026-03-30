@@ -10,3 +10,4 @@ vite.config.ts.*
 .vercel
 .ibr/
 .certs/
+api/index.mjs
