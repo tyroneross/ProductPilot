@@ -452,22 +452,10 @@ export default function SessionSurveyPage() {
           detailLevel: pref.detailLevel,
         }));
 
-      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
-        documentPreferences: preferences,
-      });
+      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {});
 
-      if (!generationComplete) {
-        await checkAndNavigate();
-        if (!generationComplete) {
-          generationComplete = true;
-          refetchProject();
-          toast({
-            title: "Documentation generated!",
-            description: "Your complete product documentation is ready.",
-          });
-          setLocation(`/documents/${projectId}`);
-        }
-      }
+      // Polling will handle navigation when generation completes
+      await checkAndNavigate();
     } catch (error) {
       if (!generationComplete) {
         toast({
@@ -1254,7 +1242,7 @@ export default function SessionSurveyPage() {
                                         }
                                       }}
                                       style={{
-                                        height: 44,
+                                        minHeight: 44,
                                         display: "flex", alignItems: "center", justifyContent: "center",
                                         borderRadius: 10,
                                         border: selected ? "1px solid #f0b65e" : "1px solid rgba(200,180,160,0.08)",
@@ -1264,9 +1252,11 @@ export default function SessionSurveyPage() {
                                         fontWeight: selected ? 500 : 400,
                                         fontFamily: "inherit",
                                         cursor: "pointer",
-                                        padding: "0 16px",
+                                        padding: "8px 16px",
                                         textAlign: "center",
                                         userSelect: "none",
+                                        wordBreak: "break-word",
+                                        overflow: "hidden",
                                       }}
                                     >
                                       {option}

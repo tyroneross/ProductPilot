@@ -456,6 +456,8 @@ Question Type Guidelines:
 - "single-select" for mutually exclusive choices - OPTIONS MUST BE SPECIFIC TO THIS PRODUCT
 - "multi-select" for selecting multiple applicable items - OPTIONS MUST BE RELEVANT
 
+IMPORTANT: Default to "multi-select" over "single-select" unless the options are truly mutually exclusive (like timeline or budget range). Most feature, priority, and preference questions should be multi-select.
+
 EXAMPLE of product-specific questions:
 - For a "task management app": "Which task views are essential?" with options like "List view", "Kanban board", "Calendar view", "Timeline/Gantt"
 - For an "e-commerce platform": "Which payment methods will you support?" with options like "Credit cards", "PayPal", "Crypto", "Buy now pay later"
