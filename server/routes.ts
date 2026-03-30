@@ -443,7 +443,10 @@ Rules:
 - Use the user's own words and concepts — don't introduce jargon they didn't use
 - Keep option text SHORT (3-5 words each)
 - Default to "multi-select" — only use "single-select" for truly either/or choices (like timeline)
-- Use "slider" sparingly — only for priority/importance ratings
+- Do NOT use "slider" for vague questions like "How important are features?" — that's meaningless
+- Use "multi-select" to let users pick features they want
+- Only use "slider" for specific, concrete questions like "What's your budget?" or "How many users at launch?"
+- Every question must be answerable without needing context from other questions
 - It's OK for the user to not know the answer — make questions approachable
 - Skip obvious questions the user already answered in their description
 

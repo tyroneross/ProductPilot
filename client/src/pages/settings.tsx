@@ -21,7 +21,7 @@ interface SettingsResponse {
 
 export default function SettingsPage() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, logout, signIn, signUp } = useAuth();
   const { toast } = useToast();
 
   // Auth form state
@@ -77,24 +77,13 @@ export default function SettingsPage() {
     setAuthError("");
     setAuthLoading(true);
     try {
-      const endpoint = authTab === "signin" ? "/api/auth/signin" : "/api/auth/signup";
-      const body = authTab === "signin"
-        ? { email: authEmail, password: authPassword }
-        : { name: authName, email: authEmail, password: authPassword };
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Authentication failed" }));
-        setAuthError(err.message || "Authentication failed");
+      if (authTab === "signin") {
+        await signIn(authEmail, authPassword);
       } else {
-        window.location.reload();
+        await signUp(authEmail, authPassword, authName);
       }
-    } catch {
-      setAuthError("Network error — please try again");
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
       setAuthLoading(false);
     }
