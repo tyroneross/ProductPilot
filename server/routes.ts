@@ -431,55 +431,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const prdStage = stages.find(s => s.stageNumber === 2);
       const discoveryMessages = prdStage ? await storage.getMessagesByStage(prdStage.id) : [];
 
-      const surveyPrompt = `You are creating a DYNAMIC, PERSONALIZED survey based on THIS SPECIFIC product idea. Analyze the product type and tailor every question to be relevant.
+      const surveyPrompt = `Generate a short, focused survey for this product idea. Keep it simple and conversational.
 
-Product Idea: "${project.description}"
+Product: "${project.description}"
 
-Discovery Conversation:
-${discoveryMessages.map(m => `${m.role}: ${m.content}`).join('\n')}
+${discoveryMessages.length > 0 ? `Context from user:\n${discoveryMessages.map(m => `${m.role}: ${m.content}`).join('\n')}` : ''}
 
-CRITICAL INSTRUCTIONS:
-1. ANALYZE the product type first (mobile app, web app, SaaS, marketplace, API, game, etc.)
-2. TAILOR all questions specifically to this product - generic questions are NOT acceptable
-3. Use product-specific terminology and options that match what the user described
-4. Reference specific features or concepts mentioned in the conversation
+Rules:
+- 3 sections max, 2 questions per section (6 questions total)
+- Questions should feel like a quick conversation, not a formal survey
+- Use the user's own words and concepts — don't introduce jargon they didn't use
+- Keep option text SHORT (3-5 words each)
+- Default to "multi-select" — only use "single-select" for truly either/or choices (like timeline)
+- Use "slider" sparingly — only for priority/importance ratings
+- It's OK for the user to not know the answer — make questions approachable
+- Skip obvious questions the user already answered in their description
 
-Generate a survey with 5 sections:
-1. Requirements - tailored to THIS product's user base and problem space
-2. Product Features - specific to features that make sense for THIS product type
-3. User Experience - relevant to how THIS product would be used
-4. Technical Architecture - appropriate tech choices for THIS product type
-5. Development Plan - realistic for THIS product scope
+Sections should cover:
+1. What they're building (users, core features)
+2. How it should work (platform, key interactions)
+3. Scope & timeline (MVP vs full, urgency)
 
-Question Type Guidelines:
-- "slider" (1-5 or 1-10 scale) for priorities, importance, complexity ratings
-- "single-select" for mutually exclusive choices - OPTIONS MUST BE SPECIFIC TO THIS PRODUCT
-- "multi-select" for selecting multiple applicable items - OPTIONS MUST BE RELEVANT
-
-IMPORTANT: Default to "multi-select" over "single-select" unless the options are truly mutually exclusive (like timeline or budget range). Most feature, priority, and preference questions should be multi-select.
-
-EXAMPLE of product-specific questions:
-- For a "task management app": "Which task views are essential?" with options like "List view", "Kanban board", "Calendar view", "Timeline/Gantt"
-- For an "e-commerce platform": "Which payment methods will you support?" with options like "Credit cards", "PayPal", "Crypto", "Buy now pay later"
-- For a "fitness app": "Which tracking features are priorities?" with options like "Workout logging", "Nutrition tracking", "Sleep monitoring", "Heart rate"
-
-Respond with ONLY valid JSON in this exact format:
+Respond with ONLY valid JSON:
 {
   "sections": [
     {
-      "id": "requirements",
-      "title": "Requirements & Goals",
-      "description": "Define your target users and core objectives",
+      "id": "what",
+      "title": "What You're Building",
+      "description": "Quick questions about your product",
       "questions": [
         {
-          "id": "q1_example",
-          "section": "requirements",
-          "question": "[Product-specific question]",
-          "type": "slider",
-          "min": 1,
-          "max": 5,
-          "minLabel": "[Relevant label]",
-          "maxLabel": "[Relevant label]",
+          "id": "q1",
+          "section": "what",
+          "question": "Short, conversational question?",
+          "type": "multi-select",
+          "options": ["Short option", "Another option"],
           "required": true
         }
       ]
