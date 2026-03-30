@@ -55,20 +55,16 @@ export default function DetailsPage() {
   const [v1Definition, setV1Definition] = useState("");
 
   // Optional fields
-  const [showOptional, setShowOptional] = useState(false);
+  const [showCoreDetails, setShowCoreDetails] = useState(false);
   const [mainFeatures, setMainFeatures] = useState("");
   const [techConstraints, setTechConstraints] = useState("");
-  const [inspirationLink, setInspirationLink] = useState("");
 
   // Async state
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // CTA is enabled only when the 4 required fields have content
-  const canContinue =
-    productIdea.trim().length > 0 &&
-    problemStatement.trim().length > 0 &&
-    primaryUsers.trim().length > 0 &&
-    v1Definition.trim().length > 0;
+  // CTA enabled when product idea has content — core details are optional
+  const canContinue = productIdea.trim().length > 0;
+  const hasIdea = productIdea.trim().length > 10; // Show style + details after typing
 
   const buildSessionPayload = () => {
     const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
@@ -78,7 +74,6 @@ export default function DetailsPage() {
       v1Definition: v1Definition.trim(),
       ...(mainFeatures.trim() && { mainFeatures: mainFeatures.trim() }),
       ...(techConstraints.trim() && { techConstraints: techConstraints.trim() }),
-      ...(inspirationLink.trim() && { inspirationLink: inspirationLink.trim() }),
     };
     return { styleObj, details };
   };
@@ -235,8 +230,9 @@ export default function DetailsPage() {
           </p>
         </div>
 
-        {/* Style selector */}
-        <div style={{ paddingTop: "36px" }}>
+        {/* Style selector — reveals after typing idea */}
+        {hasIdea && (
+          <div style={{ paddingTop: "36px" }}>
           <p
             className="text-[#a89a8c] font-semibold uppercase mb-3"
             style={{ fontSize: "11px", letterSpacing: "0.1em" }}
@@ -319,17 +315,38 @@ export default function DetailsPage() {
           <p className="mt-2 text-xs text-[#6b5d52]">
             Style influences wireframe aesthetics and color suggestions
           </p>
-        </div>
+          </div>
+        )}
 
-        {/* Core details */}
-        <div style={{ paddingTop: "36px" }}>
-          <p
-            className="text-[#a89a8c] font-semibold uppercase mb-3"
-            style={{ fontSize: "11px", letterSpacing: "0.1em" }}
-          >
-            Core Details
-          </p>
-          <div className="flex flex-col gap-2.5">
+        {/* Core details — optional, collapsible */}
+        {hasIdea && (
+          <div style={{ paddingTop: "24px" }}>
+            <button
+              type="button"
+              onClick={() => setShowCoreDetails((v) => !v)}
+              aria-expanded={showCoreDetails}
+              className="flex items-center gap-2 transition-colors"
+              style={{
+                background: "none",
+                border: "none",
+                padding: "6px 0",
+                color: "#a89a8c",
+                fontFamily: "inherit",
+                fontSize: "14px",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#f5f0eb")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
+            >
+              <ChevronDown
+                className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
+                style={{ transform: showCoreDetails ? "rotate(180deg)" : "rotate(0deg)" }}
+              />
+              Add more context (optional)
+            </button>
+            {showCoreDetails && (
+              <div className="flex flex-col gap-2.5 pt-3">
             <input
               type="text"
               value={problemStatement}
@@ -381,101 +398,47 @@ export default function DetailsPage() {
                 e.currentTarget.style.boxShadow = "none";
               }}
             />
-          </div>
-        </div>
-
-        {/* Optional details */}
-        <div style={{ paddingTop: "24px" }}>
-          <button
-            type="button"
-            onClick={() => setShowOptional((v) => !v)}
-            aria-expanded={showOptional}
-            aria-controls="optional-fields"
-            data-testid="button-show-optional"
-            className="flex items-center gap-2 transition-colors"
-            style={{
-              background: "none",
-              border: "none",
-              padding: "6px 0",
-              color: "#a89a8c",
-              fontFamily: "inherit",
-              fontSize: "14px",
-              fontWeight: 500,
-              cursor: "pointer",
-              letterSpacing: "0.01em",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#f5f0eb")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
-          >
-            <ChevronDown
-              className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
-              style={{ transform: showOptional ? "rotate(180deg)" : "rotate(0deg)" }}
+            <input
+              type="text"
+              value={mainFeatures}
+              onChange={(e) => setMainFeatures(e.target.value)}
+              placeholder="Key features (optional)"
+              aria-label="Main features"
+              data-testid="input-main-features"
+              className={fieldInputCls}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#f0b65e";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
             />
-            More details (optional)
-          </button>
+            <input
+              type="text"
+              value={techConstraints}
+              onChange={(e) => setTechConstraints(e.target.value)}
+              placeholder="Tech preferences (optional, e.g. React, iOS)"
+              aria-label="Tech constraints"
+              data-testid="input-tech-constraints"
+              className={fieldInputCls}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#f0b65e";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+              </div>
+            )}
+          </div>
+        )}
 
-          {showOptional && (
-            <div
-              id="optional-fields"
-              aria-hidden={!showOptional}
-              className="flex flex-col gap-2.5 pt-3"
-            >
-              <input
-                type="text"
-                value={mainFeatures}
-                onChange={(e) => setMainFeatures(e.target.value)}
-                placeholder="Main features (comma-separated)"
-                aria-label="Main features"
-                data-testid="input-main-features"
-                className={fieldInputCls}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#f0b65e";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-              <input
-                type="text"
-                value={techConstraints}
-                onChange={(e) => setTechConstraints(e.target.value)}
-                placeholder="Tech constraints (e.g. no-code, React, iOS only)"
-                aria-label="Tech constraints"
-                data-testid="input-tech-constraints"
-                className={fieldInputCls}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#f0b65e";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-              <input
-                type="url"
-                value={inspirationLink}
-                onChange={(e) => setInspirationLink(e.target.value)}
-                placeholder="Inspiration link (optional URL)"
-                aria-label="Inspiration link"
-                data-testid="input-inspiration-link"
-                className={fieldInputCls}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#f0b65e";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-      </div>{/* /page-content */}
+      </div>
+      {/* /page-content */}
 
       {/* ── Sticky CTA bar ── */}
       <div
