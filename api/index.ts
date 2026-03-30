@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import express, { type Request, Response, NextFunction } from "express";
+import { registerRoutes } from "../server/routes";
+import { runMigrations } from "../server/migrate";
 
 let appInitialized = false;
 const app = express();
@@ -8,9 +10,6 @@ app.use(express.urlencoded({ extended: false }));
 
 async function ensureInitialized() {
   if (appInitialized) return;
-
-  const { registerRoutes } = await import("../server/routes.js");
-  const { runMigrations } = await import("../server/migrate.js");
 
   try {
     await runMigrations();
