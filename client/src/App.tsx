@@ -14,6 +14,7 @@ const DocumentsPage = lazy(() => import("@/pages/documents"));
 const DocumentViewPage = lazy(() => import("@/pages/document-view"));
 const SessionSurveyPage = lazy(() => import("@/pages/session-survey"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function PageLoader() {
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
     </Suspense>
