@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "../server/routes";
-import { runMigrations } from "../server/migrate";
+import { registerRoutes } from "../routes";
+import { runMigrations } from "../migrate";
 
 let appInitialized = false;
 const app = express();
