@@ -44,8 +44,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const response = await fetch(`${NEON_AUTH_URL}/sign-in/social`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Origin": "http://localhost:3001" },
-        body: JSON.stringify({ provider: "google", callbackURL: `http://localhost:3001/api/auth/callback` }),
+        headers: { "Content-Type": "application/json", "Origin": _req.headers.origin || `${_req.protocol}://${_req.headers.host}` },
+        body: JSON.stringify({ provider: "google", callbackURL: `${_req.headers.origin || `${_req.protocol}://${_req.headers.host}`}/api/auth/callback` }),
       });
       const data = await response.json();
       if (data.url) {
@@ -62,7 +62,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/callback", async (_req, res) => {
     // The OAuth flow will redirect here with tokens/session info
     // For now, redirect to settings page — the session should be set by Neon Auth
-    res.redirect("/settings");
+    res.redirect("/projects");
   });
 
   // Proxy: POST /api/auth/signup — email sign-up

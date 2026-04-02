@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 
-// Build database URL from Replit PostgreSQL environment variables
+// Build database URL from environment variables
 function getDatabaseUrl(): string {
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
     const host = process.env.PGHOST;

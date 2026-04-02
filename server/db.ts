@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "@shared/schema";
 
-// Build database URL from Replit PostgreSQL environment variables
+// Build database URL from environment variables
 function getDatabaseUrl(): string {
   // If individual PG* vars are available, construct the URL from them
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
