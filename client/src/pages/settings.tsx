@@ -196,7 +196,6 @@ export default function SettingsPage() {
             Settings
           </h1>
 
-          <div>
               {/* User info bar */}
               <div
                 style={{
@@ -413,7 +412,6 @@ export default function SettingsPage() {
                   </span>
                 </div>
               </div>
-            </div>
         </div>
       </main>
     </div>
