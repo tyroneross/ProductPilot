@@ -405,4 +405,15 @@ Include a complete HTML document with basic styling. Keep it simple but function
     triggerCondition: "endpoint === '/api/projects/:projectId/generate-survey'",
     isEnabled: true,
   },
+  {
+    id: "interceptor_ui_preferences_injection",
+    scope: "interceptor",
+    targetKey: "ui_preferences_injection",
+    label: "UI/UX Preferences Prompt Pack Injection",
+    description: "Appends the user's structured UI/UX preference profile (AI Prompt Pack) to the Stage 3 wireframe system prompt so wireframes honor navigation, color, motion, and layout choices captured in /preferences.",
+    systemPrompt: "Treat the attached UI/UX PREFERENCES (AI PROMPT PACK) as the authoritative design spec. Honor color palette, navigation pattern, typography, motion, sheet/modal behavior, loading treatment, and gesture choices explicitly. If a preference conflicts with another requirement, surface the conflict rather than silently overriding.",
+    userPromptTemplate: null,
+    triggerCondition: "stage === 3 && project.appStyle?.promptPack",
+    isEnabled: true,
+  },
 ];

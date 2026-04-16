@@ -57,6 +57,7 @@ class MemStorage implements IStorage {
       customPrompts: insertProject.customPrompts || null,
       intakeAnswers: insertProject.intakeAnswers || null,
       minimumDetails: insertProject.minimumDetails || null,
+      appStyle: insertProject.appStyle || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
