@@ -34,6 +34,26 @@ export default function DetailsPage() {
     } catch { return null; }
   })();
 
+  const savedDesignProfile = (() => {
+    try {
+      const raw = sessionStorage.getItem("designProfile");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
+  const savedPromptPack = sessionStorage.getItem("promptPack") || null;
+
+  const appStyleWithPrefs = (() => {
+    if (!savedStyle && !savedDesignProfile) return null;
+    return {
+      ...(savedStyle ?? {}),
+      ...(savedDesignProfile ? { designProfile: savedDesignProfile } : {}),
+      ...(savedPromptPack ? { promptPack: savedPromptPack } : {}),
+    };
+  })();
+
+  const hasFocusedPreferences = savedDesignProfile?.source === "focused";
+
   const [details, setDetails] = useState<MinimumDetails>({
     problemStatement: "",
     userGoals: ["", "", ""],
@@ -80,6 +100,11 @@ export default function DetailsPage() {
     const cleanedDetails = getCleanedDetails();
     sessionStorage.setItem("minimumDetails", JSON.stringify(cleanedDetails));
     sessionStorage.setItem("productIdea", details.problemStatement);
+    // The session-survey flow will POST to /api/projects itself and pull
+    // appStyle from sessionStorage; ensure the merged blob is there.
+    if (appStyleWithPrefs) {
+      sessionStorage.setItem("appStyle", JSON.stringify(appStyleWithPrefs));
+    }
     setLocation("/session/survey");
   };
 
@@ -94,8 +119,8 @@ export default function DetailsPage() {
         mode: "survey",
         minimumDetails: cleanedDetails,
       };
-      if (savedStyle) {
-        projectPayload.appStyle = savedStyle;
+      if (appStyleWithPrefs) {
+        projectPayload.appStyle = appStyleWithPrefs;
       }
       const response = await apiRequest("POST", "/api/projects", projectPayload);
       
@@ -383,13 +408,23 @@ export default function DetailsPage() {
           >
             ← Back to home
           </button>
-          <button
-            onClick={() => setLocation("/style")}
-            className="text-description text-contrast-medium hover:text-accent"
-            data-testid="button-change-style"
-          >
-            {savedStyle ? `Style: ${savedStyle.name}` : "Pick a style"} →
-          </button>
+          <div className="flex items-center gap-3">
+            {hasFocusedPreferences && (
+              <span
+                className="text-metadata bg-accent/10 text-accent px-2 py-1 rounded-full font-medium"
+                data-testid="chip-preferences-applied"
+              >
+                Preferences applied
+              </span>
+            )}
+            <button
+              onClick={() => setLocation("/style")}
+              className="text-description text-contrast-medium hover:text-accent"
+              data-testid="button-change-style"
+            >
+              {savedStyle ? `Style: ${savedStyle.name}` : "Pick a style"} →
+            </button>
+          </div>
         </div>
       </div>
     </div>

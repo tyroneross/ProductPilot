@@ -367,7 +367,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (projectContext) {
           systemPromptToUse += `\n\n${projectContext}\n\nUse this context to ask informed, specific follow-up questions. DO NOT re-ask for information already provided above.`;
         }
-        
+
+        // Inject UI/UX preferences prompt pack for stage 3 wireframes
+        if (stage.stageNumber === 3) {
+          const appStyleBlob = project.appStyle as { promptPack?: string } | null;
+          const promptPack = appStyleBlob?.promptPack;
+          if (promptPack) {
+            const uiPrefsInterceptor = getInterceptorPrompt("ui_preferences_injection");
+            const isEnabled = uiPrefsInterceptor?.isEnabled ?? true;
+            if (isEnabled) {
+              systemPromptToUse += `\n\n${promptPack}\n\nThese UI/UX preferences are authoritative for wireframe generation. Honor them in HTML, color tokens, and interaction patterns.`;
+            }
+          }
+        }
+
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
           { role: "system", content: systemPromptToUse },
@@ -610,15 +623,21 @@ Respond with ONLY valid JSON in this exact format:
       const activePrompts = customPrompts.filter(p => p.isActive);
       
       // Create custom prompts context for AI
-      const customPromptsContext = activePrompts.length > 0 
+      const customPromptsContext = activePrompts.length > 0
         ? `\n\nUSER'S CUSTOM PROMPTS (incorporate these into your response where appropriate):\n${activePrompts.map(p => `- ${p.name} [${p.category}]: ${p.prompt}`).join('\n')}`
         : '';
-      
+
+      // Include UI/UX preferences prompt pack if present
+      const appStyleBlobSurvey = project.appStyle as { promptPack?: string } | null;
+      const uiPrefsContext = appStyleBlobSurvey?.promptPack
+        ? `\n\n${appStyleBlobSurvey.promptPack}`
+        : '';
+
       // Generate documentation for each stage based on survey responses
       const surveyContext = `
 Product: ${project.description}
 Survey Definition: ${JSON.stringify(project.surveyDefinition)}
-Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsContext}
+Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsContext}${uiPrefsContext}
 `;
 
       // Map stage numbers to categories for reliable routing
@@ -755,7 +774,7 @@ Be thorough and specific based on the survey answers provided.`;
       if (md.mustUseTools) contextParts.push(`MUST USE: ${md.mustUseTools}`);
       if (md.mustAvoidTools) contextParts.push(`MUST AVOID: ${md.mustAvoidTools}`);
 
-      const appStyle = project.appStyle as { id: string; name: string; description?: string; tagline?: string; vibe?: string; bestFor?: string; brands?: string } | null;
+      const appStyle = project.appStyle as { id: string; name: string; description?: string; tagline?: string; vibe?: string; bestFor?: string; brands?: string; promptPack?: string } | null;
       if (appStyle) {
         const styleParts = [`UI/UX STYLE: ${appStyle.name}`];
         if (appStyle.tagline) styleParts.push(`Style approach: ${appStyle.tagline}`);
@@ -763,6 +782,11 @@ Be thorough and specific based on the survey answers provided.`;
         if (appStyle.description) styleParts.push(`Custom description: ${appStyle.description}`);
         if (appStyle.brands) styleParts.push(`Reference brands: ${appStyle.brands}`);
         contextParts.push(styleParts.join(". "));
+      }
+
+      // Append UI/UX preferences prompt pack if present
+      if (appStyle?.promptPack) {
+        contextParts.push(appStyle.promptPack);
       }
 
       const minimalContext = contextParts.join("\n");

@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ArrowRight, Pen } from "lucide-react";
+import { ArrowRight, Pen, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { deriveFromPreset } from "@shared/ui-preferences";
+import { buildPromptPack } from "@shared/prompt-pack";
 
 const STYLES = [
   {
@@ -381,17 +383,37 @@ export default function StylePickerPage() {
     !isCustomSelected || (customStyle.name.trim() && customStyle.description.trim())
   );
 
-  const handleContinue = () => {
+  const seedPreferencesFromStyle = (styleId: string) => {
+    // Silently seed a preset-derived DesignProfile + prompt pack so the
+    // regular flow benefits from richer context without more user UI.
+    // If the user later opts into /preferences, this becomes the starting
+    // point and gets promoted to source: "focused".
+    const profile = deriveFromPreset(styleId);
+    sessionStorage.setItem("designProfile", JSON.stringify(profile));
+    sessionStorage.setItem("promptPack", buildPromptPack(profile));
+  };
+
+  const commitStyle = (): string | null => {
     const styleData = isCustomSelected
       ? { id: "custom", name: customStyle.name, description: customStyle.description }
       : selectedStyle
         ? { id: selectedStyle.id, name: selectedStyle.name, tagline: selectedStyle.tagline, vibe: selectedStyle.vibe, bestFor: selectedStyle.bestFor, brands: selectedStyle.brands }
         : null;
 
-    if (styleData) {
-      sessionStorage.setItem("appStyle", JSON.stringify(styleData));
-    }
+    if (!styleData) return null;
+    sessionStorage.setItem("appStyle", JSON.stringify(styleData));
+    seedPreferencesFromStyle(styleData.id);
+    return styleData.id;
+  };
+
+  const handleContinue = () => {
+    commitStyle();
     setLocation("/details");
+  };
+
+  const handleFineTune = () => {
+    commitStyle();
+    setLocation("/preferences");
   };
 
   return (
@@ -533,9 +555,21 @@ export default function StylePickerPage() {
             Continue
             <ArrowRight className="w-5 h-5 ml-2" />
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleFineTune}
+            disabled={!canContinue}
+            className="min-h-[52px] px-6 text-body w-full sm:w-auto"
+            data-testid="button-fine-tune-preferences"
+          >
+            <Sliders className="w-4 h-4 mr-2" />
+            Fine-tune preferences
+          </Button>
           <button
             onClick={() => {
               sessionStorage.removeItem("appStyle");
+              sessionStorage.removeItem("designProfile");
+              sessionStorage.removeItem("promptPack");
               setLocation("/details");
             }}
             className="text-description text-contrast-medium hover:text-accent"
@@ -544,6 +578,9 @@ export default function StylePickerPage() {
             Skip this step
           </button>
         </div>
+        <p className="text-metadata text-contrast-medium mt-2">
+          Fine-tune walks you through 7 design categories (~5 min). Continue uses preset defaults silently.
+        </p>
 
         <div className="mt-8">
           <button
