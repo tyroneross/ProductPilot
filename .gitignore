@@ -10,5 +10,7 @@ vite.config.ts.*
 .vercel
 .ibr/
 .certs/
+.certs-bak/
 .archive/
-api/
+.claude/
+api/*.mjs
