@@ -739,15 +739,17 @@ var auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
-    autoSignIn: false,
+    // Verification email is still sent on sign-up (see emailVerification below), but not required
+    // to sign in. Users who want to verify can; users who don't are not blocked.
+    requireEmailVerification: false,
+    autoSignIn: true,
     minPasswordLength: 8,
     maxPasswordLength: 128
   },
   emailVerification: {
     sendOnSignUp: true,
-    sendOnSignIn: true,
-    autoSignInAfterVerification: false,
+    sendOnSignIn: false,
+    autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
     sendVerificationEmail: async ({ user: user2, url }) => {
       void sendVerificationEmail({
@@ -760,6 +762,10 @@ var auth = betterAuth({
     }
   },
   account: {
+    // Account linking: if a user signs up with email/password and later uses Google OAuth
+    // (or vice versa), Better Auth merges the accounts IF the emails match.
+    // allowDifferentEmails: false means linking is blocked when emails differ — prevents
+    // accidental merging of distinct identities.
     accountLinking: {
       enabled: true,
       trustedProviders: ["google", "email-password"],
@@ -3007,10 +3013,50 @@ async function runMigrations() {
       END $$;
     `);
     await pool2.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'admin_prompts_target_key_unique' AND table_name = 'admin_prompts'
+        ) THEN
+          -- Deduplicate any existing rows before enforcing UNIQUE
+          DELETE FROM "admin_prompts" a USING "admin_prompts" b
+          WHERE a."created_at" > b."created_at" AND a."target_key" = b."target_key";
+          ALTER TABLE "admin_prompts"
+          ADD CONSTRAINT "admin_prompts_target_key_unique" UNIQUE ("target_key");
+        END IF;
+      END $$;
+    `);
+    await pool2.query(`
       CREATE INDEX IF NOT EXISTS "projects_user_id_idx" ON "projects" ("user_id")
     `);
     await pool2.query(`
       CREATE INDEX IF NOT EXISTS "projects_guest_owner_id_idx" ON "projects" ("guest_owner_id")
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "messages_stage_id_created_at_idx" ON "messages" ("stage_id", "created_at")
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "stages_project_id_idx" ON "stages" ("project_id")
+    `);
+    await pool2.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'projects_user_id_user_id_fk' AND table_name = 'projects'
+        ) THEN
+          -- Clear stale userIds before enforcing the FK to avoid migration failure.
+          UPDATE "projects"
+          SET "user_id" = NULL
+          WHERE "user_id" IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "projects"."user_id");
+
+          ALTER TABLE "projects"
+          ADD CONSTRAINT "projects_user_id_user_id_fk"
+          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL;
+        END IF;
+      END $$;
     `);
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS "user_settings" (

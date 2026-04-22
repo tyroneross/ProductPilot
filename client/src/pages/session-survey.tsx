@@ -233,39 +233,81 @@ export default function SessionSurveyPage() {
     }
   };
 
-  const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
-      if (!prdStage) return null;
-      const res = await apiRequest("POST", `/api/stages/${prdStage.id}/messages`, {
-        role: "user",
-        content,
+  // Streaming discovery chat. Consumes SSE from POST /api/stages/:id/messages/stream.
+  // EventSource can't POST, so we use fetch() + manual SSE parsing.
+  const [streamingAssistant, setStreamingAssistant] = useState<string>("");
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const sendMessageStream = async (content: string) => {
+    if (!prdStage) return;
+    setIsStreaming(true);
+    setStreamingAssistant("");
+    setInputValue("");
+
+    try {
+      const res = await fetch(`/api/stages/${prdStage.id}/messages/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ role: "user", content }),
       });
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      if (projectId && prdStage) {
-        queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
+      if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status}`);
       }
 
-      if (data && data.userMessage && !data.aiMessage) {
-        toast({
-          title: "AI service error",
-          description: data.error || "AI is temporarily unavailable. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      setInputValue("");
-    },
-    onError: () => {
+      // SSE framing: events separated by \n\n. Each event has `event:` and `data:` lines.
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const lines = frame.split("\n");
+          let eventName = "message";
+          let dataStr = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventName = line.slice(7).trim();
+            else if (line.startsWith("data: ")) dataStr += line.slice(6);
+          }
+          if (!dataStr) continue;
+          let payload: any;
+          try { payload = JSON.parse(dataStr); } catch { continue; }
+
+          if (eventName === "user") {
+            // user message persisted — invalidate so optimistic UI pulls it
+            queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
+          } else if (eventName === "delta") {
+            setStreamingAssistant((prev) => prev + (payload.text ?? ""));
+          } else if (eventName === "message") {
+            queryClient.invalidateQueries({ queryKey: ["/api/stages", prdStage.id, "messages"] });
+          } else if (eventName === "progress" && projectId) {
+            queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
+          } else if (eventName === "error") {
+            toast({
+              title: "AI service error",
+              description: payload.message || "AI is temporarily unavailable. Please try again.",
+              variant: "destructive",
+            });
+          }
+        }
+      }
+    } catch (err) {
       toast({
         title: "Failed to send message",
-        description: "Please try again.",
+        description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    },
-  });
+    } finally {
+      setIsStreaming(false);
+      setStreamingAssistant("");
+    }
+  };
 
   const generateSurveyMutation = useMutation({
     mutationFn: async () => {
@@ -320,8 +362,8 @@ export default function SessionSurveyPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputValue.trim() && !sendMessageMutation.isPending) {
-      sendMessageMutation.mutate(inputValue.trim());
+    if (inputValue.trim() && !isStreaming) {
+      void sendMessageStream(inputValue.trim());
     }
   };
 
@@ -700,15 +742,24 @@ export default function SessionSurveyPage() {
           </div>
         ))}
 
-        {sendMessageMutation.isPending && (
-          <div className="flex items-start space-x-3" data-testid="ai-loading-skeleton">
+        {isStreaming && (
+          <div className="flex items-start space-x-3" data-testid="ai-streaming">
             <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center text-surface-primary text-description font-medium">
               AI
             </div>
-            <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200 space-y-3">
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-3/4"></div>
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-full"></div>
-              <div className="h-4 bg-surface-secondary rounded animate-pulse w-5/6"></div>
+            <div className="flex-1 bg-surface-primary rounded-lg p-4 border border-gray-200">
+              {streamingAssistant ? (
+                <p className="text-description whitespace-pre-wrap leading-relaxed text-contrast-high">
+                  {streamingAssistant}
+                  <span className="inline-block w-2 h-4 ml-1 bg-accent animate-pulse align-middle" />
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="h-4 bg-surface-secondary rounded animate-pulse w-3/4"></div>
+                  <div className="h-4 bg-surface-secondary rounded animate-pulse w-full"></div>
+                  <div className="h-4 bg-surface-secondary rounded animate-pulse w-5/6"></div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -750,14 +801,14 @@ export default function SessionSurveyPage() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             className="flex-1 min-h-[44px] text-base"
-            disabled={sendMessageMutation.isPending || !prdStage}
+            disabled={isStreaming || !prdStage}
             data-testid="input-discovery-message"
             autoComplete="off"
           />
           <Button
             type="submit"
             className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
-            disabled={!inputValue.trim() || sendMessageMutation.isPending || !prdStage}
+            disabled={!inputValue.trim() || isStreaming || !prdStage}
             data-testid="button-send-discovery-message"
           >
             <Send className="w-4 h-4" />

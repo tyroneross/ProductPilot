@@ -286,12 +286,60 @@ export async function runMigrations() {
       END $$;
     `);
 
+    // UNIQUE constraint so seedDefaultPrompts can't duplicate on re-run.
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'admin_prompts_target_key_unique' AND table_name = 'admin_prompts'
+        ) THEN
+          -- Deduplicate any existing rows before enforcing UNIQUE
+          DELETE FROM "admin_prompts" a USING "admin_prompts" b
+          WHERE a."created_at" > b."created_at" AND a."target_key" = b."target_key";
+          ALTER TABLE "admin_prompts"
+          ADD CONSTRAINT "admin_prompts_target_key_unique" UNIQUE ("target_key");
+        END IF;
+      END $$;
+    `);
+
     await pool.query(`
       CREATE INDEX IF NOT EXISTS "projects_user_id_idx" ON "projects" ("user_id")
     `);
 
     await pool.query(`
       CREATE INDEX IF NOT EXISTS "projects_guest_owner_id_idx" ON "projects" ("guest_owner_id")
+    `);
+
+    // Hot-path index flagged in DB audit: message reads always filter by stage_id and order by created_at.
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "messages_stage_id_created_at_idx" ON "messages" ("stage_id", "created_at")
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "stages_project_id_idx" ON "stages" ("project_id")
+    `);
+
+    // projects.user_id → user.id FK (ON DELETE SET NULL) so deleting a Better Auth user preserves
+    // the project data for admin review but removes the reference. Idempotent: only adds FK if missing.
+    // Orphan cleanup first: null any user_id that doesn't match an existing user row (legacy Neon/Replit IDs).
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'projects_user_id_user_id_fk' AND table_name = 'projects'
+        ) THEN
+          -- Clear stale userIds before enforcing the FK to avoid migration failure.
+          UPDATE "projects"
+          SET "user_id" = NULL
+          WHERE "user_id" IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "projects"."user_id");
+
+          ALTER TABLE "projects"
+          ADD CONSTRAINT "projects_user_id_user_id_fk"
+          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL;
+        END IF;
+      END $$;
     `);
     
     // Create user_settings table for BYOK LLM configuration

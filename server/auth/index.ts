@@ -65,15 +65,17 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
-    autoSignIn: false,
+    // Verification email is still sent on sign-up (see emailVerification below), but not required
+    // to sign in. Users who want to verify can; users who don't are not blocked.
+    requireEmailVerification: false,
+    autoSignIn: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
   },
   emailVerification: {
     sendOnSignUp: true,
-    sendOnSignIn: true,
-    autoSignInAfterVerification: false,
+    sendOnSignIn: false,
+    autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
     sendVerificationEmail: async ({ user, url }) => {
       void sendVerificationEmail({
@@ -86,6 +88,10 @@ export const auth = betterAuth({
     },
   },
   account: {
+    // Account linking: if a user signs up with email/password and later uses Google OAuth
+    // (or vice versa), Better Auth merges the accounts IF the emails match.
+    // allowDifferentEmails: false means linking is blocked when emails differ — prevents
+    // accidental merging of distinct identities.
     accountLinking: {
       enabled: true,
       trustedProviders: ["google", "email-password"],
