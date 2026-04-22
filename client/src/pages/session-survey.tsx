@@ -799,6 +799,7 @@ export default function SessionSurveyPage() {
           <Input
             type="text"
             placeholder="Type your answer..."
+            aria-label="Your answer"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             className="flex-1 min-h-[44px] text-base"
@@ -906,8 +907,9 @@ export default function SessionSurveyPage() {
                   fontSize: 13, fontFamily: "inherit", cursor: "pointer", padding: 0,
                 }}
                 data-testid="button-back-home"
+                aria-label="Back to home"
               >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                   <path d="M9 11L5 7L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
@@ -1515,6 +1517,7 @@ export default function SessionSurveyPage() {
                 onClick={() => setLocation("/")}
                 className="min-h-[44px] min-w-[44px]"
                 data-testid="button-back-home"
+                aria-label="Go back home"
               >
                 <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -1531,6 +1534,7 @@ export default function SessionSurveyPage() {
                 onClick={() => setShowPromptsSection(true)}
                 className="min-h-[44px] shrink-0"
                 data-testid="button-manage-prompts"
+                aria-label="Manage custom prompts"
               >
                 <Sparkles className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Prompts</span>
@@ -1545,6 +1549,7 @@ export default function SessionSurveyPage() {
                 onClick={handleSave}
                 className="min-h-[44px] shrink-0"
                 data-testid="button-save-project"
+                aria-label="Save project"
               >
                 <Save className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Save Project</span>

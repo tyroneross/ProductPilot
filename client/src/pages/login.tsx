@@ -670,7 +670,9 @@ export default function LoginPage() {
                     style={{
                       background: "none",
                       border: "none",
-                      padding: 0,
+                      padding: "12px 4px",
+                      marginRight: "-4px",
+                      minHeight: "44px",
                       fontSize: "12px",
                       color: "#6b5d52",
                       cursor: "pointer",

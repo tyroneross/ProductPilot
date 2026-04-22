@@ -55,6 +55,7 @@ export default function Nav() {
         {/* Wordmark */}
         <a
           href="/"
+          aria-label="ProductPilot home"
           style={{
             display: "flex",
             alignItems: "center",
@@ -65,6 +66,9 @@ export default function Nav() {
             color: "#f5f0eb",
             letterSpacing: "-0.02em",
             lineHeight: 1,
+            // WCAG 2.2 tap target: enforce ≥44px on mobile via padding
+            minHeight: "44px",
+            paddingRight: "8px",
           }}
         >
           {/* Amber diamond dot */}
