@@ -662,6 +662,28 @@ async function sendAuthEmail(payload) {
     throw new Error(`Failed to send auth email (${response.status}): ${body}`);
   }
 }
+async function sendPasswordResetEmail(input) {
+  const greeting = input.name ? `Hi ${input.name},` : "Hi,";
+  const subject = "Reset your ProductPilot password";
+  const text3 = `${greeting}
+
+You (or someone with your email) requested a password reset. Click the link below to set a new password:
+${input.url}
+
+The link expires in 1 hour. If you didn't request this, you can safely ignore this email.`;
+  const html = `<p>${greeting}</p>
+<p>You (or someone with your email) requested a password reset.</p>
+<p><a href="${input.url}">Reset your password</a></p>
+<p>If the button does not work, open this link:</p>
+<p>${input.url}</p>
+<p>The link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>`;
+  await sendAuthEmail({
+    to: input.email,
+    subject,
+    html,
+    text: text3
+  });
+}
 async function sendVerificationEmail(input) {
   const greeting = input.name ? `Hi ${input.name},` : "Hi,";
   const subject = "Verify your ProductPilot email";
@@ -792,7 +814,18 @@ var auth = betterAuth({
     requireEmailVerification: false,
     autoSignIn: true,
     minPasswordLength: 8,
-    maxPasswordLength: 128
+    maxPasswordLength: 128,
+    sendResetPassword: async ({ user: user2, url }) => {
+      void sendPasswordResetEmail({
+        email: user2.email,
+        name: user2.name,
+        url
+      }).catch((error) => {
+        console.error("[auth] Failed to send password reset email", error);
+      });
+    },
+    resetPasswordTokenExpiresIn: 60 * 60
+    // 1 hour
   },
   emailVerification: {
     sendOnSignUp: true,

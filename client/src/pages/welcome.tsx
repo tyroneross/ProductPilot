@@ -61,6 +61,7 @@ export default function WelcomePage() {
               letterSpacing: "-0.02em",
               lineHeight: 1,
               padding: 0,
+              minHeight: "24px",
               fontFamily: "inherit",
             }}
           >

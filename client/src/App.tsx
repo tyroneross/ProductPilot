@@ -16,6 +16,7 @@ const SessionSurveyPage = lazy(() => import("@/pages/session-survey"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const LoginPage = lazy(() => import("@/pages/login"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function PageLoader() {
@@ -39,6 +40,7 @@ function Router() {
       <Route path="/session/survey" component={SessionSurveyPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/login" component={LoginPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>

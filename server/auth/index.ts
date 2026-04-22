@@ -6,7 +6,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
 import { db } from "../db";
-import { sendVerificationEmail } from "./email";
+import { sendVerificationEmail, sendPasswordResetEmail } from "./email";
 import * as authSchema from "./schema";
 
 const authDb = (() => {
@@ -71,6 +71,16 @@ export const auth = betterAuth({
     autoSignIn: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
+    sendResetPassword: async ({ user, url }: { user: { email: string; name: string }; url: string }) => {
+      void sendPasswordResetEmail({
+        email: user.email,
+        name: user.name,
+        url,
+      }).catch((error) => {
+        console.error("[auth] Failed to send password reset email", error);
+      });
+    },
+    resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
   },
   emailVerification: {
     sendOnSignUp: true,

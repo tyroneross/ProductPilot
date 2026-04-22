@@ -5,7 +5,7 @@ import { authClient } from "@/lib/auth";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  height: "40px",
+  minHeight: "44px",
   background: "#231f1b",
   border: "1px solid rgba(200,180,160,0.12)",
   borderRadius: "7px",
@@ -29,6 +29,14 @@ export default function LoginPage() {
   const [authInfo, setAuthInfo] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [canResendVerification, setCanResendVerification] = useState(false);
+
+  // Forgot password state
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotDone, setForgotDone] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+
   const nameInputId = "auth-name";
   const emailInputId = "auth-email";
   const passwordInputId = "auth-password";
@@ -183,6 +191,47 @@ export default function LoginPage() {
     }
   }
 
+  function openForgotPassword() {
+    setForgotEmail(authEmail); // pre-fill if user already typed their email
+    setForgotDone(false);
+    setForgotError("");
+    setForgotOpen(true);
+  }
+
+  function closeForgotPassword() {
+    setForgotOpen(false);
+    setForgotDone(false);
+    setForgotError("");
+    setForgotEmail("");
+  }
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotError("");
+    setForgotLoading(true);
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/reset-password`
+          : "/reset-password";
+      const result = await authClient.requestPasswordReset({ email: forgotEmail.trim(), redirectTo });
+      if (result.error) {
+        setForgotError(
+          typeof result.error === "object" && result.error !== null && "message" in result.error
+            ? String((result.error as { message?: string }).message ?? "Something went wrong")
+            : "Something went wrong",
+        );
+      } else {
+        setForgotDone(true);
+      }
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
   return (
     <div
       style={{
@@ -211,6 +260,128 @@ export default function LoginPage() {
       />
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Forgot password overlay */}
+      {forgotOpen && (
+        <>
+          <div
+            onClick={closeForgotPassword}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.6)",
+              zIndex: 10,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              zIndex: 11,
+              width: "100%",
+              maxWidth: "380px",
+              background: "#1a1714",
+              border: "1px solid rgba(200,180,160,0.12)",
+              borderRadius: "14px",
+              padding: "1.75rem",
+            }}
+          >
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={closeForgotPassword}
+              aria-label="Close"
+              style={{
+                position: "absolute",
+                top: "14px",
+                right: "14px",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "#6b5d52",
+                fontSize: "18px",
+                lineHeight: 1,
+                padding: "4px",
+                fontFamily: "inherit",
+              }}
+            >
+              ×
+            </button>
+
+            <p
+              style={{
+                fontSize: "16px",
+                fontWeight: 600,
+                color: "#f5f0eb",
+                margin: "0 0 0.375rem",
+              }}
+            >
+              Reset your password
+            </p>
+            <p style={{ fontSize: "13px", color: "#a89a8c", margin: "0 0 1.25rem" }}>
+              Enter your email and we'll send you a reset link.
+            </p>
+
+            {forgotDone ? (
+              <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+                If an account exists for this email, we've sent a reset link. Check your inbox.
+              </p>
+            ) : (
+              <form
+                onSubmit={handleForgotSubmit}
+                style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}
+              >
+                <input
+                  type="email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  autoFocus
+                  style={inputStyle}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
+                    e.currentTarget.style.outline = "none";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+                  }}
+                />
+
+                {forgotError && (
+                  <p style={{ fontSize: "13px", color: "#e06356", margin: 0 }}>
+                    {forgotError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={forgotLoading || !forgotEmail.trim()}
+                  style={{
+                    height: "44px",
+                    background:
+                      forgotLoading || !forgotEmail.trim()
+                        ? "rgba(240,182,94,0.5)"
+                        : "#f0b65e",
+                    color: "#110f0d",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    cursor: forgotLoading || !forgotEmail.trim() ? "not-allowed" : "pointer",
+                    transition: "background 0.2s",
+                  }}
+                >
+                  {forgotLoading ? "Sending…" : "Send reset link"}
+                </button>
+              </form>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Card */}
       <div
@@ -366,7 +537,7 @@ export default function LoginPage() {
                 }}
                 style={{
                   flex: 1,
-                  height: "36px",
+                  minHeight: "44px",
                   border: "none",
                   borderRadius: "6px",
                   cursor: "pointer",
@@ -443,12 +614,46 @@ export default function LoginPage() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label
-                htmlFor={passwordInputId}
-                style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
               >
-                Password
-              </label>
+                <label
+                  htmlFor={passwordInputId}
+                  style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}
+                >
+                  Password
+                </label>
+                {authTab === "signin" && (
+                  <button
+                    type="button"
+                    onClick={openForgotPassword}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      fontSize: "12px",
+                      color: "#6b5d52",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      textDecoration: "underline",
+                      textUnderlineOffset: "2px",
+                      lineHeight: 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = "#a89a8c";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = "#6b5d52";
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
               <input
                 id={passwordInputId}
                 type="password"
@@ -548,6 +753,9 @@ export default function LoginPage() {
               textDecorationColor: "rgba(107,93,82,0.4)",
               textUnderlineOffset: "2px",
               padding: 0,
+              minHeight: "44px",
+              display: "inline-flex",
+              alignItems: "center",
               transition: "color 0.15s",
             }}
             onMouseEnter={(e) => {

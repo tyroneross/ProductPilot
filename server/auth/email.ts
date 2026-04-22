@@ -42,6 +42,35 @@ export async function sendAuthEmail(payload: AuthEmailPayload): Promise<void> {
   }
 }
 
+export async function sendPasswordResetEmail(input: {
+  email: string;
+  name?: string | null;
+  url: string;
+}): Promise<void> {
+  const greeting = input.name ? `Hi ${input.name},` : "Hi,";
+  const subject = "Reset your ProductPilot password";
+  const text = `${greeting}
+
+You (or someone with your email) requested a password reset. Click the link below to set a new password:
+${input.url}
+
+The link expires in 1 hour. If you didn't request this, you can safely ignore this email.`;
+
+  const html = `<p>${greeting}</p>
+<p>You (or someone with your email) requested a password reset.</p>
+<p><a href="${input.url}">Reset your password</a></p>
+<p>If the button does not work, open this link:</p>
+<p>${input.url}</p>
+<p>The link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>`;
+
+  await sendAuthEmail({
+    to: input.email,
+    subject,
+    html,
+    text,
+  });
+}
+
 export async function sendVerificationEmail(input: {
   email: string;
   name?: string | null;
