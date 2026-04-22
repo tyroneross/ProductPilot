@@ -1,5 +1,5 @@
-import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
-import { projects, stages, messages, adminPrompts, DEFAULT_STAGES } from "@shared/schema";
+import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent } from "@shared/schema";
+import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
 import { db } from "./db";
@@ -40,6 +40,12 @@ interface IStorage {
   // User Settings
   getUserSettings(userId: string): Promise<any | undefined>;
   upsertUserSettings(userId: string, updates: Record<string, any>): Promise<any>;
+
+  // LLM Telemetry
+  createLlmCall(call: InsertLlmCall): Promise<void>;
+
+  // Audit log
+  createAuditEvent(event: InsertAuditEvent): Promise<void>;
 }
 
 // In-memory storage fallback
@@ -219,6 +225,8 @@ class MemStorage implements IStorage {
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
     const message: Message = {
       id: this.generateId(),
+      kind: insertMessage.kind ?? "chat",
+      version: insertMessage.version ?? 1,
       ...insertMessage,
       createdAt: new Date(),
     };
@@ -321,6 +329,20 @@ class MemStorage implements IStorage {
     const merged = { ...existing, ...updates, userId, updatedAt: new Date() };
     this.userSettingsMap.set(userId, merged);
     return merged;
+  }
+
+  // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
+  private llmCallLog: InsertLlmCall[] = [];
+
+  async createLlmCall(call: InsertLlmCall): Promise<void> {
+    this.llmCallLog.push(call);
+  }
+
+  // Audit log - MemStorage implementation (dev fallback, in-memory only)
+  private auditEventLog: InsertAuditEvent[] = [];
+
+  async createAuditEvent(event: InsertAuditEvent): Promise<void> {
+    this.auditEventLog.push(event);
   }
 }
 
@@ -584,6 +606,16 @@ class PostgresStorage implements IStorage {
       );
       return this.getUserSettings(userId);
     }
+  }
+
+  // LLM Telemetry - PostgresStorage implementation
+  async createLlmCall(call: InsertLlmCall): Promise<void> {
+    await this.db.insert(llmCalls).values(call);
+  }
+
+  // Audit log - PostgresStorage implementation
+  async createAuditEvent(event: InsertAuditEvent): Promise<void> {
+    await this.db.insert(auditEvents).values(event);
   }
 }
 

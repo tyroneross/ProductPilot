@@ -401,10 +401,12 @@ __export(schema_exports, {
   SurveyQuestionSchema: () => SurveyQuestionSchema,
   SurveyResponseSchema: () => SurveyResponseSchema,
   adminPrompts: () => adminPrompts,
+  auditEvents: () => auditEvents,
   insertAdminPromptSchema: () => insertAdminPromptSchema,
   insertMessageSchema: () => insertMessageSchema,
   insertProjectSchema: () => insertProjectSchema,
   insertStageSchema: () => insertStageSchema,
+  llmCalls: () => llmCalls,
   messages: () => messages,
   projects: () => projects,
   stages: () => stages,
@@ -414,7 +416,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, jsonb, integer, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-var adminPrompts, insertAdminPromptSchema, projects, stages, messages, insertProjectSchema, CustomPromptSchema, CustomPromptsSchema, SurveyQuestionSchema, SurveyDefinitionSchema, SurveyResponseSchema, insertStageSchema, insertMessageSchema, updateStageSchema, DEFAULT_STAGES, INTERCEPTOR_PROMPTS;
+var adminPrompts, insertAdminPromptSchema, projects, stages, messages, llmCalls, auditEvents, insertProjectSchema, CustomPromptSchema, CustomPromptsSchema, SurveyQuestionSchema, SurveyDefinitionSchema, SurveyResponseSchema, insertStageSchema, insertMessageSchema, updateStageSchema, DEFAULT_STAGES, INTERCEPTOR_PROMPTS;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -504,8 +506,62 @@ var init_schema = __esm({
       role: text("role").notNull(),
       // "user" | "assistant"
       content: text("content").notNull(),
+      // kind: 'chat' = conversational turn, 'deliverable' = final generated document (PRD, spec, etc.)
+      // 'system_note' reserved for future automated annotations
+      kind: text("kind").notNull().default("chat"),
+      // version bumps on regenerate; older versions are retained for history
+      version: integer("version").notNull().default(1),
       createdAt: timestamp("created_at").defaultNow().notNull()
     });
+    llmCalls = pgTable("llm_calls", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: varchar("user_id"),
+      // nullable — guest calls won't have it
+      guestOwnerId: varchar("guest_owner_id"),
+      // nullable — authed calls won't have it
+      projectId: varchar("project_id"),
+      // nullable — some calls (survey gen) don't have a project at call time
+      stageId: varchar("stage_id"),
+      provider: text("provider").notNull(),
+      // 'anthropic' | 'groq' | 'openai'
+      model: text("model").notNull(),
+      task: text("task").notNull(),
+      // matches LLMTask union in ai.ts
+      inputTokens: integer("input_tokens").notNull().default(0),
+      outputTokens: integer("output_tokens").notNull().default(0),
+      cacheReadTokens: integer("cache_read_tokens"),
+      cacheWriteTokens: integer("cache_write_tokens"),
+      costUsd: varchar("cost_usd"),
+      // decimal-as-string to avoid float loss; numeric(12,6) in DB
+      latencyMs: integer("latency_ms"),
+      status: text("status").notNull(),
+      // 'ok' | 'error'
+      errorCode: text("error_code"),
+      streamed: boolean("streamed").notNull().default(false),
+      byok: boolean("byok").notNull().default(false),
+      requestId: varchar("request_id"),
+      // correlate with audit + logs
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (table) => [
+      index("llm_calls_user_id_created_at_idx").on(table.userId, table.createdAt),
+      index("llm_calls_project_id_idx").on(table.projectId)
+    ]);
+    auditEvents = pgTable("audit_events", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      actorType: text("actor_type").notNull(),
+      // 'user' | 'guest' | 'admin' | 'system'
+      actorId: varchar("actor_id"),
+      action: text("action").notNull(),
+      // 'project.create' | 'project.delete' | ...
+      resourceType: text("resource_type").notNull(),
+      resourceId: varchar("resource_id"),
+      metadata: jsonb("metadata"),
+      requestId: varchar("request_id"),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    }, (table) => [
+      index("audit_events_actor_id_created_at_idx").on(table.actorId, table.createdAt),
+      index("audit_events_resource_idx").on(table.resourceType, table.resourceId)
+    ]);
     insertProjectSchema = createInsertSchema(projects).pick({
       name: true,
       description: true,
@@ -574,7 +630,9 @@ var init_schema = __esm({
     insertMessageSchema = createInsertSchema(messages).pick({
       stageId: true,
       role: true,
-      content: true
+      content: true,
+      kind: true,
+      version: true
     });
     updateStageSchema = createInsertSchema(stages).pick({
       progress: true,
@@ -589,20 +647,7 @@ var init_schema = __esm({
   }
 });
 
-// server/api-entry/index.ts
-import express from "express";
-import { toNodeHandler } from "better-auth/node";
-
-// server/auth/index.ts
-import fs from "fs";
-import path from "path";
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { fromNodeHeaders } from "better-auth/node";
-import { dash } from "@better-auth/infra";
-
 // server/db.ts
-init_schema();
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 function getDatabaseUrl() {
@@ -619,15 +664,521 @@ function getDatabaseUrl() {
   }
   return null;
 }
-var dbUrl = getDatabaseUrl();
-var connString = dbUrl && !dbUrl.includes("sslmode=") ? dbUrl + (dbUrl.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl;
-var pool = connString ? new Pool({
-  connectionString: connString,
-  max: 20,
-  idleTimeoutMillis: 3e4,
-  connectionTimeoutMillis: 5e3
-}) : null;
-var db = pool ? drizzle(pool, { schema: schema_exports }) : null;
+var dbUrl, connString, pool, db;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_schema();
+    dbUrl = getDatabaseUrl();
+    connString = dbUrl && !dbUrl.includes("sslmode=") ? dbUrl + (dbUrl.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl;
+    pool = connString ? new Pool({
+      connectionString: connString,
+      max: 20,
+      idleTimeoutMillis: 3e4,
+      connectionTimeoutMillis: 5e3
+    }) : null;
+    db = pool ? drizzle(pool, { schema: schema_exports }) : null;
+  }
+});
+
+// server/storage-hybrid.ts
+var storage_hybrid_exports = {};
+__export(storage_hybrid_exports, {
+  storage: () => storage
+});
+import { eq, and, ne, desc, asc, sql as sql2 } from "drizzle-orm";
+function createStorage() {
+  const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
+  if (hasDatabase && db) {
+    console.log("Using PostgreSQL storage");
+    return new PostgresStorage(db);
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "No database configured in production. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE. Refusing to fall back to in-memory storage."
+    );
+  }
+  console.log("Using in-memory storage (no database configured \u2014 dev only)");
+  return new MemStorage();
+}
+var MemStorage, PostgresStorage, storage;
+var init_storage_hybrid = __esm({
+  "server/storage-hybrid.ts"() {
+    "use strict";
+    init_schema();
+    init_prompt_content();
+    init_db();
+    MemStorage = class {
+      projects = /* @__PURE__ */ new Map();
+      stages = /* @__PURE__ */ new Map();
+      messages = /* @__PURE__ */ new Map();
+      userSettingsMap = /* @__PURE__ */ new Map();
+      generateId() {
+        return Math.random().toString(36).substring(2) + Date.now().toString(36);
+      }
+      async createProject(insertProject) {
+        const project = {
+          id: this.generateId(),
+          userId: insertProject.userId || null,
+          guestOwnerId: insertProject.guestOwnerId || null,
+          name: insertProject.name,
+          description: insertProject.description,
+          mode: insertProject.mode || "survey",
+          aiModel: insertProject.aiModel || "claude-sonnet",
+          surveyPhase: insertProject.surveyPhase || "discovery",
+          surveyDefinition: insertProject.surveyDefinition || null,
+          surveyResponses: insertProject.surveyResponses || null,
+          customPrompts: insertProject.customPrompts || null,
+          intakeAnswers: insertProject.intakeAnswers || null,
+          minimumDetails: insertProject.minimumDetails || null,
+          appStyle: insertProject.appStyle || null,
+          createdAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.projects.set(project.id, project);
+        for (const defaultStage of DEFAULT_STAGES) {
+          const stage = {
+            id: this.generateId(),
+            projectId: project.id,
+            ...defaultStage,
+            progress: 0,
+            isUnlocked: true,
+            outputs: null,
+            completedInsights: [],
+            aiModel: null,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          };
+          this.stages.set(stage.id, stage);
+        }
+        return project;
+      }
+      async getProject(id) {
+        return this.projects.get(id);
+      }
+      async getAllProjects() {
+        return Array.from(this.projects.values()).sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+        );
+      }
+      async getProjectsByUserId(userId) {
+        return (await this.getAllProjects()).filter((project) => project.userId === userId);
+      }
+      async getProjectsByGuestOwnerId(guestOwnerId) {
+        return (await this.getAllProjects()).filter(
+          (project) => project.guestOwnerId === guestOwnerId
+        );
+      }
+      async getUserDraft(userId) {
+        const allProjects = Array.from(this.projects.values());
+        return allProjects.find((p) => p.userId === userId && p.surveyPhase !== "complete");
+      }
+      async updateProject(id, updates) {
+        const existing = this.projects.get(id);
+        if (!existing) {
+          return void 0;
+        }
+        const updated = {
+          ...existing,
+          ...updates,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.projects.set(id, updated);
+        return updated;
+      }
+      async deleteProject(id) {
+        const deleted = this.projects.delete(id);
+        const stagesToDelete = Array.from(this.stages.values()).filter((s) => s.projectId === id);
+        for (const stage of stagesToDelete) {
+          await this.deleteMessagesByStage(stage.id);
+          this.stages.delete(stage.id);
+        }
+        return deleted;
+      }
+      async createStage(insertStage) {
+        const stage = {
+          id: this.generateId(),
+          projectId: insertStage.projectId,
+          stageNumber: insertStage.stageNumber,
+          title: insertStage.title,
+          description: insertStage.description,
+          systemPrompt: insertStage.systemPrompt,
+          aiModel: insertStage.aiModel || null,
+          progress: 0,
+          isUnlocked: true,
+          outputs: null,
+          keyInsights: null,
+          completedInsights: null,
+          createdAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.stages.set(stage.id, stage);
+        return stage;
+      }
+      async getStage(id) {
+        return this.stages.get(id);
+      }
+      async getStagesByProject(projectId) {
+        return Array.from(this.stages.values()).filter((s) => s.projectId === projectId);
+      }
+      async updateStage(id, updates) {
+        const existing = this.stages.get(id);
+        if (!existing) {
+          throw new Error(`Stage with id ${id} not found`);
+        }
+        const updated = {
+          ...existing,
+          ...updates,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.stages.set(id, updated);
+        return updated;
+      }
+      async ensureStagesForProject(projectId) {
+        const existing = await this.getStagesByProject(projectId);
+        if (existing.length > 0) return existing;
+        const createdStages = [];
+        for (const defaultStage of DEFAULT_STAGES) {
+          const stage = await this.createStage({
+            projectId,
+            stageNumber: defaultStage.stageNumber,
+            title: defaultStage.title,
+            description: defaultStage.description,
+            systemPrompt: defaultStage.systemPrompt
+          });
+          createdStages.push(stage);
+        }
+        return createdStages;
+      }
+      async getMessage(id) {
+        return this.messages.get(id);
+      }
+      async getMessagesByStage(stageId) {
+        return Array.from(this.messages.values()).filter((m) => m.stageId === stageId).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      async createMessage(insertMessage) {
+        const message = {
+          id: this.generateId(),
+          kind: insertMessage.kind ?? "chat",
+          version: insertMessage.version ?? 1,
+          ...insertMessage,
+          createdAt: /* @__PURE__ */ new Date()
+        };
+        this.messages.set(message.id, message);
+        return message;
+      }
+      async deleteMessagesByStage(stageId) {
+        const messagesToDelete = Array.from(this.messages.values()).filter((m) => m.stageId === stageId);
+        for (const message of messagesToDelete) {
+          this.messages.delete(message.id);
+        }
+      }
+      // Admin Prompts - In-memory implementation
+      adminPrompts = /* @__PURE__ */ new Map();
+      async getAllAdminPrompts() {
+        return Array.from(this.adminPrompts.values());
+      }
+      async getAdminPrompt(id) {
+        return this.adminPrompts.get(id);
+      }
+      async getAdminPromptByTargetKey(targetKey) {
+        const prompts = Array.from(this.adminPrompts.values());
+        return prompts.find((p) => p.targetKey === targetKey);
+      }
+      async createAdminPrompt(insertPrompt) {
+        const prompt = {
+          id: this.generateId(),
+          scope: insertPrompt.scope,
+          targetKey: insertPrompt.targetKey,
+          label: insertPrompt.label,
+          description: insertPrompt.description || null,
+          content: insertPrompt.content,
+          isDefault: insertPrompt.isDefault || false,
+          stageNumber: insertPrompt.stageNumber || null,
+          updatedBy: insertPrompt.updatedBy || null,
+          createdAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.adminPrompts.set(prompt.id, prompt);
+        return prompt;
+      }
+      async updateAdminPrompt(id, updates) {
+        const existing = this.adminPrompts.get(id);
+        if (!existing) return void 0;
+        const updated = {
+          ...existing,
+          ...updates,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
+        this.adminPrompts.set(id, updated);
+        return updated;
+      }
+      async deleteAdminPrompt(id) {
+        return this.adminPrompts.delete(id);
+      }
+      async seedDefaultPrompts(userId) {
+        for (const stage of DEFAULT_STAGES) {
+          await this.createAdminPrompt({
+            scope: "stage",
+            targetKey: `stage_${stage.stageNumber}`,
+            label: stage.title,
+            description: stage.description,
+            content: stage.systemPrompt,
+            isDefault: true,
+            stageNumber: stage.stageNumber,
+            updatedBy: userId
+          });
+        }
+        await this.createAdminPrompt({
+          scope: "discovery",
+          targetKey: "discovery_initial",
+          label: "Discovery Initial Prompt",
+          description: "The initial prompt used to start the discovery conversation in Survey Mode",
+          content: DISCOVERY_INITIAL_PROMPT,
+          isDefault: true,
+          updatedBy: userId
+        });
+      }
+      // User Settings - MemStorage implementation
+      async getUserSettings(userId) {
+        return this.userSettingsMap.get(userId);
+      }
+      async upsertUserSettings(userId, updates) {
+        const existing = this.userSettingsMap.get(userId) || { userId, llmProvider: "groq", llmModel: "llama-3.3-70b-versatile" };
+        const merged = { ...existing, ...updates, userId, updatedAt: /* @__PURE__ */ new Date() };
+        this.userSettingsMap.set(userId, merged);
+        return merged;
+      }
+      // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
+      llmCallLog = [];
+      async createLlmCall(call) {
+        this.llmCallLog.push(call);
+      }
+      // Audit log - MemStorage implementation (dev fallback, in-memory only)
+      auditEventLog = [];
+      async createAuditEvent(event) {
+        this.auditEventLog.push(event);
+      }
+    };
+    PostgresStorage = class {
+      db;
+      constructor(database) {
+        this.db = database;
+      }
+      async createProject(insertProject) {
+        return await this.db.transaction(async (tx) => {
+          const [project] = await tx.insert(projects).values(insertProject).returning();
+          const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
+            projectId: project.id,
+            stageNumber: defaultStage.stageNumber,
+            title: defaultStage.title,
+            description: defaultStage.description,
+            systemPrompt: defaultStage.systemPrompt,
+            keyInsights: defaultStage.keyInsights || [],
+            completedInsights: [],
+            progress: 0,
+            isUnlocked: true
+          }));
+          if (stageRows.length > 0) {
+            await tx.insert(stages).values(stageRows);
+          }
+          return project;
+        });
+      }
+      async getProject(id) {
+        const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
+        return result[0];
+      }
+      async getAllProjects() {
+        return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+      }
+      async getProjectsByUserId(userId) {
+        return await this.db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.createdAt));
+      }
+      async getProjectsByGuestOwnerId(guestOwnerId) {
+        return await this.db.select().from(projects).where(eq(projects.guestOwnerId, guestOwnerId)).orderBy(desc(projects.createdAt));
+      }
+      async getUserDraft(userId) {
+        const result = await this.db.select().from(projects).where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete"))).limit(1);
+        return result[0];
+      }
+      async updateProject(id, updates) {
+        const finalUpdates = { ...updates };
+        if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
+          finalUpdates.updatedAt = /* @__PURE__ */ new Date();
+        }
+        const [updatedProject] = await this.db.update(projects).set(finalUpdates).where(eq(projects.id, id)).returning();
+        return updatedProject;
+      }
+      async deleteProject(id) {
+        const result = await this.db.delete(projects).where(eq(projects.id, id));
+        return result.rowCount > 0;
+      }
+      async createStage(insertStage) {
+        const [stage] = await this.db.insert(stages).values(insertStage).returning();
+        return stage;
+      }
+      async getStage(id) {
+        const result = await this.db.select().from(stages).where(eq(stages.id, id)).limit(1);
+        return result[0];
+      }
+      async getStagesByProject(projectId) {
+        return await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+      }
+      async updateStage(id, updates) {
+        const finalUpdates = { ...updates };
+        if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
+          finalUpdates.updatedAt = /* @__PURE__ */ new Date();
+        }
+        if (updates.completedInsights !== void 0) {
+          const keyInsights = updates.keyInsights || [];
+          const completedInsights = updates.completedInsights || [];
+          if (Array.isArray(keyInsights) && keyInsights.length > 0) {
+            const completedCount = Array.isArray(completedInsights) ? completedInsights.length : 0;
+            const totalCount = keyInsights.length;
+            finalUpdates.progress = Math.max(0, Math.min(100, Math.round(completedCount / totalCount * 100)));
+          }
+        }
+        const [updatedStage] = await this.db.update(stages).set(finalUpdates).where(eq(stages.id, id)).returning();
+        return updatedStage;
+      }
+      async ensureStagesForProject(projectId) {
+        const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+        if (existing.length > 0) return existing;
+        const createdStages = [];
+        for (const defaultStage of DEFAULT_STAGES) {
+          const [stage] = await this.db.insert(stages).values({
+            projectId,
+            stageNumber: defaultStage.stageNumber,
+            title: defaultStage.title,
+            description: defaultStage.description,
+            systemPrompt: defaultStage.systemPrompt,
+            keyInsights: defaultStage.keyInsights || [],
+            completedInsights: [],
+            progress: 0,
+            isUnlocked: true
+          }).returning();
+          createdStages.push(stage);
+        }
+        return createdStages;
+      }
+      async getMessage(id) {
+        const result = await this.db.select().from(messages).where(eq(messages.id, id)).limit(1);
+        return result[0];
+      }
+      async getMessagesByStage(stageId) {
+        return await this.db.select().from(messages).where(eq(messages.stageId, stageId)).orderBy(asc(messages.createdAt));
+      }
+      async createMessage(insertMessage) {
+        const [message] = await this.db.insert(messages).values(insertMessage).returning();
+        return message;
+      }
+      async deleteMessagesByStage(stageId) {
+        await this.db.delete(messages).where(eq(messages.stageId, stageId));
+      }
+      // Admin Prompts - PostgreSQL implementation
+      async getAllAdminPrompts() {
+        return await this.db.select().from(adminPrompts);
+      }
+      async getAdminPrompt(id) {
+        const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.id, id)).limit(1);
+        return result[0];
+      }
+      async getAdminPromptByTargetKey(targetKey) {
+        const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.targetKey, targetKey)).limit(1);
+        return result[0];
+      }
+      async createAdminPrompt(insertPrompt) {
+        const [prompt] = await this.db.insert(adminPrompts).values(insertPrompt).returning();
+        return prompt;
+      }
+      async updateAdminPrompt(id, updates) {
+        const finalUpdates = { ...updates };
+        if (!finalUpdates.updatedAt) {
+          finalUpdates.updatedAt = /* @__PURE__ */ new Date();
+        }
+        const [updatedPrompt] = await this.db.update(adminPrompts).set(finalUpdates).where(eq(adminPrompts.id, id)).returning();
+        return updatedPrompt;
+      }
+      async deleteAdminPrompt(id) {
+        const result = await this.db.delete(adminPrompts).where(eq(adminPrompts.id, id));
+        return result.rowCount > 0;
+      }
+      async seedDefaultPrompts(userId) {
+        for (const stage of DEFAULT_STAGES) {
+          await this.createAdminPrompt({
+            scope: "stage",
+            targetKey: `stage_${stage.stageNumber}`,
+            label: stage.title,
+            description: stage.description,
+            content: stage.systemPrompt,
+            isDefault: true,
+            stageNumber: stage.stageNumber,
+            updatedBy: userId
+          });
+        }
+        await this.createAdminPrompt({
+          scope: "discovery",
+          targetKey: "discovery_initial",
+          label: "Discovery Initial Prompt",
+          description: "The initial prompt used to start the discovery conversation in Survey Mode",
+          content: DISCOVERY_INITIAL_PROMPT,
+          isDefault: true,
+          updatedBy: userId
+        });
+      }
+      // User Settings - PostgresStorage implementation
+      async getUserSettings(userId) {
+        const result = await this.db.execute(
+          sql2`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`
+        );
+        return result.rows?.[0] || void 0;
+      }
+      async upsertUserSettings(userId, updates) {
+        const existing = await this.getUserSettings(userId);
+        if (existing) {
+          await this.db.execute(
+            sql2`UPDATE user_settings SET
+          llm_provider = COALESCE(${updates.llmProvider ?? null}, llm_provider),
+          llm_api_key = ${updates.llmApiKey !== void 0 ? updates.llmApiKey : sql2`llm_api_key`},
+          llm_model = COALESCE(${updates.llmModel ?? null}, llm_model),
+          updated_at = NOW()
+        WHERE user_id = ${userId}`
+          );
+          return this.getUserSettings(userId);
+        } else {
+          await this.db.execute(
+            sql2`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
+        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || "groq"}, ${updates.llmApiKey || null}, ${updates.llmModel || "llama-3.3-70b-versatile"})`
+          );
+          return this.getUserSettings(userId);
+        }
+      }
+      // LLM Telemetry - PostgresStorage implementation
+      async createLlmCall(call) {
+        await this.db.insert(llmCalls).values(call);
+      }
+      // Audit log - PostgresStorage implementation
+      async createAuditEvent(event) {
+        await this.db.insert(auditEvents).values(event);
+      }
+    };
+    storage = createStorage();
+  }
+});
+
+// server/api-entry/index.ts
+import express from "express";
+import { toNodeHandler } from "better-auth/node";
+
+// server/auth/index.ts
+init_db();
+import fs from "fs";
+import path from "path";
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { fromNodeHeaders } from "better-auth/node";
+import { dash } from "@better-auth/infra";
 
 // server/auth/email.ts
 var RESEND_API_URL = "https://api.resend.com/emails";
@@ -898,463 +1449,9 @@ var requireAuth = (req, res, next) => {
 };
 
 // server/routes.ts
+init_storage_hybrid();
 import { randomUUID } from "crypto";
 import { createServer } from "http";
-
-// server/storage-hybrid.ts
-init_schema();
-init_prompt_content();
-import { eq, and, ne, desc, asc, sql as sql2 } from "drizzle-orm";
-var MemStorage = class {
-  projects = /* @__PURE__ */ new Map();
-  stages = /* @__PURE__ */ new Map();
-  messages = /* @__PURE__ */ new Map();
-  userSettingsMap = /* @__PURE__ */ new Map();
-  generateId() {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36);
-  }
-  async createProject(insertProject) {
-    const project = {
-      id: this.generateId(),
-      userId: insertProject.userId || null,
-      guestOwnerId: insertProject.guestOwnerId || null,
-      name: insertProject.name,
-      description: insertProject.description,
-      mode: insertProject.mode || "survey",
-      aiModel: insertProject.aiModel || "claude-sonnet",
-      surveyPhase: insertProject.surveyPhase || "discovery",
-      surveyDefinition: insertProject.surveyDefinition || null,
-      surveyResponses: insertProject.surveyResponses || null,
-      customPrompts: insertProject.customPrompts || null,
-      intakeAnswers: insertProject.intakeAnswers || null,
-      minimumDetails: insertProject.minimumDetails || null,
-      appStyle: insertProject.appStyle || null,
-      createdAt: /* @__PURE__ */ new Date(),
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.projects.set(project.id, project);
-    for (const defaultStage of DEFAULT_STAGES) {
-      const stage = {
-        id: this.generateId(),
-        projectId: project.id,
-        ...defaultStage,
-        progress: 0,
-        isUnlocked: true,
-        outputs: null,
-        completedInsights: [],
-        aiModel: null,
-        createdAt: /* @__PURE__ */ new Date(),
-        updatedAt: /* @__PURE__ */ new Date()
-      };
-      this.stages.set(stage.id, stage);
-    }
-    return project;
-  }
-  async getProject(id) {
-    return this.projects.get(id);
-  }
-  async getAllProjects() {
-    return Array.from(this.projects.values()).sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-    );
-  }
-  async getProjectsByUserId(userId) {
-    return (await this.getAllProjects()).filter((project) => project.userId === userId);
-  }
-  async getProjectsByGuestOwnerId(guestOwnerId) {
-    return (await this.getAllProjects()).filter(
-      (project) => project.guestOwnerId === guestOwnerId
-    );
-  }
-  async getUserDraft(userId) {
-    const allProjects = Array.from(this.projects.values());
-    return allProjects.find((p) => p.userId === userId && p.surveyPhase !== "complete");
-  }
-  async updateProject(id, updates) {
-    const existing = this.projects.get(id);
-    if (!existing) {
-      return void 0;
-    }
-    const updated = {
-      ...existing,
-      ...updates,
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.projects.set(id, updated);
-    return updated;
-  }
-  async deleteProject(id) {
-    const deleted = this.projects.delete(id);
-    const stagesToDelete = Array.from(this.stages.values()).filter((s) => s.projectId === id);
-    for (const stage of stagesToDelete) {
-      await this.deleteMessagesByStage(stage.id);
-      this.stages.delete(stage.id);
-    }
-    return deleted;
-  }
-  async createStage(insertStage) {
-    const stage = {
-      id: this.generateId(),
-      projectId: insertStage.projectId,
-      stageNumber: insertStage.stageNumber,
-      title: insertStage.title,
-      description: insertStage.description,
-      systemPrompt: insertStage.systemPrompt,
-      aiModel: insertStage.aiModel || null,
-      progress: 0,
-      isUnlocked: true,
-      outputs: null,
-      keyInsights: null,
-      completedInsights: null,
-      createdAt: /* @__PURE__ */ new Date(),
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.stages.set(stage.id, stage);
-    return stage;
-  }
-  async getStage(id) {
-    return this.stages.get(id);
-  }
-  async getStagesByProject(projectId) {
-    return Array.from(this.stages.values()).filter((s) => s.projectId === projectId);
-  }
-  async updateStage(id, updates) {
-    const existing = this.stages.get(id);
-    if (!existing) {
-      throw new Error(`Stage with id ${id} not found`);
-    }
-    const updated = {
-      ...existing,
-      ...updates,
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.stages.set(id, updated);
-    return updated;
-  }
-  async ensureStagesForProject(projectId) {
-    const existing = await this.getStagesByProject(projectId);
-    if (existing.length > 0) return existing;
-    const createdStages = [];
-    for (const defaultStage of DEFAULT_STAGES) {
-      const stage = await this.createStage({
-        projectId,
-        stageNumber: defaultStage.stageNumber,
-        title: defaultStage.title,
-        description: defaultStage.description,
-        systemPrompt: defaultStage.systemPrompt
-      });
-      createdStages.push(stage);
-    }
-    return createdStages;
-  }
-  async getMessage(id) {
-    return this.messages.get(id);
-  }
-  async getMessagesByStage(stageId) {
-    return Array.from(this.messages.values()).filter((m) => m.stageId === stageId).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  }
-  async createMessage(insertMessage) {
-    const message = {
-      id: this.generateId(),
-      ...insertMessage,
-      createdAt: /* @__PURE__ */ new Date()
-    };
-    this.messages.set(message.id, message);
-    return message;
-  }
-  async deleteMessagesByStage(stageId) {
-    const messagesToDelete = Array.from(this.messages.values()).filter((m) => m.stageId === stageId);
-    for (const message of messagesToDelete) {
-      this.messages.delete(message.id);
-    }
-  }
-  // Admin Prompts - In-memory implementation
-  adminPrompts = /* @__PURE__ */ new Map();
-  async getAllAdminPrompts() {
-    return Array.from(this.adminPrompts.values());
-  }
-  async getAdminPrompt(id) {
-    return this.adminPrompts.get(id);
-  }
-  async getAdminPromptByTargetKey(targetKey) {
-    const prompts = Array.from(this.adminPrompts.values());
-    return prompts.find((p) => p.targetKey === targetKey);
-  }
-  async createAdminPrompt(insertPrompt) {
-    const prompt = {
-      id: this.generateId(),
-      scope: insertPrompt.scope,
-      targetKey: insertPrompt.targetKey,
-      label: insertPrompt.label,
-      description: insertPrompt.description || null,
-      content: insertPrompt.content,
-      isDefault: insertPrompt.isDefault || false,
-      stageNumber: insertPrompt.stageNumber || null,
-      updatedBy: insertPrompt.updatedBy || null,
-      createdAt: /* @__PURE__ */ new Date(),
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.adminPrompts.set(prompt.id, prompt);
-    return prompt;
-  }
-  async updateAdminPrompt(id, updates) {
-    const existing = this.adminPrompts.get(id);
-    if (!existing) return void 0;
-    const updated = {
-      ...existing,
-      ...updates,
-      updatedAt: /* @__PURE__ */ new Date()
-    };
-    this.adminPrompts.set(id, updated);
-    return updated;
-  }
-  async deleteAdminPrompt(id) {
-    return this.adminPrompts.delete(id);
-  }
-  async seedDefaultPrompts(userId) {
-    for (const stage of DEFAULT_STAGES) {
-      await this.createAdminPrompt({
-        scope: "stage",
-        targetKey: `stage_${stage.stageNumber}`,
-        label: stage.title,
-        description: stage.description,
-        content: stage.systemPrompt,
-        isDefault: true,
-        stageNumber: stage.stageNumber,
-        updatedBy: userId
-      });
-    }
-    await this.createAdminPrompt({
-      scope: "discovery",
-      targetKey: "discovery_initial",
-      label: "Discovery Initial Prompt",
-      description: "The initial prompt used to start the discovery conversation in Survey Mode",
-      content: DISCOVERY_INITIAL_PROMPT,
-      isDefault: true,
-      updatedBy: userId
-    });
-  }
-  // User Settings - MemStorage implementation
-  async getUserSettings(userId) {
-    return this.userSettingsMap.get(userId);
-  }
-  async upsertUserSettings(userId, updates) {
-    const existing = this.userSettingsMap.get(userId) || { userId, llmProvider: "groq", llmModel: "llama-3.3-70b-versatile" };
-    const merged = { ...existing, ...updates, userId, updatedAt: /* @__PURE__ */ new Date() };
-    this.userSettingsMap.set(userId, merged);
-    return merged;
-  }
-};
-var PostgresStorage = class {
-  db;
-  constructor(database) {
-    this.db = database;
-  }
-  async createProject(insertProject) {
-    return await this.db.transaction(async (tx) => {
-      const [project] = await tx.insert(projects).values(insertProject).returning();
-      const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
-        projectId: project.id,
-        stageNumber: defaultStage.stageNumber,
-        title: defaultStage.title,
-        description: defaultStage.description,
-        systemPrompt: defaultStage.systemPrompt,
-        keyInsights: defaultStage.keyInsights || [],
-        completedInsights: [],
-        progress: 0,
-        isUnlocked: true
-      }));
-      if (stageRows.length > 0) {
-        await tx.insert(stages).values(stageRows);
-      }
-      return project;
-    });
-  }
-  async getProject(id) {
-    const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
-    return result[0];
-  }
-  async getAllProjects() {
-    return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
-  }
-  async getProjectsByUserId(userId) {
-    return await this.db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.createdAt));
-  }
-  async getProjectsByGuestOwnerId(guestOwnerId) {
-    return await this.db.select().from(projects).where(eq(projects.guestOwnerId, guestOwnerId)).orderBy(desc(projects.createdAt));
-  }
-  async getUserDraft(userId) {
-    const result = await this.db.select().from(projects).where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete"))).limit(1);
-    return result[0];
-  }
-  async updateProject(id, updates) {
-    const finalUpdates = { ...updates };
-    if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
-      finalUpdates.updatedAt = /* @__PURE__ */ new Date();
-    }
-    const [updatedProject] = await this.db.update(projects).set(finalUpdates).where(eq(projects.id, id)).returning();
-    return updatedProject;
-  }
-  async deleteProject(id) {
-    const result = await this.db.delete(projects).where(eq(projects.id, id));
-    return result.rowCount > 0;
-  }
-  async createStage(insertStage) {
-    const [stage] = await this.db.insert(stages).values(insertStage).returning();
-    return stage;
-  }
-  async getStage(id) {
-    const result = await this.db.select().from(stages).where(eq(stages.id, id)).limit(1);
-    return result[0];
-  }
-  async getStagesByProject(projectId) {
-    return await this.db.select().from(stages).where(eq(stages.projectId, projectId));
-  }
-  async updateStage(id, updates) {
-    const finalUpdates = { ...updates };
-    if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
-      finalUpdates.updatedAt = /* @__PURE__ */ new Date();
-    }
-    if (updates.completedInsights !== void 0) {
-      const keyInsights = updates.keyInsights || [];
-      const completedInsights = updates.completedInsights || [];
-      if (Array.isArray(keyInsights) && keyInsights.length > 0) {
-        const completedCount = Array.isArray(completedInsights) ? completedInsights.length : 0;
-        const totalCount = keyInsights.length;
-        finalUpdates.progress = Math.max(0, Math.min(100, Math.round(completedCount / totalCount * 100)));
-      }
-    }
-    const [updatedStage] = await this.db.update(stages).set(finalUpdates).where(eq(stages.id, id)).returning();
-    return updatedStage;
-  }
-  async ensureStagesForProject(projectId) {
-    const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
-    if (existing.length > 0) return existing;
-    const createdStages = [];
-    for (const defaultStage of DEFAULT_STAGES) {
-      const [stage] = await this.db.insert(stages).values({
-        projectId,
-        stageNumber: defaultStage.stageNumber,
-        title: defaultStage.title,
-        description: defaultStage.description,
-        systemPrompt: defaultStage.systemPrompt,
-        keyInsights: defaultStage.keyInsights || [],
-        completedInsights: [],
-        progress: 0,
-        isUnlocked: true
-      }).returning();
-      createdStages.push(stage);
-    }
-    return createdStages;
-  }
-  async getMessage(id) {
-    const result = await this.db.select().from(messages).where(eq(messages.id, id)).limit(1);
-    return result[0];
-  }
-  async getMessagesByStage(stageId) {
-    return await this.db.select().from(messages).where(eq(messages.stageId, stageId)).orderBy(asc(messages.createdAt));
-  }
-  async createMessage(insertMessage) {
-    const [message] = await this.db.insert(messages).values(insertMessage).returning();
-    return message;
-  }
-  async deleteMessagesByStage(stageId) {
-    await this.db.delete(messages).where(eq(messages.stageId, stageId));
-  }
-  // Admin Prompts - PostgreSQL implementation
-  async getAllAdminPrompts() {
-    return await this.db.select().from(adminPrompts);
-  }
-  async getAdminPrompt(id) {
-    const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.id, id)).limit(1);
-    return result[0];
-  }
-  async getAdminPromptByTargetKey(targetKey) {
-    const result = await this.db.select().from(adminPrompts).where(eq(adminPrompts.targetKey, targetKey)).limit(1);
-    return result[0];
-  }
-  async createAdminPrompt(insertPrompt) {
-    const [prompt] = await this.db.insert(adminPrompts).values(insertPrompt).returning();
-    return prompt;
-  }
-  async updateAdminPrompt(id, updates) {
-    const finalUpdates = { ...updates };
-    if (!finalUpdates.updatedAt) {
-      finalUpdates.updatedAt = /* @__PURE__ */ new Date();
-    }
-    const [updatedPrompt] = await this.db.update(adminPrompts).set(finalUpdates).where(eq(adminPrompts.id, id)).returning();
-    return updatedPrompt;
-  }
-  async deleteAdminPrompt(id) {
-    const result = await this.db.delete(adminPrompts).where(eq(adminPrompts.id, id));
-    return result.rowCount > 0;
-  }
-  async seedDefaultPrompts(userId) {
-    for (const stage of DEFAULT_STAGES) {
-      await this.createAdminPrompt({
-        scope: "stage",
-        targetKey: `stage_${stage.stageNumber}`,
-        label: stage.title,
-        description: stage.description,
-        content: stage.systemPrompt,
-        isDefault: true,
-        stageNumber: stage.stageNumber,
-        updatedBy: userId
-      });
-    }
-    await this.createAdminPrompt({
-      scope: "discovery",
-      targetKey: "discovery_initial",
-      label: "Discovery Initial Prompt",
-      description: "The initial prompt used to start the discovery conversation in Survey Mode",
-      content: DISCOVERY_INITIAL_PROMPT,
-      isDefault: true,
-      updatedBy: userId
-    });
-  }
-  // User Settings - PostgresStorage implementation
-  async getUserSettings(userId) {
-    const result = await this.db.execute(
-      sql2`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`
-    );
-    return result.rows?.[0] || void 0;
-  }
-  async upsertUserSettings(userId, updates) {
-    const existing = await this.getUserSettings(userId);
-    if (existing) {
-      await this.db.execute(
-        sql2`UPDATE user_settings SET
-          llm_provider = COALESCE(${updates.llmProvider ?? null}, llm_provider),
-          llm_api_key = ${updates.llmApiKey !== void 0 ? updates.llmApiKey : sql2`llm_api_key`},
-          llm_model = COALESCE(${updates.llmModel ?? null}, llm_model),
-          updated_at = NOW()
-        WHERE user_id = ${userId}`
-      );
-      return this.getUserSettings(userId);
-    } else {
-      await this.db.execute(
-        sql2`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
-        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || "groq"}, ${updates.llmApiKey || null}, ${updates.llmModel || "llama-3.3-70b-versatile"})`
-      );
-      return this.getUserSettings(userId);
-    }
-  }
-};
-function createStorage() {
-  const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
-  if (hasDatabase && db) {
-    console.log("Using PostgreSQL storage");
-    return new PostgresStorage(db);
-  }
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "No database configured in production. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE. Refusing to fall back to in-memory storage."
-    );
-  }
-  console.log("Using in-memory storage (no database configured \u2014 dev only)");
-  return new MemStorage();
-}
-var storage = createStorage();
 
 // server/services/ai.ts
 import Anthropic from "@anthropic-ai/sdk";
@@ -1712,6 +1809,23 @@ var GROQ_MODELS = {
   // Safety classifier (not used today).
   safeguard: "openai/gpt-oss-safeguard-20b"
 };
+var MODEL_COST_RATES = {
+  // Anthropic
+  "claude-opus-4-7": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-sonnet-4-5": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // Groq
+  "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
+  "llama-3.1-8b-instant": { input: 0.05, output: 0.08 },
+  "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
+  "openai/gpt-oss-safeguard-20b": { input: 0.075, output: 0.3 }
+};
+function computeCostUsd(model, inputTokens, outputTokens, cacheReadTokens = 0, cacheWriteTokens = 0) {
+  const rate = MODEL_COST_RATES[model];
+  if (!rate) return null;
+  const cost = inputTokens / 1e6 * rate.input + outputTokens / 1e6 * rate.output + cacheReadTokens / 1e6 * (rate.cacheRead ?? 0) + cacheWriteTokens / 1e6 * (rate.cacheWrite ?? 0);
+  return cost.toFixed(6);
+}
 var AIService = class {
   getDefaultConfig(task = "chat") {
     const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -1739,34 +1853,39 @@ var AIService = class {
     const groqModel = task === "complex" || task === "deliverable" ? GROQ_MODELS.reasoning : GROQ_MODELS.fast;
     return { provider: "groq", apiKey: process.env.GROQ_API_KEY, model: groqModel };
   }
-  async chat(messages2, model = "claude-sonnet", userConfig, task = "chat") {
+  async chat(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
     const config = userConfig || this.getDefaultConfig(task);
     switch (config.provider) {
       case "groq":
-        return this.chatWithGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey);
+        return this.chatWithGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey, task, context);
       case "anthropic":
-        return this.chatWithClaude(messages2, this.normalizeModel(model || config.model || "claude-sonnet"), config.apiKey);
+        return this.chatWithClaude(messages2, this.normalizeModel(model || config.model || "claude-sonnet"), config.apiKey, task, context);
       default:
-        return this.chatWithGroq(messages2, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey);
+        return this.chatWithGroq(messages2, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey, task, context);
     }
   }
   /**
    * Streaming variant of chat(). Yields incremental text deltas, then a final event with the full content and usage.
    * Use for conversational stages where perceived latency matters.
    */
-  async *chatStream(messages2, model = "claude-sonnet", userConfig, task = "chat") {
+  async *chatStream(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
     const config = userConfig || this.getDefaultConfig(task);
     if (config.provider === "anthropic") {
       yield* this.streamClaude(
         messages2,
         this.normalizeModel(model || config.model || "claude-sonnet"),
-        config.apiKey
+        config.apiKey,
+        task,
+        context
       );
       return;
     }
-    yield* this.streamGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey);
+    yield* this.streamGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey, task, context);
   }
-  async *streamGroq(messages2, model, apiKey) {
+  async *streamGroq(messages2, model, apiKey, task = "chat", context) {
+    const startedAt = Date.now();
+    let capturedUsage = null;
+    let errorCode = null;
     const groq = new Groq({ apiKey });
     const systemMessage = messages2.find((m) => m.role === "system");
     const conversationMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
@@ -1781,16 +1900,54 @@ var AIService = class {
       stream: true
     });
     let full = "";
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      if (delta) {
-        full += delta;
-        yield { type: "delta", text: delta };
+    try {
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? "";
+        if (delta) {
+          full += delta;
+          yield { type: "delta", text: delta };
+        }
+        if (chunk.x_groq?.usage) {
+          capturedUsage = {
+            prompt_tokens: chunk.x_groq.usage.prompt_tokens,
+            completion_tokens: chunk.x_groq.usage.completion_tokens,
+            total_tokens: chunk.x_groq.usage.total_tokens
+          };
+        }
       }
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw err;
+    } finally {
+      if (!capturedUsage) {
+        console.warn("[llm-telemetry] streamGroq: x_groq.usage not present on final chunk \u2014 token counts will be 0");
+      }
+      void this.recordLlmCall({
+        provider: "groq",
+        model,
+        task,
+        inputTokens: capturedUsage?.prompt_tokens ?? 0,
+        outputTokens: capturedUsage?.completion_tokens ?? 0,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: true,
+        byok: Boolean(apiKey && apiKey !== process.env.GROQ_API_KEY),
+        context
+      });
     }
-    yield { type: "done", fullContent: full };
+    yield {
+      type: "done",
+      fullContent: full,
+      usage: capturedUsage ?? void 0
+    };
   }
-  async *streamClaude(messages2, model, apiKey) {
+  async *streamClaude(messages2, model, apiKey, task = "chat", context) {
+    const startedAt = Date.now();
+    let capturedUsage = null;
+    let errorCode = null;
     const key = apiKey || process.env.ANTHROPIC_API_KEY;
     if (!key) throw new Error("No Anthropic API key configured");
     const anthropic = new Anthropic({ apiKey: key });
@@ -1804,40 +1961,97 @@ var AIService = class {
       messages: conversationMessages
     });
     let full = "";
-    for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        full += event.delta.text;
-        yield { type: "delta", text: event.delta.text };
+    try {
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          full += event.delta.text;
+          yield { type: "delta", text: event.delta.text };
+        }
       }
-    }
-    const final = await stream.finalMessage();
-    yield {
-      type: "done",
-      fullContent: full,
-      usage: {
+      const final = await stream.finalMessage();
+      capturedUsage = {
         prompt_tokens: final.usage.input_tokens,
         completion_tokens: final.usage.output_tokens,
         total_tokens: final.usage.input_tokens + final.usage.output_tokens
-      }
+      };
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw err;
+    } finally {
+      void this.recordLlmCall({
+        provider: "anthropic",
+        model,
+        task,
+        inputTokens: capturedUsage?.prompt_tokens ?? 0,
+        outputTokens: capturedUsage?.completion_tokens ?? 0,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: true,
+        byok: Boolean(apiKey && apiKey !== process.env.ANTHROPIC_API_KEY),
+        context
+      });
+    }
+    yield {
+      type: "done",
+      fullContent: full,
+      usage: capturedUsage ?? void 0
     };
   }
-  async chatWithGroq(messages2, model, apiKey) {
-    const groq = new Groq({ apiKey });
-    const systemMessage = messages2.find((m) => m.role === "system");
-    const conversationMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
-    const response = await groq.chat.completions.create({
-      model,
-      messages: [
-        ...systemMessage ? [{ role: "system", content: systemMessage.content }] : [],
-        ...conversationMessages
-      ],
-      max_tokens: 4096,
-      temperature: 0.7
-    });
-    const content = response.choices[0]?.message?.content || "";
-    return { content };
+  async chatWithGroq(messages2, model, apiKey, task = "chat", context) {
+    const startedAt = Date.now();
+    let response = null;
+    let errorCode = null;
+    try {
+      const groq = new Groq({ apiKey });
+      const systemMessage = messages2.find((m) => m.role === "system");
+      const conversationMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+      const groqResponse = await groq.chat.completions.create({
+        model,
+        messages: [
+          ...systemMessage ? [{ role: "system", content: systemMessage.content }] : [],
+          ...conversationMessages
+        ],
+        max_tokens: 4096,
+        temperature: 0.7
+      });
+      const content = groqResponse.choices[0]?.message?.content || "";
+      response = {
+        content,
+        usage: groqResponse.usage ? {
+          prompt_tokens: groqResponse.usage.prompt_tokens,
+          completion_tokens: groqResponse.usage.completion_tokens,
+          total_tokens: groqResponse.usage.total_tokens
+        } : void 0
+      };
+      return response;
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw err;
+    } finally {
+      void this.recordLlmCall({
+        provider: "groq",
+        model,
+        task,
+        inputTokens: response?.usage?.prompt_tokens ?? 0,
+        outputTokens: response?.usage?.completion_tokens ?? 0,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: false,
+        byok: Boolean(apiKey && apiKey !== process.env.GROQ_API_KEY),
+        context
+      });
+    }
   }
-  async chatWithClaude(messages2, model, apiKey) {
+  async chatWithClaude(messages2, model, apiKey, task = "chat", context) {
+    const startedAt = Date.now();
+    let response = null;
+    let errorCode = null;
     try {
       const key = apiKey || process.env.ANTHROPIC_API_KEY;
       if (!key) throw new Error("No Anthropic API key configured");
@@ -1847,32 +2061,50 @@ var AIService = class {
         role: m.role,
         content: m.content
       }));
-      const response = await anthropic.messages.create({
+      const claudeResponse = await anthropic.messages.create({
         model,
         max_tokens: 4096,
         temperature: 0.7,
         system: systemMessage?.content ? [{ type: "text", text: systemMessage.content, cache_control: { type: "ephemeral" } }] : void 0,
         messages: conversationMessages
       });
-      const firstBlock = response.content?.[0];
+      const firstBlock = claudeResponse.content?.[0];
       const content = firstBlock && firstBlock.type === "text" ? firstBlock.text : "";
-      return {
+      response = {
         content,
         usage: {
-          prompt_tokens: response.usage.input_tokens,
-          completion_tokens: response.usage.output_tokens,
-          total_tokens: response.usage.input_tokens + response.usage.output_tokens
+          prompt_tokens: claudeResponse.usage.input_tokens,
+          completion_tokens: claudeResponse.usage.output_tokens,
+          total_tokens: claudeResponse.usage.input_tokens + claudeResponse.usage.output_tokens
         }
       };
-    } catch (error) {
-      throw new Error(`Claude API error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      return response;
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw new Error(`Claude API error: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      void this.recordLlmCall({
+        provider: "anthropic",
+        model,
+        task,
+        inputTokens: response?.usage?.prompt_tokens ?? 0,
+        outputTokens: response?.usage?.completion_tokens ?? 0,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: false,
+        byok: Boolean(apiKey && apiKey !== process.env.ANTHROPIC_API_KEY),
+        context
+      });
     }
   }
-  async generateStructuredOutput(messages2, model = "claude-sonnet", userConfig, task = "classification") {
+  async generateStructuredOutput(messages2, model = "claude-sonnet", userConfig, task = "classification", context) {
     const config = userConfig || this.getDefaultConfig(task);
     if (config.provider === "groq") {
       const groqModel = config.model || (task === "classification" ? GROQ_MODELS.fast : GROQ_MODELS.reasoning);
-      const response = await this.chatWithGroq(messages2, groqModel, config.apiKey);
+      const response = await this.chatWithGroq(messages2, groqModel, config.apiKey, task, context);
       try {
         return this.extractJSON(response.content);
       } catch {
@@ -1880,9 +2112,12 @@ var AIService = class {
       }
     }
     const targetModel = config.model || this.normalizeModel(model);
-    return this.generateStructuredWithClaude(messages2, this.normalizeModel(targetModel), config.apiKey);
+    return this.generateStructuredWithClaude(messages2, this.normalizeModel(targetModel), config.apiKey, task, context);
   }
-  async generateStructuredWithClaude(messages2, model, apiKey) {
+  async generateStructuredWithClaude(messages2, model, apiKey, task = "classification", context) {
+    const startedAt = Date.now();
+    let capturedUsage = null;
+    let errorCode = null;
     try {
       const key = apiKey || process.env.ANTHROPIC_API_KEY;
       if (!key) throw new Error("No Anthropic API key configured");
@@ -1902,11 +2137,32 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
         messages: conversationMessages
       });
+      capturedUsage = {
+        prompt_tokens: response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens
+      };
       const firstBlock = response.content?.[0];
       const content = firstBlock && firstBlock.type === "text" ? firstBlock.text : "{}";
       return this.extractJSON(content);
-    } catch (error) {
-      throw new Error(`Claude structured output error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw new Error(`Claude structured output error: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      void this.recordLlmCall({
+        provider: "anthropic",
+        model,
+        task,
+        inputTokens: capturedUsage?.prompt_tokens ?? 0,
+        outputTokens: capturedUsage?.completion_tokens ?? 0,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: false,
+        byok: Boolean(apiKey && apiKey !== process.env.ANTHROPIC_API_KEY),
+        context
+      });
     }
   }
   /**
@@ -1951,7 +2207,7 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         return "claude-sonnet-4-5";
     }
   }
-  async calculateProgress(messages2, stageGoals, userConfig) {
+  async calculateProgress(messages2, stageGoals, userConfig, context) {
     const progressPrompt = buildProgressAssessmentPrompt({
       messages: messages2,
       stageGoals
@@ -1964,12 +2220,46 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         ],
         "claude-haiku",
         userConfig,
-        "classification"
+        "classification",
+        context
       );
       return Math.min(100, Math.max(0, result.progress || 0));
     } catch (error) {
       const meaningfulMessages = messages2.filter((m) => m.role === "user" && m.content.length > 20);
       return Math.max(0, Math.min(75, meaningfulMessages.length * 15));
+    }
+  }
+  async recordLlmCall(args) {
+    try {
+      const { storage: storage2 } = await Promise.resolve().then(() => (init_storage_hybrid(), storage_hybrid_exports));
+      await storage2.createLlmCall({
+        userId: args.context?.userId ?? null,
+        guestOwnerId: args.context?.guestOwnerId ?? null,
+        projectId: args.context?.projectId ?? null,
+        stageId: args.context?.stageId ?? null,
+        provider: args.provider,
+        model: args.model,
+        task: args.task,
+        inputTokens: args.inputTokens,
+        outputTokens: args.outputTokens,
+        cacheReadTokens: args.cacheReadTokens,
+        cacheWriteTokens: args.cacheWriteTokens,
+        costUsd: computeCostUsd(
+          args.model,
+          args.inputTokens,
+          args.outputTokens,
+          args.cacheReadTokens ?? 0,
+          args.cacheWriteTokens ?? 0
+        ),
+        latencyMs: args.latencyMs,
+        status: args.status,
+        errorCode: args.errorCode,
+        streamed: args.streamed,
+        byok: args.byok,
+        requestId: args.context?.requestId ?? null
+      });
+    } catch (err) {
+      console.error("[llm-telemetry] Failed to record call:", err);
     }
   }
 };
@@ -2208,6 +2498,14 @@ async function registerRoutes(app2) {
         userId: actor.kind === "user" ? actor.id : null,
         guestOwnerId
       });
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.kind === "user" ? actor.id : guestOwnerId,
+        action: "project.create",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { name: project.name, mode: project.mode }
+      }).catch((e) => console.error("[audit] project.create failed:", e));
       res.status(201).json(project);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2254,6 +2552,14 @@ async function registerRoutes(app2) {
       if (!deleted) {
         return res.status(404).json({ message: "Project not found" });
       }
+      void storage.createAuditEvent({
+        actorType: projectAccess.actor.kind,
+        actorId: projectAccess.actor.id,
+        action: "project.delete",
+        resourceType: "project",
+        resourceId: projectAccess.project.id,
+        metadata: { name: projectAccess.project.name }
+      }).catch((e) => console.error("[audit] project.delete failed:", e));
       res.json({ message: "Project deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete project" });
@@ -2366,7 +2672,12 @@ async function registerRoutes(app2) {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
           const userConfig = await getLLMConfig(req);
           const task = stage.stageNumber >= 4 ? "complex" : "chat";
-          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task);
+          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task, {
+            userId: stageAccess.actor.kind === "user" ? stageAccess.actor.id : null,
+            guestOwnerId: stageAccess.actor.kind === "guest" ? stageAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id
+          });
           const aiMessage = await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
@@ -2451,7 +2762,12 @@ data: ${JSON.stringify(data)}
       const task = stage.stageNumber >= 4 ? "complex" : "chat";
       const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
       let full = "";
-      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task)) {
+      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task, {
+        userId: stageAccess.actor.kind === "user" ? stageAccess.actor.id : null,
+        guestOwnerId: stageAccess.actor.kind === "guest" ? stageAccess.actor.id : null,
+        projectId: project.id,
+        stageId: stage.id
+      })) {
         if (chunk.type === "delta") {
           full += chunk.text;
           send("delta", { text: chunk.text });
@@ -2587,11 +2903,17 @@ data: ${JSON.stringify(data)}
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig, task);
+          ], "claude-sonnet", userConfig, task, {
+            userId: projectAccess.actor.kind === "user" ? projectAccess.actor.id : null,
+            guestOwnerId: projectAccess.actor.kind === "guest" ? projectAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id
+          });
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
-            content: response.content
+            content: response.content,
+            kind: "deliverable"
           });
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
@@ -2669,11 +2991,17 @@ data: ${JSON.stringify(data)}
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig, task);
+          ], "claude-sonnet", userConfig, task, {
+            userId: projectAccess.actor.kind === "user" ? projectAccess.actor.id : null,
+            guestOwnerId: projectAccess.actor.kind === "guest" ? projectAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id
+          });
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
-            content: response.content
+            content: response.content,
+            kind: "deliverable"
           });
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
@@ -2735,6 +3063,14 @@ data: ${JSON.stringify(data)}
         ...promptData,
         updatedBy: userId
       });
+      void storage.createAuditEvent({
+        actorType: "admin",
+        actorId: userId,
+        action: "admin.prompt.create",
+        resourceType: "admin_prompt",
+        resourceId: prompt.id,
+        metadata: { targetKey: prompt.targetKey, scope: prompt.scope }
+      }).catch((e) => console.error("[audit] admin.prompt.create failed:", e));
       res.status(201).json(prompt);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2755,6 +3091,14 @@ data: ${JSON.stringify(data)}
       if (!prompt) {
         return res.status(404).json({ message: "Prompt not found" });
       }
+      void storage.createAuditEvent({
+        actorType: "admin",
+        actorId: userId,
+        action: "admin.prompt.update",
+        resourceType: "admin_prompt",
+        resourceId: prompt.id,
+        metadata: { targetKey: prompt.targetKey }
+      }).catch((e) => console.error("[audit] admin.prompt.update failed:", e));
       res.json(prompt);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -3138,6 +3482,69 @@ async function runMigrations() {
           FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL;
         END IF;
       END $$;
+    `);
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS "llm_calls" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "user_id" varchar,
+        "guest_owner_id" varchar,
+        "project_id" varchar,
+        "stage_id" varchar,
+        "provider" text NOT NULL,
+        "model" text NOT NULL,
+        "task" text NOT NULL,
+        "input_tokens" integer NOT NULL DEFAULT 0,
+        "output_tokens" integer NOT NULL DEFAULT 0,
+        "cache_read_tokens" integer,
+        "cache_write_tokens" integer,
+        "cost_usd" numeric(12, 6),
+        "latency_ms" integer,
+        "status" text NOT NULL,
+        "error_code" text,
+        "streamed" boolean NOT NULL DEFAULT false,
+        "byok" boolean NOT NULL DEFAULT false,
+        "request_id" varchar,
+        "created_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "llm_calls_user_id_created_at_idx" ON "llm_calls" ("user_id", "created_at")
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "llm_calls_project_id_idx" ON "llm_calls" ("project_id")
+    `);
+    await pool2.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='kind') THEN
+          ALTER TABLE "messages" ADD COLUMN "kind" text NOT NULL DEFAULT 'chat';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='version') THEN
+          ALTER TABLE "messages" ADD COLUMN "version" integer NOT NULL DEFAULT 1;
+        END IF;
+      END $$;
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "messages_stage_kind_idx" ON "messages" ("stage_id", "kind")
+    `);
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS "audit_events" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "actor_type" text NOT NULL,
+        "actor_id" varchar,
+        "action" text NOT NULL,
+        "resource_type" text NOT NULL,
+        "resource_id" varchar,
+        "metadata" jsonb,
+        "request_id" varchar,
+        "created_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "audit_events_actor_id_created_at_idx" ON "audit_events" ("actor_id", "created_at")
+    `);
+    await pool2.query(`
+      CREATE INDEX IF NOT EXISTS "audit_events_resource_idx" ON "audit_events" ("resource_type", "resource_id")
     `);
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS "user_settings" (

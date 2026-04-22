@@ -354,6 +354,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: actor.kind === "user" ? actor.id : null,
         guestOwnerId,
       });
+      // Audit: record project creation (fire-and-forget; never throws)
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.kind === "user" ? actor.id : guestOwnerId,
+        action: "project.create",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { name: project.name, mode: project.mode },
+      }).catch((e) => console.error("[audit] project.create failed:", e));
       res.status(201).json(project);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -405,6 +414,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) {
         return res.status(404).json({ message: "Project not found" });
       }
+      void storage.createAuditEvent({
+        actorType: projectAccess.actor.kind,
+        actorId: projectAccess.actor.id,
+        action: "project.delete",
+        resourceType: "project",
+        resourceId: projectAccess.project.id,
+        metadata: { name: projectAccess.project.name },
+      }).catch((e) => console.error("[audit] project.delete failed:", e));
       res.json({ message: "Project deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete project" });
@@ -546,7 +563,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const userConfig = await getLLMConfig(req);
           // Conversation stages use 'chat' tier (Groq default); stages 4+ are complex reasoning.
           const task = stage.stageNumber >= 4 ? 'complex' : 'chat';
-          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task);
+          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task, {
+            userId: stageAccess.actor.kind === 'user' ? stageAccess.actor.id : null,
+            guestOwnerId: stageAccess.actor.kind === 'guest' ? stageAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id,
+          });
 
           // Create AI response message
           const aiMessage = await storage.createMessage({
@@ -647,7 +669,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
 
       let full = "";
-      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task)) {
+      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task, {
+        userId: stageAccess.actor.kind === 'user' ? stageAccess.actor.id : null,
+        guestOwnerId: stageAccess.actor.kind === 'guest' ? stageAccess.actor.id : null,
+        projectId: project.id,
+        stageId: stage.id,
+      })) {
         if (chunk.type === "delta") {
           full += chunk.text;
           send("delta", { text: chunk.text });
@@ -836,13 +863,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig, task);
+          ], "claude-sonnet", userConfig, task, {
+            userId: projectAccess.actor.kind === 'user' ? projectAccess.actor.id : null,
+            guestOwnerId: projectAccess.actor.kind === 'guest' ? projectAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id,
+          });
 
-          // Create a message in the stage with the generated content
+          // Create a message in the stage with the generated content.
+          // kind='deliverable' distinguishes a final doc from conversational turns.
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
             content: response.content,
+            kind: "deliverable",
           });
 
           // Update stage progress to 100%
@@ -950,12 +984,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig, task);
+          ], "claude-sonnet", userConfig, task, {
+            userId: projectAccess.actor.kind === 'user' ? projectAccess.actor.id : null,
+            guestOwnerId: projectAccess.actor.kind === 'guest' ? projectAccess.actor.id : null,
+            projectId: project.id,
+            stageId: stage.id,
+          });
 
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
             content: response.content,
+            kind: "deliverable",
           });
 
           await storage.updateStage(stage.id, { progress: 100 });
@@ -1027,6 +1067,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...promptData,
         updatedBy: userId,
       });
+      void storage.createAuditEvent({
+        actorType: "admin",
+        actorId: userId,
+        action: "admin.prompt.create",
+        resourceType: "admin_prompt",
+        resourceId: prompt.id,
+        metadata: { targetKey: prompt.targetKey, scope: prompt.scope },
+      }).catch((e) => console.error("[audit] admin.prompt.create failed:", e));
       res.status(201).json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1048,6 +1096,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!prompt) {
         return res.status(404).json({ message: "Prompt not found" });
       }
+      void storage.createAuditEvent({
+        actorType: "admin",
+        actorId: userId,
+        action: "admin.prompt.update",
+        resourceType: "admin_prompt",
+        resourceId: prompt.id,
+        metadata: { targetKey: prompt.targetKey },
+      }).catch((e) => console.error("[audit] admin.prompt.update failed:", e));
       res.json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {

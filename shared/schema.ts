@@ -72,8 +72,64 @@ export const messages = pgTable("messages", {
   stageId: varchar("stage_id").notNull().references(() => stages.id, { onDelete: "cascade" }),
   role: text("role").notNull(), // "user" | "assistant"
   content: text("content").notNull(),
+  // kind: 'chat' = conversational turn, 'deliverable' = final generated document (PRD, spec, etc.)
+  // 'system_note' reserved for future automated annotations
+  kind: text("kind").notNull().default("chat"),
+  // version bumps on regenerate; older versions are retained for history
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// LLM call telemetry. Written by AIService at call boundary. Used for cost
+// attribution, latency/error tracking, and BYOK spend caps.
+export const llmCalls = pgTable("llm_calls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),              // nullable — guest calls won't have it
+  guestOwnerId: varchar("guest_owner_id"), // nullable — authed calls won't have it
+  projectId: varchar("project_id"),        // nullable — some calls (survey gen) don't have a project at call time
+  stageId: varchar("stage_id"),
+  provider: text("provider").notNull(),    // 'anthropic' | 'groq' | 'openai'
+  model: text("model").notNull(),
+  task: text("task").notNull(),            // matches LLMTask union in ai.ts
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cacheReadTokens: integer("cache_read_tokens"),
+  cacheWriteTokens: integer("cache_write_tokens"),
+  costUsd: varchar("cost_usd"),            // decimal-as-string to avoid float loss; numeric(12,6) in DB
+  latencyMs: integer("latency_ms"),
+  status: text("status").notNull(),        // 'ok' | 'error'
+  errorCode: text("error_code"),
+  streamed: boolean("streamed").notNull().default(false),
+  byok: boolean("byok").notNull().default(false),
+  requestId: varchar("request_id"),        // correlate with audit + logs
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("llm_calls_user_id_created_at_idx").on(table.userId, table.createdAt),
+  index("llm_calls_project_id_idx").on(table.projectId),
+]);
+
+export type LlmCall = typeof llmCalls.$inferSelect;
+export type InsertLlmCall = typeof llmCalls.$inferInsert;
+
+// Audit events. Write-only business-level log. Actions: project.create,
+// project.delete, stage.regenerate, admin.prompt.edit, settings.byok.change, etc.
+export const auditEvents = pgTable("audit_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  actorType: text("actor_type").notNull(),  // 'user' | 'guest' | 'admin' | 'system'
+  actorId: varchar("actor_id"),
+  action: text("action").notNull(),          // 'project.create' | 'project.delete' | ...
+  resourceType: text("resource_type").notNull(),
+  resourceId: varchar("resource_id"),
+  metadata: jsonb("metadata"),
+  requestId: varchar("request_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("audit_events_actor_id_created_at_idx").on(table.actorId, table.createdAt),
+  index("audit_events_resource_idx").on(table.resourceType, table.resourceId),
+]);
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type InsertAuditEvent = typeof auditEvents.$inferInsert;
 
 // NOTE: userId and guestOwnerId are intentionally NOT in this pick list —
 // they are assigned server-side from the request actor. Accepting them from
@@ -161,6 +217,8 @@ export const insertMessageSchema = createInsertSchema(messages).pick({
   stageId: true,
   role: true,
   content: true,
+  kind: true,
+  version: true,
 });
 
 export const updateStageSchema = createInsertSchema(stages).pick({

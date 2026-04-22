@@ -341,7 +341,77 @@ export async function runMigrations() {
         END IF;
       END $$;
     `);
-    
+
+    // llm_calls — cost + latency telemetry. Written by AIService at call boundary.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "llm_calls" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "user_id" varchar,
+        "guest_owner_id" varchar,
+        "project_id" varchar,
+        "stage_id" varchar,
+        "provider" text NOT NULL,
+        "model" text NOT NULL,
+        "task" text NOT NULL,
+        "input_tokens" integer NOT NULL DEFAULT 0,
+        "output_tokens" integer NOT NULL DEFAULT 0,
+        "cache_read_tokens" integer,
+        "cache_write_tokens" integer,
+        "cost_usd" numeric(12, 6),
+        "latency_ms" integer,
+        "status" text NOT NULL,
+        "error_code" text,
+        "streamed" boolean NOT NULL DEFAULT false,
+        "byok" boolean NOT NULL DEFAULT false,
+        "request_id" varchar,
+        "created_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "llm_calls_user_id_created_at_idx" ON "llm_calls" ("user_id", "created_at")
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "llm_calls_project_id_idx" ON "llm_calls" ("project_id")
+    `);
+
+    // messages.kind + messages.version — distinguish chat turns from finalized deliverables,
+    // support versioned regeneration without a separate documents table.
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='kind') THEN
+          ALTER TABLE "messages" ADD COLUMN "kind" text NOT NULL DEFAULT 'chat';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='version') THEN
+          ALTER TABLE "messages" ADD COLUMN "version" integer NOT NULL DEFAULT 1;
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "messages_stage_kind_idx" ON "messages" ("stage_id", "kind")
+    `);
+
+    // audit_events — write-only business-event log.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "audit_events" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "actor_type" text NOT NULL,
+        "actor_id" varchar,
+        "action" text NOT NULL,
+        "resource_type" text NOT NULL,
+        "resource_id" varchar,
+        "metadata" jsonb,
+        "request_id" varchar,
+        "created_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "audit_events_actor_id_created_at_idx" ON "audit_events" ("actor_id", "created_at")
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "audit_events_resource_idx" ON "audit_events" ("resource_type", "resource_id")
+    `);
+
     // Create user_settings table for BYOK LLM configuration
     await pool.query(`
       CREATE TABLE IF NOT EXISTS "user_settings" (
