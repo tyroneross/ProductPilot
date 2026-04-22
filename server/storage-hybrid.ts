@@ -1,4 +1,5 @@
 import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent } from "@shared/schema";
+import { logger } from "./lib/logger";
 import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
@@ -628,7 +629,7 @@ function createStorage(): IStorage {
   );
 
   if (hasDatabase && db) {
-    console.log("Using PostgreSQL storage");
+    logger.info("Using PostgreSQL storage");
     return new PostgresStorage(db);
   }
 
@@ -638,7 +639,7 @@ function createStorage(): IStorage {
     );
   }
 
-  console.log("Using in-memory storage (no database configured — dev only)");
+  logger.warn("Using in-memory storage (no database configured — dev only)");
   return new MemStorage();
 }
 

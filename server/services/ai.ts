@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import Groq from "groq-sdk";
 import { buildProgressAssessmentPrompt } from "../prompt-builders";
+import { logger } from "../lib/logger";
 
 // Current Anthropic models (2026-04): claude-opus-4-7, claude-sonnet-4-5, claude-haiku-4-5.
 // Current Groq models (2026-04): openai/gpt-oss-120b (reasoning, $0.15/$0.60), llama-3.1-8b-instant
@@ -220,7 +221,7 @@ export class AIService {
       throw err;
     } finally {
       if (!capturedUsage) {
-        console.warn("[llm-telemetry] streamGroq: x_groq.usage not present on final chunk — token counts will be 0");
+        logger.warn({ model }, "[llm-telemetry] streamGroq: x_groq.usage not present on final chunk — token counts will be 0");
       }
       void this.recordLlmCall({
         provider: "groq",
@@ -652,7 +653,7 @@ export class AIService {
         requestId: args.context?.requestId ?? null,
       });
     } catch (err) {
-      console.error("[llm-telemetry] Failed to record call:", err);
+      logger.error({ err }, "[llm-telemetry] Failed to record call");
     }
   }
 }

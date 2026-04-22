@@ -4,6 +4,10 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "../auth";
 import { registerRoutes } from "../routes";
 import { runMigrations } from "../migrate";
+import { initSentry, Sentry } from "../lib/sentry";
+import { logger } from "../lib/logger";
+
+initSentry();
 
 let appInitialized = false;
 const app = express();
@@ -17,15 +21,14 @@ async function ensureInitialized() {
   try {
     await runMigrations();
   } catch (error) {
-    console.log(
-      "Skipping migrations:",
-      error instanceof Error ? error.message : error,
-    );
+    logger.warn({ err: error }, "Skipping migrations");
   }
 
   await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+    logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
+    Sentry.captureException(err);
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
     res.status(status).json({ message });

@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logger } from "./lib/logger";
 
 // Build database URL from environment variables
 function getDatabaseUrl(): string {
@@ -26,7 +27,7 @@ export async function runMigrations() {
   const pool = new Pool({ connectionString: connString });
   
   try {
-    console.log("Running database migrations...");
+    logger.info("Running database migrations");
     
     // Create projects table
     await pool.query(`
@@ -470,10 +471,10 @@ export async function runMigrations() {
       END $$;
     `);
 
-    console.log("Database migrations completed successfully!");
+    logger.info("Database migrations completed successfully");
     return true;
   } catch (error) {
-    console.error("Error running migrations:", error);
+    logger.error({ err: error }, "Error running migrations");
     return false;
   } finally {
     await pool.end();

@@ -8,6 +8,41 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// server/lib/logger.ts
+import pino from "pino";
+var logger;
+var init_logger = __esm({
+  "server/lib/logger.ts"() {
+    "use strict";
+    logger = pino({
+      level: process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug"),
+      // Serverless-friendly: no transports, JSON to stdout — Vercel/Axiom/BetterStack pipe from there.
+      // In dev, pretty-print for readability.
+      ...process.env.NODE_ENV !== "production" && {
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true, translateTime: "SYS:HH:MM:ss" }
+        }
+      },
+      base: {
+        service: "productpilot",
+        env: process.env.NODE_ENV || "development"
+      },
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          "*.password",
+          "*.apiKey",
+          "*.api_key",
+          "*.secret"
+        ],
+        censor: "[REDACTED]"
+      }
+    });
+  }
+});
+
 // shared/prompt-content.ts
 var DISCOVERY_INITIAL_PROMPT, DEFAULT_STAGE_TEMPLATES, DEFAULT_INTERCEPTOR_PROMPTS;
 var init_prompt_content = __esm({
@@ -690,7 +725,7 @@ import { eq, and, ne, desc, asc, sql as sql2 } from "drizzle-orm";
 function createStorage() {
   const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
   if (hasDatabase && db) {
-    console.log("Using PostgreSQL storage");
+    logger.info("Using PostgreSQL storage");
     return new PostgresStorage(db);
   }
   if (process.env.NODE_ENV === "production") {
@@ -698,13 +733,14 @@ function createStorage() {
       "No database configured in production. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE. Refusing to fall back to in-memory storage."
     );
   }
-  console.log("Using in-memory storage (no database configured \u2014 dev only)");
+  logger.warn("Using in-memory storage (no database configured \u2014 dev only)");
   return new MemStorage();
 }
 var MemStorage, PostgresStorage, storage;
 var init_storage_hybrid = __esm({
   "server/storage-hybrid.ts"() {
     "use strict";
+    init_logger();
     init_schema();
     init_prompt_content();
     init_db();
@@ -1172,6 +1208,7 @@ import express from "express";
 import { toNodeHandler } from "better-auth/node";
 
 // server/auth/index.ts
+init_logger();
 init_db();
 import fs from "fs";
 import path from "path";
@@ -1181,17 +1218,14 @@ import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
 
 // server/auth/email.ts
+init_logger();
 var RESEND_API_URL = "https://api.resend.com/emails";
 function canSendWithResend() {
   return Boolean(process.env.RESEND_API_KEY && process.env.AUTH_FROM_EMAIL);
 }
 async function sendAuthEmail(payload) {
   if (!canSendWithResend()) {
-    console.info("[auth] Email provider not configured. Logging email instead.", {
-      to: payload.to,
-      subject: payload.subject,
-      text: payload.text
-    });
+    logger.info({ to: payload.to, subject: payload.subject, text: payload.text }, "[auth] Email provider not configured. Logging email instead.");
     return;
   }
   const response = await fetch(RESEND_API_URL, {
@@ -1372,7 +1406,7 @@ var auth = betterAuth({
         name: user2.name,
         url
       }).catch((error) => {
-        console.error("[auth] Failed to send password reset email", error);
+        logger.error({ err: error }, "[auth] Failed to send password reset email");
       });
     },
     resetPasswordTokenExpiresIn: 60 * 60
@@ -1389,7 +1423,7 @@ var auth = betterAuth({
         name: user2.name,
         url
       }).catch((error) => {
-        console.error("[auth] Failed to send verification email", error);
+        logger.error({ err: error }, "[auth] Failed to send verification email");
       });
     }
   },
@@ -1449,6 +1483,7 @@ var requireAuth = (req, res, next) => {
 };
 
 // server/routes.ts
+init_logger();
 init_storage_hybrid();
 import { randomUUID } from "crypto";
 import { createServer } from "http";
@@ -1801,6 +1836,7 @@ Acceptance criteria:
 }
 
 // server/services/ai.ts
+init_logger();
 var GROQ_MODELS = {
   // Reasoning / deliverables / complex tasks. Replaces the retired kimi-k2-instruct-0905.
   reasoning: "openai/gpt-oss-120b",
@@ -1920,7 +1956,7 @@ var AIService = class {
       throw err;
     } finally {
       if (!capturedUsage) {
-        console.warn("[llm-telemetry] streamGroq: x_groq.usage not present on final chunk \u2014 token counts will be 0");
+        logger.warn({ model }, "[llm-telemetry] streamGroq: x_groq.usage not present on final chunk \u2014 token counts will be 0");
       }
       void this.recordLlmCall({
         provider: "groq",
@@ -2259,7 +2295,7 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         requestId: args.context?.requestId ?? null
       });
     } catch (err) {
-      console.error("[llm-telemetry] Failed to record call:", err);
+      logger.error({ err }, "[llm-telemetry] Failed to record call");
     }
   }
 };
@@ -2428,7 +2464,7 @@ async function registerRoutes(app2) {
       const draft = await storage.getUserDraft(userId);
       res.json(draft || null);
     } catch (error) {
-      console.error("Error fetching user draft:", error);
+      logger.error({ err: error }, "Error fetching user draft");
       res.status(500).json({ message: "Failed to fetch draft" });
     }
   });
@@ -2457,7 +2493,7 @@ async function registerRoutes(app2) {
       clearGuestOwnerCookie(res);
       res.json(updatedProject);
     } catch (error) {
-      console.error("Error claiming project:", error);
+      logger.error({ err: error }, "Error claiming project");
       res.status(500).json({ message: "Failed to claim project" });
     }
   });
@@ -2505,7 +2541,7 @@ async function registerRoutes(app2) {
         resourceType: "project",
         resourceId: project.id,
         metadata: { name: project.name, mode: project.mode }
-      }).catch((e) => console.error("[audit] project.create failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] project.create failed"));
       res.status(201).json(project);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -2559,7 +2595,7 @@ async function registerRoutes(app2) {
         resourceType: "project",
         resourceId: projectAccess.project.id,
         metadata: { name: projectAccess.project.name }
-      }).catch((e) => console.error("[audit] project.delete failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] project.delete failed"));
       res.json({ message: "Project deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete project" });
@@ -2590,7 +2626,7 @@ async function registerRoutes(app2) {
       const stages2 = await storage.ensureStagesForProject(projectAccess.project.id);
       res.status(201).json(stages2);
     } catch (error) {
-      console.error("Error ensuring stages:", error);
+      logger.error({ err: error }, "Error ensuring stages");
       res.status(500).json({ message: "Failed to create stages" });
     }
   });
@@ -2653,9 +2689,9 @@ async function registerRoutes(app2) {
         const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
         const projectContext = buildProjectContext(project);
         if (projectContext.length > 0) {
-          console.log(`AI context enriched with project data (${projectContext.length} chars)`);
+          logger.debug({ chars: projectContext.length }, "AI context enriched with project data");
         } else if (project.intakeAnswers || project.minimumDetails) {
-          console.warn("Project has intake/details but context extraction failed");
+          logger.warn({ projectId: project.id }, "Project has intake/details but context extraction failed");
         }
         const userMessageCount = existingMessages.filter((m) => m.role === "user").length;
         const systemPromptToUse = buildStageRuntimeSystemPrompt({
@@ -2698,14 +2734,14 @@ async function registerRoutes(app2) {
           }
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
-          console.error("AI service error:", aiError);
+          logger.error({ err: aiError }, "AI service error");
           res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
         }
       } else {
         res.status(201).json({ userMessage: message });
       }
     } catch (error) {
-      console.error("Message creation error:", error);
+      logger.error({ err: error }, "Message creation error");
       if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
@@ -2794,7 +2830,7 @@ data: ${JSON.stringify(data)}
       send("done", {});
       res.end();
     } catch (err) {
-      console.error("Stream error:", err);
+      logger.error({ err }, "Stream error");
       send("error", { message: err instanceof Error ? err.message : "AI service error" });
       res.end();
     }
@@ -2825,7 +2861,7 @@ data: ${JSON.stringify(data)}
       });
       res.json({ surveyDefinition: response });
     } catch (error) {
-      console.error("Survey generation error:", error);
+      logger.error({ err: error }, "Survey generation error");
       res.status(500).json({ message: "Failed to generate survey" });
     }
   });
@@ -2917,12 +2953,12 @@ data: ${JSON.stringify(data)}
           });
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
-          console.error(`Error generating docs for stage ${stage.title}:`, stageError);
+          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage");
         }
       }));
       res.json({ message: "Documentation generated successfully" });
     } catch (error) {
-      console.error("Doc generation error:", error);
+      logger.error({ err: error }, "Doc generation error");
       res.status(500).json({ message: "Failed to generate documentation" });
     }
   });
@@ -3005,12 +3041,12 @@ data: ${JSON.stringify(data)}
           });
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
-          console.error(`Error generating docs for stage ${stage.title}:`, stageError);
+          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage (minimum)");
         }
       }));
       res.json({ message: "Documentation generated from minimum details" });
     } catch (error) {
-      console.error("Min doc generation error:", error);
+      logger.error({ err: error }, "Min doc generation error");
       res.status(500).json({ message: "Failed to generate documentation" });
     }
   });
@@ -3040,7 +3076,7 @@ data: ${JSON.stringify(data)}
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
     } catch (error) {
-      console.error("Error fetching admin prompts:", error);
+      logger.error({ err: error }, "Error fetching admin prompts");
       res.status(500).json({ message: "Failed to fetch prompts" });
     }
   });
@@ -3070,13 +3106,13 @@ data: ${JSON.stringify(data)}
         resourceType: "admin_prompt",
         resourceId: prompt.id,
         metadata: { targetKey: prompt.targetKey, scope: prompt.scope }
-      }).catch((e) => console.error("[audit] admin.prompt.create failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] admin.prompt.create failed"));
       res.status(201).json(prompt);
     } catch (error) {
       if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "Invalid prompt data", errors: error.issues });
       }
-      console.error("Error creating prompt:", error);
+      logger.error({ err: error }, "Error creating prompt");
       res.status(500).json({ message: "Failed to create prompt" });
     }
   });
@@ -3098,7 +3134,7 @@ data: ${JSON.stringify(data)}
         resourceType: "admin_prompt",
         resourceId: prompt.id,
         metadata: { targetKey: prompt.targetKey }
-      }).catch((e) => console.error("[audit] admin.prompt.update failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] admin.prompt.update failed"));
       res.json(prompt);
     } catch (error) {
       if (error instanceof z2.ZodError) {
@@ -3129,7 +3165,7 @@ data: ${JSON.stringify(data)}
       const prompts = await storage.getAllAdminPrompts();
       res.json({ message: "Default prompts seeded", count: prompts.length });
     } catch (error) {
-      console.error("Error seeding prompts:", error);
+      logger.error({ err: error }, "Error seeding prompts");
       res.status(500).json({ message: "Failed to seed prompts" });
     }
   });
@@ -3190,6 +3226,7 @@ data: ${JSON.stringify(data)}
 }
 
 // server/migrate.ts
+init_logger();
 import { Pool as Pool2 } from "pg";
 function getDatabaseUrl2() {
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
@@ -3210,7 +3247,7 @@ async function runMigrations() {
   const connString2 = !dbUrl2.includes("sslmode=") ? dbUrl2 + (dbUrl2.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl2;
   const pool2 = new Pool2({ connectionString: connString2 });
   try {
-    console.log("Running database migrations...");
+    logger.info("Running database migrations");
     await pool2.query(`
       CREATE TABLE IF NOT EXISTS "projects" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -3597,17 +3634,45 @@ async function runMigrations() {
         END IF;
       END $$;
     `);
-    console.log("Database migrations completed successfully!");
+    logger.info("Database migrations completed successfully");
     return true;
   } catch (error) {
-    console.error("Error running migrations:", error);
+    logger.error({ err: error }, "Error running migrations");
     return false;
   } finally {
     await pool2.end();
   }
 }
 
+// server/lib/sentry.ts
+import * as Sentry from "@sentry/node";
+var initialized = false;
+function initSentry() {
+  if (initialized) return;
+  const dsn = process.env.SENTRY_DSN;
+  if (!dsn) {
+    return;
+  }
+  Sentry.init({
+    dsn,
+    environment: process.env.NODE_ENV || "development",
+    tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
+    profilesSampleRate: 0,
+    // enable later if @sentry/profiling-node works
+    // Serverless: don't fork worker threads
+    // autoSessionTracking removed — not in @sentry/node NodeOptions type (serverless default is already off)
+    // Don't capture these
+    ignoreErrors: [
+      "ResizeObserver loop limit exceeded",
+      "Non-Error promise rejection captured"
+    ]
+  });
+  initialized = true;
+}
+
 // server/api-entry/index.ts
+init_logger();
+initSentry();
 var appInitialized = false;
 var app = express();
 app.all("/api/auth/*", toNodeHandler(auth));
@@ -3618,13 +3683,12 @@ async function ensureInitialized() {
   try {
     await runMigrations();
   } catch (error) {
-    console.log(
-      "Skipping migrations:",
-      error instanceof Error ? error.message : error
-    );
+    logger.warn({ err: error }, "Skipping migrations");
   }
   await registerRoutes(app);
-  app.use((err, _req, res, _next) => {
+  app.use((err, req, res, _next) => {
+    logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
+    Sentry.captureException(err);
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
     res.status(status).json({ message });

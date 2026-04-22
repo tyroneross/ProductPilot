@@ -1,4 +1,5 @@
 import type { Express, RequestHandler } from "express";
+import { logger } from "./lib/logger";
 import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
@@ -250,7 +251,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const draft = await storage.getUserDraft(userId);
       res.json(draft || null);
     } catch (error) {
-      console.error("Error fetching user draft:", error);
+      logger.error({ err: error }, "Error fetching user draft");
       res.status(500).json({ message: "Failed to fetch draft" });
     }
   });
@@ -295,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       clearGuestOwnerCookie(res);
       res.json(updatedProject);
     } catch (error) {
-      console.error("Error claiming project:", error);
+      logger.error({ err: error }, "Error claiming project");
       res.status(500).json({ message: "Failed to claim project" });
     }
   });
@@ -362,7 +363,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resourceType: "project",
         resourceId: project.id,
         metadata: { name: project.name, mode: project.mode },
-      }).catch((e) => console.error("[audit] project.create failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] project.create failed"));
       res.status(201).json(project);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -421,7 +422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resourceType: "project",
         resourceId: projectAccess.project.id,
         metadata: { name: projectAccess.project.name },
-      }).catch((e) => console.error("[audit] project.delete failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] project.delete failed"));
       res.json({ message: "Project deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete project" });
@@ -460,7 +461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stages = await storage.ensureStagesForProject(projectAccess.project.id);
       res.status(201).json(stages);
     } catch (error) {
-      console.error("Error ensuring stages:", error);
+      logger.error({ err: error }, "Error ensuring stages");
       res.status(500).json({ message: "Failed to create stages" });
     }
   });
@@ -540,9 +541,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Log when context extraction succeeds or fails for debugging
         if (projectContext.length > 0) {
-          console.log(`AI context enriched with project data (${projectContext.length} chars)`);
+          logger.debug({ chars: projectContext.length }, "AI context enriched with project data");
         } else if (project.intakeAnswers || project.minimumDetails) {
-          console.warn("Project has intake/details but context extraction failed");
+          logger.warn({ projectId: project.id }, "Project has intake/details but context extraction failed");
         }
         const userMessageCount = existingMessages.filter(m => m.role === "user").length;
         const systemPromptToUse = buildStageRuntimeSystemPrompt({
@@ -595,14 +596,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
-          console.error("AI service error:", aiError);
+          logger.error({ err: aiError }, "AI service error");
           res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
         }
       } else {
         res.status(201).json({ userMessage: message });
       }
     } catch (error) {
-      console.error("Message creation error:", error);
+      logger.error({ err: error }, "Message creation error");
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
@@ -705,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       send("done", {});
       res.end();
     } catch (err) {
-      console.error("Stream error:", err);
+      logger.error({ err }, "Stream error");
       send("error", { message: err instanceof Error ? err.message : "AI service error" });
       res.end();
     }
@@ -750,7 +751,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ surveyDefinition: response });
     } catch (error) {
-      console.error("Survey generation error:", error);
+      logger.error({ err: error }, "Survey generation error");
       res.status(500).json({ message: "Failed to generate survey" });
     }
   });
@@ -882,13 +883,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Update stage progress to 100%
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
-          console.error(`Error generating docs for stage ${stage.title}:`, stageError);
+          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage");
         }
       }))
 
       res.json({ message: "Documentation generated successfully" });
     } catch (error) {
-      console.error("Doc generation error:", error);
+      logger.error({ err: error }, "Doc generation error");
       res.status(500).json({ message: "Failed to generate documentation" });
     }
   });
@@ -1000,13 +1001,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           await storage.updateStage(stage.id, { progress: 100 });
         } catch (stageError) {
-          console.error(`Error generating docs for stage ${stage.title}:`, stageError);
+          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage (minimum)");
         }
       }));
 
       res.json({ message: "Documentation generated from minimum details" });
     } catch (error) {
-      console.error("Min doc generation error:", error);
+      logger.error({ err: error }, "Min doc generation error");
       res.status(500).json({ message: "Failed to generate documentation" });
     }
   });
@@ -1042,7 +1043,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const prompts = await storage.getAllAdminPrompts();
       res.json(prompts);
     } catch (error) {
-      console.error("Error fetching admin prompts:", error);
+      logger.error({ err: error }, "Error fetching admin prompts");
       res.status(500).json({ message: "Failed to fetch prompts" });
     }
   });
@@ -1074,13 +1075,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resourceType: "admin_prompt",
         resourceId: prompt.id,
         metadata: { targetKey: prompt.targetKey, scope: prompt.scope },
-      }).catch((e) => console.error("[audit] admin.prompt.create failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] admin.prompt.create failed"));
       res.status(201).json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid prompt data", errors: error.issues });
       }
-      console.error("Error creating prompt:", error);
+      logger.error({ err: error }, "Error creating prompt");
       res.status(500).json({ message: "Failed to create prompt" });
     }
   });
@@ -1103,7 +1104,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resourceType: "admin_prompt",
         resourceId: prompt.id,
         metadata: { targetKey: prompt.targetKey },
-      }).catch((e) => console.error("[audit] admin.prompt.update failed:", e));
+      }).catch((e) => logger.error({ err: e }, "[audit] admin.prompt.update failed"));
       res.json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1138,7 +1139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const prompts = await storage.getAllAdminPrompts();
       res.json({ message: "Default prompts seeded", count: prompts.length });
     } catch (error) {
-      console.error("Error seeding prompts:", error);
+      logger.error({ err: error }, "Error seeding prompts");
       res.status(500).json({ message: "Failed to seed prompts" });
     }
   });

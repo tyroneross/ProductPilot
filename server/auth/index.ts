@@ -2,6 +2,7 @@ import type { RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 import { betterAuth } from "better-auth";
+import { logger } from "../lib/logger";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
@@ -77,7 +78,7 @@ export const auth = betterAuth({
         name: user.name,
         url,
       }).catch((error) => {
-        console.error("[auth] Failed to send password reset email", error);
+        logger.error({ err: error }, "[auth] Failed to send password reset email");
       });
     },
     resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
@@ -93,7 +94,7 @@ export const auth = betterAuth({
         name: user.name,
         url,
       }).catch((error) => {
-        console.error("[auth] Failed to send verification email", error);
+        logger.error({ err: error }, "[auth] Failed to send verification email");
       });
     },
   },

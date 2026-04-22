@@ -1,3 +1,5 @@
+import { logger } from "../lib/logger";
+
 type AuthEmailPayload = {
   to: string;
   subject: string;
@@ -13,11 +15,7 @@ function canSendWithResend() {
 
 export async function sendAuthEmail(payload: AuthEmailPayload): Promise<void> {
   if (!canSendWithResend()) {
-    console.info("[auth] Email provider not configured. Logging email instead.", {
-      to: payload.to,
-      subject: payload.subject,
-      text: payload.text,
-    });
+    logger.info({ to: payload.to, subject: payload.subject, text: payload.text }, "[auth] Email provider not configured. Logging email instead.");
     return;
   }
 
