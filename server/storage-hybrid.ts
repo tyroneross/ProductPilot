@@ -1,4 +1,4 @@
-import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
+import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
 import { projects, stages, messages, adminPrompts, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
@@ -6,7 +6,7 @@ import { db } from "./db";
 
 interface IStorage {
   // Projects
-  createProject(project: InsertProject): Promise<Project>;
+  createProject(project: InsertProjectWithOwner): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
   getAllProjects(): Promise<Project[]>;
   getProjectsByUserId(userId: string): Promise<Project[]>;
@@ -53,7 +53,7 @@ class MemStorage implements IStorage {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  async createProject(insertProject: InsertProject): Promise<Project> {
+  async createProject(insertProject: InsertProjectWithOwner): Promise<Project> {
     const project: Project = {
       id: this.generateId(),
       userId: insertProject.userId || null,
@@ -332,12 +332,12 @@ class PostgresStorage implements IStorage {
     this.db = database;
   }
 
-  async createProject(insertProject: InsertProject): Promise<Project> {
-    const [project] = await this.db.insert(projects).values(insertProject).returning();
-    
-    // Create default stages for the project
-    for (const defaultStage of DEFAULT_STAGES) {
-      await this.db.insert(stages).values({
+  async createProject(insertProject: InsertProjectWithOwner): Promise<Project> {
+    // Project + default stages atomically — no orphan project rows if a stage insert fails.
+    return await this.db.transaction(async (tx: typeof this.db) => {
+      const [project] = await tx.insert(projects).values(insertProject).returning();
+
+      const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
         projectId: project.id,
         stageNumber: defaultStage.stageNumber,
         title: defaultStage.title,
@@ -347,10 +347,13 @@ class PostgresStorage implements IStorage {
         completedInsights: [],
         progress: 0,
         isUnlocked: true,
-      });
-    }
-    
-    return project;
+      }));
+      if (stageRows.length > 0) {
+        await tx.insert(stages).values(stageRows);
+      }
+
+      return project;
+    });
   }
 
   async getProject(id: string): Promise<Project | undefined> {
@@ -584,26 +587,27 @@ class PostgresStorage implements IStorage {
   }
 }
 
-// Create the storage instance with proper fallback
+// Create the storage instance with proper fallback.
+// Fail closed in production: never serve MemStorage in prod — it silently drops data on restart.
 function createStorage(): IStorage {
-  try {
-    // Check if database environment is available
-    const hasDatabase = !!(
-      process.env.DATABASE_URL || 
-      (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE)
-    );
-    
-    if (hasDatabase && db) {
-      console.log("Using PostgreSQL storage");
-      return new PostgresStorage(db);
-    }
-    
-    console.log("Using in-memory storage (no database configured)");
-    return new MemStorage();
-  } catch (error) {
-    console.log("Fallback to in-memory storage:", error);
-    return new MemStorage();
+  const hasDatabase = !!(
+    process.env.DATABASE_URL ||
+    (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE)
+  );
+
+  if (hasDatabase && db) {
+    console.log("Using PostgreSQL storage");
+    return new PostgresStorage(db);
   }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "No database configured in production. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE. Refusing to fall back to in-memory storage.",
+    );
+  }
+
+  console.log("Using in-memory storage (no database configured — dev only)");
+  return new MemStorage();
 }
 
 export const storage = createStorage();

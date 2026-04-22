@@ -43,7 +43,7 @@ export default function Dashboard() {
               </p>
             </div>
             <Button
-              onClick={() => setLocation("/")}
+              onClick={() => setLocation("/details")}
               className="btn-primary min-h-[44px] shrink-0"
               data-testid="button-new-project"
             >
@@ -166,7 +166,7 @@ export default function Dashboard() {
               Describe what you want to build and get a complete PRD, wireframes, architecture docs, and coding prompts.
             </p>
             <Button
-              onClick={() => setLocation("/")}
+              onClick={() => setLocation("/details")}
               className="btn-primary min-h-[44px] px-8"
               data-testid="button-start-first-project"
             >

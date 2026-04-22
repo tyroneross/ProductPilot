@@ -75,9 +75,10 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// NOTE: userId and guestOwnerId are intentionally NOT in this pick list —
+// they are assigned server-side from the request actor. Accepting them from
+// the client would let a caller forge ownership.
 export const insertProjectSchema = createInsertSchema(projects).pick({
-  userId: true,
-  guestOwnerId: true,
   name: true,
   description: true,
   mode: true,
@@ -90,6 +91,13 @@ export const insertProjectSchema = createInsertSchema(projects).pick({
   minimumDetails: true,
   appStyle: true,
 });
+
+// Server-side shape used when storage.createProject is called.
+// Augments the client-validated input with ownership fields that only the server may set.
+export type InsertProjectWithOwner = z.infer<typeof insertProjectSchema> & {
+  userId: string | null;
+  guestOwnerId: string | null;
+};
 
 // Custom prompt types for user-defined LLM prompts
 export const CustomPromptSchema = z.object({

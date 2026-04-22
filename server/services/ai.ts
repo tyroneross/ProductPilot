@@ -40,6 +40,10 @@ export interface LLMConfig {
 // Cheap/fast for conversation, quality for deliverables, Haiku-tier for classification.
 export type LLMTask = 'chat' | 'deliverable' | 'complex' | 'classification';
 
+export type StreamChunk =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; fullContent: string; usage?: AIResponse['usage'] };
+
 export class AIService {
   private getDefaultConfig(task: LLMTask = 'chat'): LLMConfig {
     const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -96,6 +100,99 @@ export class AIService {
       default:
         return this.chatWithGroq(messages, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey);
     }
+  }
+
+  /**
+   * Streaming variant of chat(). Yields incremental text deltas, then a final event with the full content and usage.
+   * Use for conversational stages where perceived latency matters.
+   */
+  async *chatStream(
+    messages: AIMessage[],
+    model: string = "claude-sonnet",
+    userConfig?: LLMConfig | null,
+    task: LLMTask = 'chat',
+  ): AsyncGenerator<StreamChunk> {
+    const config = userConfig || this.getDefaultConfig(task);
+
+    if (config.provider === 'anthropic') {
+      yield* this.streamClaude(
+        messages,
+        this.normalizeModel(model || config.model || 'claude-sonnet'),
+        config.apiKey,
+      );
+      return;
+    }
+
+    // Groq (default)
+    yield* this.streamGroq(messages, config.model || GROQ_MODELS.fast, config.apiKey);
+  }
+
+  private async *streamGroq(messages: AIMessage[], model: string, apiKey: string): AsyncGenerator<StreamChunk> {
+    const groq = new Groq({ apiKey });
+    const systemMessage = messages.find(m => m.role === 'system');
+    const conversationMessages = messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+    const stream = await groq.chat.completions.create({
+      model,
+      messages: [
+        ...(systemMessage ? [{ role: 'system' as const, content: systemMessage.content }] : []),
+        ...conversationMessages,
+      ],
+      max_tokens: 4096,
+      temperature: 0.7,
+      stream: true,
+    });
+
+    let full = '';
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? '';
+      if (delta) {
+        full += delta;
+        yield { type: 'delta', text: delta };
+      }
+    }
+    yield { type: 'done', fullContent: full };
+  }
+
+  private async *streamClaude(messages: AIMessage[], model: string, apiKey?: string): AsyncGenerator<StreamChunk> {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    if (!key) throw new Error('No Anthropic API key configured');
+
+    const anthropic = new Anthropic({ apiKey: key });
+    const systemMessage = messages.find(m => m.role === 'system');
+    const conversationMessages = messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+    const stream = anthropic.messages.stream({
+      model,
+      max_tokens: 4096,
+      temperature: 0.7,
+      system: systemMessage?.content
+        ? [{ type: 'text', text: systemMessage.content, cache_control: { type: 'ephemeral' } }]
+        : undefined,
+      messages: conversationMessages,
+    });
+
+    let full = '';
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        full += event.delta.text;
+        yield { type: 'delta', text: event.delta.text };
+      }
+    }
+    const final = await stream.finalMessage();
+    yield {
+      type: 'done',
+      fullContent: full,
+      usage: {
+        prompt_tokens: final.usage.input_tokens,
+        completion_tokens: final.usage.output_tokens,
+        total_tokens: final.usage.input_tokens + final.usage.output_tokens,
+      },
+    };
   }
 
   private async chatWithGroq(messages: AIMessage[], model: string, apiKey: string): Promise<AIResponse> {

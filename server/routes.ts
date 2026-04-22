@@ -36,7 +36,7 @@ async function getLLMConfig(req: any): Promise<LLMConfig | null> {
   };
 }
 
-const ADMIN_USER_IDS = new Set(["Glokta3000", "39614428"]);
+// Admin allowlist by email only. Previous ID-based allowlist used stale Neon/Replit IDs.
 const ADMIN_EMAILS = new Set(["tyrone.ross@gmail.com"]);
 
 // Helper to get interceptor prompt by targetKey
@@ -45,10 +45,7 @@ const getInterceptorPrompt = (targetKey: string) =>
 
 const hasAdminAccess = (req: any) => {
   const email = typeof req.user?.email === "string" ? req.user.email.toLowerCase() : null;
-  return Boolean(
-    req.userId &&
-      (ADMIN_USER_IDS.has(req.userId) || (email && ADMIN_EMAILS.has(email))),
-  );
+  return Boolean(req.userId && email && ADMIN_EMAILS.has(email));
 };
 
 const isAdmin: RequestHandler = (req: any, res, next) => {
@@ -137,20 +134,11 @@ function projectBelongsToActor(
   return project.guestOwnerId === actor.id;
 }
 
-async function adoptLegacyProjectOwnership(
-  project: Project,
-  actor: Exclude<ActorContext, { kind: "none" }>,
-): Promise<Project> {
-  if (project.userId || project.guestOwnerId) {
-    return project;
-  }
-
-  const adoptedProject = await storage.updateProject(project.id, {
-    userId: actor.kind === "user" ? actor.id : null,
-    guestOwnerId: actor.kind === "guest" ? actor.id : null,
-  });
-
-  return adoptedProject || project;
+// Orphan-claim data-leak fix: ownerless rows are no longer silently adopted by the first
+// requester. Guests who lose their cookie lose access (document UX for recovery separately).
+// Admin path can manually reassign via a future /api/admin/projects/:id/reassign endpoint.
+function isOrphanProject(project: Project): boolean {
+  return !project.userId && !project.guestOwnerId;
 }
 
 function requireActor(
@@ -182,13 +170,22 @@ async function loadOwnedProject(
     return null;
   }
 
-  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
-  if (!projectBelongsToActor(accessibleProject, actor)) {
+  if (isOrphanProject(project)) {
+    // Ownerless rows are not auto-adopted. Return 404 so their existence isn't leaked.
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+  if (!projectBelongsToActor(project, actor)) {
     res.status(403).json({ message: "You do not have access to this project" });
     return null;
   }
 
-  return { actor, project: accessibleProject };
+  // Sliding 30-day guest cookie refresh — active guests don't silently expire.
+  if (actor.kind === "guest") {
+    setGuestOwnerCookie(res, actor.id);
+  }
+
+  return { actor, project };
 }
 
 async function loadOwnedStage(
@@ -217,13 +214,19 @@ async function loadOwnedStage(
     return null;
   }
 
-  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
-  if (!projectBelongsToActor(accessibleProject, actor)) {
+  if (isOrphanProject(project)) {
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+  if (!projectBelongsToActor(project, actor)) {
     res.status(403).json({ message: "You do not have access to this project" });
     return null;
   }
+  if (actor.kind === "guest") {
+    setGuestOwnerCookie(res, actor.id);
+  }
 
-  return { actor, project: accessibleProject, stage };
+  return { actor, project, stage };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -274,9 +277,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         !project.userId &&
         Boolean(project.guestOwnerId) &&
         project.guestOwnerId === guestOwnerId;
-      const legacyUnownedProject = !project.userId && !project.guestOwnerId;
 
-      if (project.userId !== userId && !callerOwnsDemoProject && !legacyUnownedProject) {
+      // Orphan rows (neither userId nor guestOwnerId) are no longer claimable — prevents
+      // the data-leak path where anyone could claim a guest's abandoned project.
+      if (project.userId !== userId && !callerOwnsDemoProject) {
         return res.status(403).json({ message: "You do not have access to claim this project" });
       }
 
@@ -581,6 +585,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to create message", error: String(error) });
+    }
+  });
+
+  // Streaming variant — SSE; emits delta chunks and a final `done` event with the full content.
+  // Same semantics as POST /messages above (persists user + assistant messages, updates progress).
+  app.post("/api/stages/:stageId/messages/stream", async (req: any, res) => {
+    const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+    if (!stageAccess) return;
+
+    let userMessage: any;
+    try {
+      const messageData = insertMessageSchema.parse({ ...req.body, stageId: stageAccess.stage.id });
+      userMessage = await storage.createMessage(messageData);
+
+      if (messageData.role !== "user") {
+        res.status(400).json({ message: "Streaming only supports user-initiated messages" });
+        return;
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid message data", errors: error.issues });
+      }
+      return res.status(500).json({ message: "Failed to create message", error: String(error) });
+    }
+
+    const { stage, project } = stageAccess;
+    const existingMessages = await storage.getMessagesByStage(stage.id);
+    const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+    const projectContext = buildProjectContext(project);
+    const userMessageCount = existingMessages.filter((m) => m.role === "user").length;
+    const systemPromptToUse = buildStageRuntimeSystemPrompt({
+      basePrompt: adminPrompt?.content || stage.systemPrompt,
+      projectContext,
+      stageNumber: stage.stageNumber,
+      userMessageCount,
+    });
+    const aiMessages: AIMessage[] = [
+      { role: "system", content: systemPromptToUse },
+      ...existingMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ];
+
+    // SSE headers
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const send = (event: string, data: any) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Echo back the persisted user message first so the client can reconcile
+    send("user", { userMessage });
+
+    try {
+      const userConfig = await getLLMConfig(req);
+      const task = stage.stageNumber >= 4 ? "complex" : "chat";
+      const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
+
+      let full = "";
+      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task)) {
+        if (chunk.type === "delta") {
+          full += chunk.text;
+          send("delta", { text: chunk.text });
+        } else {
+          full = chunk.fullContent;
+        }
+      }
+
+      const aiMessage = await storage.createMessage({
+        stageId: stage.id,
+        role: "assistant",
+        content: full,
+      });
+      send("message", { aiMessage });
+
+      // Throttled progress assessment — same rule as non-streaming path
+      const shouldAssessProgress = userMessageCount === 1 || userMessageCount % 3 === 0;
+      if (shouldAssessProgress) {
+        const allMessages = [
+          ...existingMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+          { role: "assistant" as const, content: full },
+        ];
+        const progress = await aiService.calculateProgress(allMessages, [stage.description]);
+        await storage.updateStage(stage.id, { progress });
+        send("progress", { progress });
+      }
+
+      send("done", {});
+      res.end();
+    } catch (err) {
+      console.error("Stream error:", err);
+      send("error", { message: err instanceof Error ? err.message : "AI service error" });
+      res.end();
     }
   });
 

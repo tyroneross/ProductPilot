@@ -76,107 +76,144 @@ Acceptance criteria:
       },
       {
         stageNumber: 2,
-        title: "Product Requirements",
-        description: "Create detailed PRD through conversation",
-        systemPrompt: `You are ProductPilot's PRD interviewer and writer.
+        title: "North Star Brief",
+        description: "Capture user pain, ICP, Jobs-to-be-Done, and success metrics \u2014 the strategic context every later stage references",
+        systemPrompt: `You are ProductPilot's North Star author.
 
 Context:
-- This stage also has two modes:
-  1. Interview mode for collecting missing product information.
-  2. Deliverable mode for generating the PRD from gathered context.
-- Early in the conversation, the priority is information gain, not document generation.
+- This document is the strategic anchor every subsequent stage references to decide what's in scope, out of scope, or worth building at all. It is NOT a technical spec \u2014 Stage 4 owns implementation detail.
+- Stage 1 already captured concrete scope (MVP, non-goals, constraints). Do not duplicate it. This stage captures the strategic WHY, WHO, and WHAT SUCCESS LOOKS LIKE.
+- Two modes: interview (gather missing strategic context) and deliverable (produce the North Star doc).
 
 Task:
-- In interview mode, collect the missing inputs needed for a high-quality PRD.
-- In deliverable mode, generate a product requirements document that is specific, scoped, and implementation-ready.
+- In interview mode, probe for genuine pain (not generic), sharp ICP traits, and the Jobs-to-be-Done the product will get hired for.
+- In deliverable mode, produce a North Star doc that a future LLM can use to audit any decision ("is this change in service of the JTBD or against it?").
 
 Constraints:
-- Count user messages before responding.
-- If there are fewer than 6 user messages and the user did not explicitly ask for a PRD, ask exactly one focused follow-up question and do not generate document sections.
-- Keep early-stage follow-ups short and conversational.
-- When generating the PRD, do not invent facts. Use an Assumptions / Open Questions section for gaps.
+- Count user messages. If < 6 user messages and the user did not ask for the doc, ask exactly one focused question and do NOT generate sections.
+- ICP must be specific: demographic + behavioral + situational traits. Not "our users."
+- Jobs to Be Done must follow Christensen framing: "When [situation], I want to [motivation], so I can [outcome]."
+- Success metrics: one North Star + 2-3 leading indicators. Each must be measurable.
+- Do not invent. Mark assumptions explicitly.
+- Keep each section tight \u2014 1-3 lines, decision-grade prose, no restated context.
 
-Output:
-- Early interview mode: one acknowledgement plus one focused question. No headers, numbered sections, or PRD content.
-- Deliverable mode: markdown with Overview, Users, Problem, Goals, User Stories, Functional Requirements, Non-Functional Requirements, MVP Scope, Success Metrics, Risks, and Open Questions.
+Output sections (deliverable mode, markdown):
+- **User Pain Point** \u2014 What are users suffering today? Be specific about the emotional / economic cost.
+- **Ideal Customer Profile (ICP)** \u2014 Who exactly? List 3-5 traits (demographic + behavioral + situational).
+- **Problem Statement** \u2014 One tight sentence naming the gap between today and the desired state.
+- **Jobs to Be Done** \u2014 1-3 jobs in Christensen form. These are what the product gets hired for.
+- **Positioning & Unique Insight** \u2014 Why this product, why now, why us (the unique wedge).
+- **Success Metrics** \u2014 North Star + 2-3 leading indicators, each with a target.
+- **Non-Goals** \u2014 What you explicitly will NOT do. These are as important as the goals.
 
 Acceptance criteria:
-- The PRD should be specific enough that design and engineering can act on it.
-- The response must never switch into document mode too early.`,
+- A future LLM reading this doc can tell, without asking, whether a proposed feature serves the JTBD.
+- Each ICP trait narrows the target materially (not "busy professionals" \u2014 "small-team engineering leads at 20-100 person companies who are promoted ICs not trained in people management").
+- Every success metric is countable.`,
         isUnlocked: true,
         keyInsights: [
-          "User stories and personas explored in depth",
-          "Key workflows and journeys mapped",
-          "Feature prioritization discussed",
-          "Success metrics and KPIs defined",
-          "Full PRD document generated"
+          "User pain point articulated with specificity",
+          "Ideal Customer Profile narrowed to 3-5 traits",
+          "Jobs to Be Done framed in Christensen form",
+          "North Star metric + 2-3 leading indicators defined",
+          "Non-goals explicit"
         ]
       },
       {
         stageNumber: 3,
-        title: "UI Design & Wireframes",
-        description: "Generate simple wireframe mockups",
-        systemPrompt: `You are ProductPilot's wireframe designer.
+        title: "Design Requirements",
+        description: "Specify user flows, interaction requirements, and target outcomes \u2014 a UX spec an AI coding tool can build from",
+        systemPrompt: `You are ProductPilot's design-requirements author.
 
 Context:
-- This stage turns the product definition into low-fidelity HTML wireframes.
-- The output must be useful to both humans and downstream coding tools.
+- Downstream AI coding tools (Claude Code, Cursor, Replit) choose their own component library from the user's tech stack. A low-fidelity HTML wireframe is the wrong target.
+- Instead, specify WHAT the UI must do, not how it looks. Name the flows, the screens, the interactions, the outcomes \u2014 the coding tool produces the markup.
 
 Task:
-- If the request is still ambiguous, ask up to two concise questions that unblock the right screens or flows.
-- When enough information exists, generate self-contained HTML wireframes that represent the main user journeys.
+- In interview mode, ask up to two concise questions only if the core flows are ambiguous.
+- In deliverable mode, produce a design-requirements doc: user flows, critical screens, interaction requirements, target outcomes.
 
 Constraints:
-- Return complete HTML inside \`\`\`html code fences when generating wireframes.
-- Use inline CSS only. Do not rely on external libraries or assets.
-- Use a warm orange palette with #FF6B35 as the primary accent and #FFA500 as the secondary accent.
-- Favor semantic HTML, simple layout structure, and obvious placeholders over polished visual styling.
-- Make the layout readable on mobile and desktop widths.
+- Do NOT produce HTML. Do NOT pick a design system. Do NOT specify colors or typography \u2014 those live in the user's existing brand / Stage 2 North Star.
+- Each user flow: numbered steps from trigger to success outcome.
+- Each critical screen: name, purpose, primary action, key data shown, secondary actions (if any).
+- Interaction requirements: specify patterns (form validation approach, feedback mechanism, error/loading/empty states) \u2014 not CSS.
+- Target outcomes: for each core flow, what should the user feel or achieve at the end? This is the success definition.
+- Accessibility: WCAG 2.2 AA minimum, keyboard-navigable, screen-reader-friendly labels.
+- Responsive: specify breakpoints and which layouts collapse at which widths. Mobile-first if relevant.
+- Ground every flow and screen in a Stage 2 Job-to-be-Done or Stage 1 MVP scope item. Flag orphans under Open Questions.
 
-Output:
-- Clarification mode: short questions only.
-- Deliverable mode: a brief note followed by one or more complete HTML wireframes in \`\`\`html blocks, plus concise interaction notes if needed.
+Output sections (deliverable mode, markdown):
+- **Key User Flows** \u2014 Numbered flows. For each: name, trigger, steps (1\u2192N), success outcome. Max 5 flows (MVP scope).
+- **Critical Screens** \u2014 Per screen: name, purpose, primary action, key data shown, secondary actions. Max 7 screens (MVP).
+- **Interaction Requirements** \u2014 Patterns only, no CSS: form validation (inline vs on-submit), feedback (toasts, inline, modal), error states, loading states, empty states, confirmation for destructive actions.
+- **Target Outcomes** \u2014 For each flow, one sentence describing what success feels like for the user.
+- **Accessibility Requirements** \u2014 Keyboard nav expectations, screen reader labels, contrast target, focus management.
+- **Responsive Requirements** \u2014 Breakpoints, layouts that collapse, touch-target minimums.
+- **Open Questions** \u2014 Any unresolved UX decisions that need the builder's input.
 
 Acceptance criteria:
-- The wireframes render as standalone HTML.
-- The main screens, navigation, and primary actions are visible and aligned to the product context.`,
+- An AI coding tool reading this, plus Stage 2 (North Star) and Stage 4 (Spec), can build a working UI without seeing any image or mockup.
+- Every flow traces back to a stated JTBD or MVP scope item.
+- No HTML, no framework names, no color hex codes in the output.`,
         aiModel: "claude-haiku",
         isUnlocked: true,
         keyInsights: [
-          "Key screens and pages identified",
-          "Navigation structure defined",
-          "User interaction flows mapped",
-          "Wireframes generated for main views",
-          "UI dependencies documented for architecture"
+          "Key user flows named and numbered",
+          "Critical screens listed with primary actions",
+          "Interaction patterns specified (validation, feedback, states)",
+          "Target outcomes defined per flow",
+          "Accessibility and responsive requirements called out"
         ]
       },
       {
         stageNumber: 4,
-        title: "System Architecture",
-        description: "Design technical architecture",
+        title: "Architecture & Technical Spec",
+        description: "Produce the build-grade spec: runnable DDL, TypeScript types, API contracts, component list \u2014 paste-ready for AI coding tools",
         systemPrompt: `You are ProductPilot's system architect.
 
 Context:
-- Use the product requirements and wireframe intent to design the technical system.
-- The goal is an architecture that can guide implementation, not a generic stack list.
+- This stage produces the concrete artifacts a solo builder pastes into Claude Code, Cursor, or Replit to ship a working V1. Verbose prose fails here. Concrete DDL, types, and request/response JSON succeed.
+- You receive Stage 1 (Requirements), Stage 2 (North Star), Stage 3 (Design Requirements). Use them to decide entities, relations, endpoints, and component boundaries.
 
 Task:
-- In conversation mode, identify the missing technical decisions.
-- In deliverable mode, produce a practical architecture for the product as described.
+- In interview mode, ask one question only if a critical technical decision is missing (e.g. auth provider, multi-tenancy, sync vs async generation).
+- In deliverable mode, produce runnable artifacts: schema.sql DDL, TypeScript types, API contracts, component architecture, .env.example, error conventions, security considerations.
 
 Constraints:
-- Tie architecture choices to explicit product needs such as search, real-time updates, analytics, auth, or user-generated content.
-- Explain tradeoffs only where they affect delivery, scale, security, or complexity.
-- Do not invent infrastructure requirements that are unsupported by the product context.
-- If inputs are missing, call them out under assumptions or open questions.
+- Data Model MUST be a \`\`\`sql fenced block containing valid Postgres DDL: CREATE TABLE statements with column types, NOT NULL, DEFAULT, PRIMARY KEY, FOREIGN KEY ... ON DELETE, and CREATE INDEX for hot FK columns. If a type is uncertain, use the best guess and add \`-- TAG:ASSUMED\` on the line + an Open Questions entry.
+- TypeScript Types MUST be a \`\`\`ts fenced block with entity types (matching the DDL 1:1), request/response types per endpoint, and shared enums. Export each type.
+- API Contracts: for each endpoint, write a compact block with:
+    METHOD /path  (auth: none | session | apiKey)
+    Request: { ... JSON shape ... }
+    Response 200: { ... }
+    Errors: 400 | 401 | 404 | 409 | 500 (only the ones that apply) with one-line meaning.
+- Component Architecture: list backend routes grouped by resource, frontend pages/components with their data dependencies, and the data-flow between them. Use a compact tree, not prose.
+- External Dependencies: name each service (LLM, auth, DB, storage, email) with the specific provider chosen.
+- Environment Variables: \`\`\`bash fenced .env.example block with every secret and its purpose as a comment.
+- Error Handling Conventions: the error response shape (JSON) used across all endpoints.
+- Security: auth strategy, data validation boundary, rate-limiting approach, secret handling.
+- Assumptions & Open Questions: explicit. Mark everything you assumed that wasn't stated in Stages 1-3.
 
-Output:
-- Conversation mode: one short acknowledgement plus one focused technical question.
-- Deliverable mode: markdown with System Overview, Core Components, Data Model, APIs / Events, Security, Scalability, Deployment, Risks, and Open Questions.
+Ground every component in a Stage 2 JTBD or Stage 3 user flow. If no flow needs a component, do not include it.
+
+Output sections (deliverable mode, markdown):
+- **System Overview** \u2014 1 short paragraph: what's built, primary stack, deployment target.
+- **Data Model (schema.sql)** \u2014 \`\`\`sql fenced block, runnable Postgres DDL.
+- **TypeScript Types** \u2014 \`\`\`ts fenced block, entity + request/response + enum types.
+- **API Contracts** \u2014 one compact block per endpoint (see format above).
+- **Component Architecture** \u2014 tree of backend routes + frontend pages.
+- **External Dependencies** \u2014 list with chosen provider per dep.
+- **Environment Variables (.env.example)** \u2014 \`\`\`bash fenced block.
+- **Error Handling Conventions** \u2014 one JSON shape + HTTP code table.
+- **Security Considerations** \u2014 auth, validation, rate-limit, secrets.
+- **Assumptions & Open Questions** \u2014 everything inferred.
 
 Acceptance criteria:
-- Every major component has a reason to exist.
-- The architecture is specific enough that implementation can be broken into workstreams.`,
+- A solo builder can paste the schema.sql block into \`psql\` and get a working database.
+- A builder can paste the TypeScript Types block into a shared/types.ts and use them in both frontend and backend without modification.
+- For every user flow in Stage 3, at least one API contract here names the endpoint(s) that serve it.
+- No hand-waving. No "the backend should handle X" \u2014 every backend concern has an endpoint or is in Open Questions.`,
         isUnlocked: true,
         keyInsights: [
           "System components defined",
@@ -422,8 +459,6 @@ var init_schema = __esm({
       createdAt: timestamp("created_at").defaultNow().notNull()
     });
     insertProjectSchema = createInsertSchema(projects).pick({
-      userId: true,
-      guestOwnerId: true,
       name: true,
       description: true,
       mode: true,
@@ -1029,9 +1064,9 @@ var PostgresStorage = class {
     this.db = database;
   }
   async createProject(insertProject) {
-    const [project] = await this.db.insert(projects).values(insertProject).returning();
-    for (const defaultStage of DEFAULT_STAGES) {
-      await this.db.insert(stages).values({
+    return await this.db.transaction(async (tx) => {
+      const [project] = await tx.insert(projects).values(insertProject).returning();
+      const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
         projectId: project.id,
         stageNumber: defaultStage.stageNumber,
         title: defaultStage.title,
@@ -1041,9 +1076,12 @@ var PostgresStorage = class {
         completedInsights: [],
         progress: 0,
         isUnlocked: true
-      });
-    }
-    return project;
+      }));
+      if (stageRows.length > 0) {
+        await tx.insert(stages).values(stageRows);
+      }
+      return project;
+    });
   }
   async getProject(id) {
     const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
@@ -1216,18 +1254,18 @@ var PostgresStorage = class {
   }
 };
 function createStorage() {
-  try {
-    const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
-    if (hasDatabase && db) {
-      console.log("Using PostgreSQL storage");
-      return new PostgresStorage(db);
-    }
-    console.log("Using in-memory storage (no database configured)");
-    return new MemStorage();
-  } catch (error) {
-    console.log("Fallback to in-memory storage:", error);
-    return new MemStorage();
+  const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
+  if (hasDatabase && db) {
+    console.log("Using PostgreSQL storage");
+    return new PostgresStorage(db);
   }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "No database configured in production. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE. Refusing to fall back to in-memory storage."
+    );
+  }
+  console.log("Using in-memory storage (no database configured \u2014 dev only)");
+  return new MemStorage();
 }
 var storage = createStorage();
 
@@ -1247,44 +1285,47 @@ var STAGE_SECTION_GUIDANCE = {
     "Success Metrics",
     "Open Questions"
   ],
+  // Stage 2 = North Star. Strategic context every later LLM call references to audit scope.
+  // No duplication with Stage 1's concrete requirements.
   2: [
-    "Overview",
-    "Users",
-    "Problem",
-    "Goals",
-    "User Stories",
-    "Functional Requirements",
-    "Non-Functional Requirements",
-    "MVP Scope",
+    "User Pain Point",
+    "Ideal Customer Profile (ICP)",
+    "Problem Statement",
+    "Jobs To Be Done",
+    "Positioning & Unique Insight",
     "Success Metrics",
-    "Risks",
-    "Open Questions"
+    "Non-Goals"
   ],
+  // Stage 3 = Design Requirements. User flows + outcomes, not low-fi HTML.
   3: [
-    "Key Screens",
-    "Primary User Flows",
-    "HTML Wireframes",
-    "Interaction Notes",
+    "Key User Flows",
+    "Critical Screens",
+    "Interaction Requirements",
+    "Target Outcomes",
+    "Accessibility Requirements",
+    "Responsive Requirements",
     "Open Questions"
   ],
+  // Stage 4 = Architecture + full Spec. Concrete, paste-ready artifacts.
   4: [
     "System Overview",
-    "Core Components",
-    "Data Model",
-    "APIs and Events",
-    "Security",
-    "Scalability",
-    "Deployment",
-    "Risks",
-    "Open Questions"
+    "Data Model (schema.sql)",
+    "TypeScript Types",
+    "API Contracts",
+    "Component Architecture",
+    "External Dependencies",
+    "Environment Variables (.env.example)",
+    "Error Handling Conventions",
+    "Security Considerations",
+    "Assumptions & Open Questions"
   ],
   5: [
-    "System Prompt",
-    "Build Plan Prompt",
-    "Frontend Prompt",
-    "Backend Prompt",
-    "Testing Prompt",
-    "Deployment and Verification Prompt"
+    "Repo Bootstrap Prompt",
+    "Schema Migration Prompt",
+    "Backend Route Prompts",
+    "Frontend Screen Prompts",
+    "Smoke Test Prompt",
+    "Deploy Prompt"
   ],
   6: [
     "Phases",
@@ -1298,11 +1339,11 @@ var STAGE_SECTION_GUIDANCE = {
 };
 var STAGE_DELIVERABLE_HINTS = {
   1: "Make the output crisp enough that product, design, and engineering align on scope.",
-  2: "Write a product requirements document that an implementation team can execute against.",
-  3: "Return actual low-fidelity HTML wireframes, not just a description of screens.",
-  4: "Design the architecture around the product's specific workflows and constraints.",
-  5: "Produce copy-ready prompts that can be pasted into coding assistants without major rewrites.",
-  6: "Produce an execution plan that can turn into tickets, milestones, and release checks."
+  2: "This is the North Star doc. Every later LLM call will reference it to decide what's in-scope. Capture pain, ICP, JTBD, and success crisply \u2014 no duplication with Stage 1's concrete scope.",
+  3: "Specify design requirements \u2014 user flows, interaction patterns, target outcomes. Do NOT produce HTML. The output is read by AI coding tools that will choose their own component library.",
+  4: "Produce build-grade artifacts a solo developer can paste into Claude Code / Cursor and ship. Include a runnable schema.sql DDL block, TypeScript types, and explicit API contracts with request/response JSON.",
+  5: "Each prompt must reference Stage 4's data model / types / APIs and Stage 3's screens by name. Prompts are paste-ready \u2014 they include file paths, exact deps, env keys, and concrete commands.",
+  6: "Produce an execution plan a solo builder can follow without a second translation pass. Commands over ceremony."
 };
 function parseJsonField(field) {
   if (!field) return null;
@@ -1622,6 +1663,77 @@ var AIService = class {
         return this.chatWithGroq(messages2, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey);
     }
   }
+  /**
+   * Streaming variant of chat(). Yields incremental text deltas, then a final event with the full content and usage.
+   * Use for conversational stages where perceived latency matters.
+   */
+  async *chatStream(messages2, model = "claude-sonnet", userConfig, task = "chat") {
+    const config = userConfig || this.getDefaultConfig(task);
+    if (config.provider === "anthropic") {
+      yield* this.streamClaude(
+        messages2,
+        this.normalizeModel(model || config.model || "claude-sonnet"),
+        config.apiKey
+      );
+      return;
+    }
+    yield* this.streamGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey);
+  }
+  async *streamGroq(messages2, model, apiKey) {
+    const groq = new Groq({ apiKey });
+    const systemMessage = messages2.find((m) => m.role === "system");
+    const conversationMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+    const stream = await groq.chat.completions.create({
+      model,
+      messages: [
+        ...systemMessage ? [{ role: "system", content: systemMessage.content }] : [],
+        ...conversationMessages
+      ],
+      max_tokens: 4096,
+      temperature: 0.7,
+      stream: true
+    });
+    let full = "";
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        full += delta;
+        yield { type: "delta", text: delta };
+      }
+    }
+    yield { type: "done", fullContent: full };
+  }
+  async *streamClaude(messages2, model, apiKey) {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    if (!key) throw new Error("No Anthropic API key configured");
+    const anthropic = new Anthropic({ apiKey: key });
+    const systemMessage = messages2.find((m) => m.role === "system");
+    const conversationMessages = messages2.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
+    const stream = anthropic.messages.stream({
+      model,
+      max_tokens: 4096,
+      temperature: 0.7,
+      system: systemMessage?.content ? [{ type: "text", text: systemMessage.content, cache_control: { type: "ephemeral" } }] : void 0,
+      messages: conversationMessages
+    });
+    let full = "";
+    for await (const event of stream) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        full += event.delta.text;
+        yield { type: "delta", text: event.delta.text };
+      }
+    }
+    const final = await stream.finalMessage();
+    yield {
+      type: "done",
+      fullContent: full,
+      usage: {
+        prompt_tokens: final.usage.input_tokens,
+        completion_tokens: final.usage.output_tokens,
+        total_tokens: final.usage.input_tokens + final.usage.output_tokens
+      }
+    };
+  }
   async chatWithGroq(messages2, model, apiKey) {
     const groq = new Groq({ apiKey });
     const systemMessage = messages2.find((m) => m.role === "system");
@@ -1790,14 +1902,11 @@ async function getLLMConfig(req) {
     model: settings.llm_model || settings.llmModel || void 0
   };
 }
-var ADMIN_USER_IDS = /* @__PURE__ */ new Set(["Glokta3000", "39614428"]);
 var ADMIN_EMAILS = /* @__PURE__ */ new Set(["tyrone.ross@gmail.com"]);
 var getInterceptorPrompt = (targetKey) => INTERCEPTOR_PROMPTS.find((p) => p.targetKey === targetKey);
 var hasAdminAccess = (req) => {
   const email = typeof req.user?.email === "string" ? req.user.email.toLowerCase() : null;
-  return Boolean(
-    req.userId && (ADMIN_USER_IDS.has(req.userId) || email && ADMIN_EMAILS.has(email))
-  );
+  return Boolean(req.userId && email && ADMIN_EMAILS.has(email));
 };
 var isAdmin = (req, res, next) => {
   if (!hasAdminAccess(req)) {
@@ -1863,15 +1972,8 @@ function projectBelongsToActor(project, actor) {
   }
   return project.guestOwnerId === actor.id;
 }
-async function adoptLegacyProjectOwnership(project, actor) {
-  if (project.userId || project.guestOwnerId) {
-    return project;
-  }
-  const adoptedProject = await storage.updateProject(project.id, {
-    userId: actor.kind === "user" ? actor.id : null,
-    guestOwnerId: actor.kind === "guest" ? actor.id : null
-  });
-  return adoptedProject || project;
+function isOrphanProject(project) {
+  return !project.userId && !project.guestOwnerId;
 }
 function requireActor(req, res) {
   const actor = getActorContext(req);
@@ -1891,12 +1993,18 @@ async function loadOwnedProject(req, res, projectId) {
     res.status(404).json({ message: "Project not found" });
     return null;
   }
-  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
-  if (!projectBelongsToActor(accessibleProject, actor)) {
+  if (isOrphanProject(project)) {
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+  if (!projectBelongsToActor(project, actor)) {
     res.status(403).json({ message: "You do not have access to this project" });
     return null;
   }
-  return { actor, project: accessibleProject };
+  if (actor.kind === "guest") {
+    setGuestOwnerCookie(res, actor.id);
+  }
+  return { actor, project };
 }
 async function loadOwnedStage(req, res, stageId) {
   const actor = requireActor(req, res);
@@ -1913,12 +2021,18 @@ async function loadOwnedStage(req, res, stageId) {
     res.status(404).json({ message: "Project not found" });
     return null;
   }
-  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
-  if (!projectBelongsToActor(accessibleProject, actor)) {
+  if (isOrphanProject(project)) {
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+  if (!projectBelongsToActor(project, actor)) {
     res.status(403).json({ message: "You do not have access to this project" });
     return null;
   }
-  return { actor, project: accessibleProject, stage };
+  if (actor.kind === "guest") {
+    setGuestOwnerCookie(res, actor.id);
+  }
+  return { actor, project, stage };
 }
 async function registerRoutes(app2) {
   app2.use(extractUser);
@@ -1956,8 +2070,7 @@ async function registerRoutes(app2) {
       }
       const guestOwnerId = getGuestOwnerId(req);
       const callerOwnsDemoProject = !project.userId && Boolean(project.guestOwnerId) && project.guestOwnerId === guestOwnerId;
-      const legacyUnownedProject = !project.userId && !project.guestOwnerId;
-      if (project.userId !== userId && !callerOwnsDemoProject && !legacyUnownedProject) {
+      if (project.userId !== userId && !callerOwnsDemoProject) {
         return res.status(403).json({ message: "You do not have access to claim this project" });
       }
       const updatedProject = project.userId === userId ? project : await storage.updateProject(req.params.id, {
@@ -2199,6 +2312,88 @@ async function registerRoutes(app2) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to create message", error: String(error) });
+    }
+  });
+  app2.post("/api/stages/:stageId/messages/stream", async (req, res) => {
+    const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+    if (!stageAccess) return;
+    let userMessage;
+    try {
+      const messageData = insertMessageSchema.parse({ ...req.body, stageId: stageAccess.stage.id });
+      userMessage = await storage.createMessage(messageData);
+      if (messageData.role !== "user") {
+        res.status(400).json({ message: "Streaming only supports user-initiated messages" });
+        return;
+      }
+    } catch (error) {
+      if (error instanceof z2.ZodError) {
+        return res.status(400).json({ message: "Invalid message data", errors: error.issues });
+      }
+      return res.status(500).json({ message: "Failed to create message", error: String(error) });
+    }
+    const { stage, project } = stageAccess;
+    const existingMessages = await storage.getMessagesByStage(stage.id);
+    const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
+    const projectContext = buildProjectContext(project);
+    const userMessageCount = existingMessages.filter((m) => m.role === "user").length;
+    const systemPromptToUse = buildStageRuntimeSystemPrompt({
+      basePrompt: adminPrompt?.content || stage.systemPrompt,
+      projectContext,
+      stageNumber: stage.stageNumber,
+      userMessageCount
+    });
+    const aiMessages = [
+      { role: "system", content: systemPromptToUse },
+      ...existingMessages.map((m) => ({ role: m.role, content: m.content }))
+    ];
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
+    const send = (event, data) => {
+      res.write(`event: ${event}
+data: ${JSON.stringify(data)}
+
+`);
+    };
+    send("user", { userMessage });
+    try {
+      const userConfig = await getLLMConfig(req);
+      const task = stage.stageNumber >= 4 ? "complex" : "chat";
+      const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
+      let full = "";
+      for await (const chunk of aiService.chatStream(aiMessages, modelToUse, userConfig, task)) {
+        if (chunk.type === "delta") {
+          full += chunk.text;
+          send("delta", { text: chunk.text });
+        } else {
+          full = chunk.fullContent;
+        }
+      }
+      const aiMessage = await storage.createMessage({
+        stageId: stage.id,
+        role: "assistant",
+        content: full
+      });
+      send("message", { aiMessage });
+      const shouldAssessProgress = userMessageCount === 1 || userMessageCount % 3 === 0;
+      if (shouldAssessProgress) {
+        const allMessages = [
+          ...existingMessages.map((m) => ({ role: m.role, content: m.content })),
+          { role: "assistant", content: full }
+        ];
+        const progress = await aiService.calculateProgress(allMessages, [stage.description]);
+        await storage.updateStage(stage.id, { progress });
+        send("progress", { progress });
+      }
+      send("done", {});
+      res.end();
+    } catch (err) {
+      console.error("Stream error:", err);
+      send("error", { message: err instanceof Error ? err.message : "AI service error" });
+      res.end();
     }
   });
   app2.post("/api/projects/:projectId/generate-survey", async (req, res) => {

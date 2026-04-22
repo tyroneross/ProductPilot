@@ -27,8 +27,20 @@ export default function DetailsPage() {
 
   const handleContinueToSurvey = () => {
     const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
-    sessionStorage.setItem("productIdea", productIdea.trim());
+    const idea = productIdea.trim();
+    sessionStorage.setItem("productIdea", idea);
     sessionStorage.setItem("appStyle", JSON.stringify(styleObj));
+    // Seed the survey's expected context shape so discovery-stage prompts get the user's idea.
+    // Without this, session-survey.tsx reads intakeAnswers/minimumDetails from sessionStorage
+    // and finds nothing, falling through to a generic "Tell me more about your idea" prompt.
+    sessionStorage.setItem(
+      "intakeAnswers",
+      JSON.stringify({ intent: "build", qualityPriority: "balanced" }),
+    );
+    sessionStorage.setItem(
+      "minimumDetails",
+      JSON.stringify({ problemStatement: idea, userGoals: [], v1Definition: "" }),
+    );
     setLocation("/session/survey");
   };
 
@@ -69,7 +81,7 @@ export default function DetailsPage() {
           <a href="/" className="text-base font-bold tracking-tight no-underline" style={{ color: "#f5f0eb", letterSpacing: "-0.02em" }}>
             Product<span style={{ color: "#f0b65e" }}>Pilot</span>
           </a>
-          <a href="/settings" className="text-sm font-medium no-underline" style={{ color: "#f0b65e" }}>Sign in</a>
+          <a href="/login" className="text-sm font-medium no-underline" style={{ color: "#f0b65e" }}>Sign in</a>
         </div>
       </div>
 
