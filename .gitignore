@@ -13,3 +13,4 @@ vite.config.ts.*
 .certs-bak/
 .archive/
 .claude/
+meta.json
