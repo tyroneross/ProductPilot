@@ -13,4 +13,3 @@ vite.config.ts.*
 .certs-bak/
 .archive/
 .claude/
-api/*.mjs

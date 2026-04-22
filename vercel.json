@@ -1,14 +1,14 @@
 {
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build && npm run build:api",
   "outputDirectory": "dist/public",
   "framework": "vite",
   "functions": {
-    "api/index.ts": {
+    "api/index.mjs": {
       "maxDuration": 60
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/api/(.*)", "destination": "/api/index.mjs" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "env": {
