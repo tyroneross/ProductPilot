@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
+import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -20,6 +20,7 @@ export default function DocumentViewPage() {
   const [detailLevel, setDetailLevel] = useState<"detailed" | "summary">("detailed");
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const { data: project } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -67,6 +68,41 @@ export default function DocumentViewPage() {
         description: "Please try selecting and copying manually.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleExport = async () => {
+    if (!projectId) return;
+    setIsExporting(true);
+    try {
+      const res = await apiRequest("GET", `/api/projects/${projectId}/export`);
+      const data = await res.json();
+      // Build markdown from the returned JSON shape: { project, stages: [{ ...stage, messages }], exportedAt }
+      const lines: string[] = [];
+      lines.push(`# ${data.project?.name ?? "ProductPilot Export"}\n`);
+      lines.push(`Exported: ${data.exportedAt ?? new Date().toISOString()}\n`);
+      for (const s of data.stages ?? []) {
+        lines.push(`\n## ${s.title ?? s.stageNumber}\n`);
+        const lastAssistant = [...(s.messages ?? [])].reverse().find((m: { role: string }) => m.role === "assistant");
+        if (lastAssistant) {
+          lines.push(lastAssistant.content);
+        }
+      }
+      const markdown = lines.join("\n");
+      const blob = new Blob([markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${project?.name ?? "productpilot"}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Export downloaded", description: `${project?.name ?? "Project"}.md saved.` });
+    } catch {
+      toast({ title: "Export failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -143,6 +179,17 @@ export default function DocumentViewPage() {
             >
               {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
               {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="min-h-[44px]"
+              data-testid="button-export-all"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              {isExporting ? "Exporting..." : "Export All"}
             </Button>
             <Button
               variant="outline"

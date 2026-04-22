@@ -536,7 +536,7 @@ export default function LoginPage() {
         <p style={{ textAlign: "center", margin: 0 }}>
           <button
             type="button"
-            onClick={() => setLocation("/")}
+            onClick={() => setLocation("/details")}
             style={{
               background: "none",
               border: "none",

@@ -176,6 +176,7 @@ export default function DetailsPage() {
             WebkitBackdropFilter: "blur(16px)",
             borderColor: "rgba(200,180,160,0.08)",
             padding: "14px 24px",
+            paddingBottom: "max(14px, env(safe-area-inset-bottom))",
           }}
         >
           <div className="mx-auto flex items-center gap-4" style={{ maxWidth: "672px" }}>
