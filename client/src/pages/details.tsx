@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { Loader2 } from "lucide-react";
+import Nav from "@/components/nav";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -67,23 +68,7 @@ export default function DetailsPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#110f0d", paddingBottom: "100px" }}>
-      {/* Nav */}
-      <div
-        className="sticky top-0 z-50 border-b"
-        style={{
-          background: "rgba(17,15,13,0.92)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          borderColor: "rgba(200,180,160,0.08)",
-        }}
-      >
-        <div className="flex items-center justify-between mx-auto" style={{ maxWidth: "1100px", padding: "18px 32px" }}>
-          <a href="/" className="text-base font-bold tracking-tight no-underline" style={{ color: "#f5f0eb", letterSpacing: "-0.02em" }}>
-            Product<span style={{ color: "#f0b65e" }}>Pilot</span>
-          </a>
-          <a href="/login" className="text-sm font-medium no-underline" style={{ color: "#f0b65e" }}>Sign in</a>
-        </div>
-      </div>
+      <Nav />
 
       {/* Content */}
       <div className="mx-auto px-6" style={{ maxWidth: "672px" }}>

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, FileText, ListTodo, Layout, Code, BookOpen, Layers } from "lucide-react";
+import Nav from "@/components/nav";
 import type { Project, Stage } from "@shared/schema";
 
 const SHIMMER_STYLE: React.CSSProperties = {
@@ -140,101 +141,7 @@ export default function DocumentsPage() {
         @keyframes glow-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
       `}</style>
 
-      {/* Nav */}
-      <nav
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          height: 56,
-          display: "flex",
-          alignItems: "center",
-          background: "rgba(17,15,13,0.80)",
-          backdropFilter: "blur(12px) saturate(1.2)",
-          WebkitBackdropFilter: "blur(12px) saturate(1.2)",
-          borderBottom: "1px solid rgba(200,180,160,0.08)",
-        }}
-        aria-label="Main navigation"
-      >
-        <div
-          style={{
-            maxWidth: "56rem",
-            width: "100%",
-            margin: "0 auto",
-            padding: "0 1.5rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <button
-            onClick={() => setLocation("/")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 18,
-              color: "#f5f0eb",
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-              padding: 0,
-            }}
-          >
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                background: "#f0b65e",
-                transform: "rotate(45deg)",
-                borderRadius: 2,
-                flexShrink: 0,
-                display: "inline-block",
-              }}
-              aria-hidden="true"
-            />
-            ProductPilot
-          </button>
-          <ul
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "1.5rem",
-              listStyle: "none",
-              margin: 0,
-              padding: 0,
-            }}
-          >
-            {[
-              { label: "Projects", href: "/projects" },
-            ].map(({ label, href }) => (
-              <li key={label}>
-                <button
-                  onClick={() => setLocation(href)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: "#a89a8c",
-                    transition: "color 0.2s",
-                    padding: 0,
-                    fontFamily: "inherit",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = "#f0b65e")}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
-                >
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </nav>
+      <Nav />
 
       {/* Main */}
       <main style={{ flex: 1 }}>

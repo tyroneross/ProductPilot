@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
+import { Mail } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { authClient } from "@/lib/auth";
 
@@ -29,6 +30,10 @@ export default function LoginPage() {
   const [authInfo, setAuthInfo] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [canResendVerification, setCanResendVerification] = useState(false);
+
+  // Magic link state
+  const [magicLinkLoading, setMagicLinkLoading] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
 
   // Forgot password state
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -188,6 +193,37 @@ export default function LoginPage() {
       setAuthError(message);
     } finally {
       setAuthLoading(false);
+    }
+  }
+
+  async function handleMagicLink() {
+    if (!authEmail.trim()) {
+      setAuthError("Enter your email address first.");
+      return;
+    }
+    setAuthError("");
+    setAuthInfo("");
+    setMagicLinkSent(false);
+    setMagicLinkLoading(true);
+    try {
+      const callbackURL =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/projects`
+          : "/projects";
+      const result = await authClient.signIn.magicLink({ email: authEmail.trim(), callbackURL });
+      if (result?.error) {
+        const msg =
+          typeof result.error === "object" && result.error !== null && "message" in result.error
+            ? String((result.error as { message?: string }).message ?? "Something went wrong")
+            : "Something went wrong";
+        setAuthError(msg);
+      } else {
+        setMagicLinkSent(true);
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Failed to send magic link");
+    } finally {
+      setMagicLinkLoading(false);
     }
   }
 
@@ -728,6 +764,52 @@ export default function LoginPage() {
                 ? "Sign In"
                 : "Sign Up"}
             </button>
+
+            {authTab === "signin" && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleMagicLink}
+                  disabled={magicLinkLoading || authLoading}
+                  style={{
+                    height: "44px",
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    background: "transparent",
+                    color: magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c",
+                    border: "1px solid rgba(200,180,160,0.18)",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                    fontFamily: "inherit",
+                    cursor: magicLinkLoading || authLoading ? "not-allowed" : "pointer",
+                    transition: "border-color 0.15s, color 0.15s",
+                    marginTop: "4px",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!magicLinkLoading && !authLoading) {
+                      e.currentTarget.style.borderColor = "rgba(200,180,160,0.35)";
+                      e.currentTarget.style.color = "#f5f0eb";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(200,180,160,0.18)";
+                    e.currentTarget.style.color = magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c";
+                  }}
+                >
+                  <Mail size={16} />
+                  {magicLinkLoading ? "Sending…" : "Continue with Magic Link"}
+                </button>
+                {magicLinkSent && (
+                  <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+                    Check your email for a sign-in link. It expires in 15 minutes.
+                  </p>
+                )}
+              </>
+            )}
 
             {authTab === "signup" && (
               <p style={{ fontSize: "12px", color: "#6b5d52", margin: 0, lineHeight: 1.5 }}>

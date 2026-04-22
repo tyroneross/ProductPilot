@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { magicLinkClient } from "better-auth/client/plugins";
 
 const authOrigin =
   typeof window !== "undefined"
@@ -11,4 +12,5 @@ export const authClient = createAuthClient({
   fetchOptions: {
     credentials: "include" as RequestCredentials,
   },
+  plugins: [magicLinkClient()],
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import Nav from "@/components/nav";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check, Download } from "lucide-react";
@@ -147,6 +148,7 @@ export default function DocumentViewPage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary">
+      <Nav />
       <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">

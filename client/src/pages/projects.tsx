@@ -1,177 +1,232 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { MessageCircle, Plus, FileText, Sparkles } from "lucide-react";
-import ContextFlow from "@/components/context-flow";
-import StageCard from "@/components/stage-card";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { Project, Stage } from "@shared/schema";
+import { FolderKanban, Sparkles, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { apiRequest } from "@/lib/queryClient";
+import Nav from "@/components/nav";
+import type { Project } from "@shared/schema";
 
-export default function Dashboard() {
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+// Warm Craft tokens
+const bg = "#110f0d", surface = "#1a1714", textPrimary = "#f5f0eb";
+const textSecondary = "#a89a8c", textMuted = "#6b5d52";
+const accent = "#f0b65e", accentHover = "#d4a04e";
+const border = "rgba(200,180,160,0.08)";
+
+const ctaStyle: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
+  background: accent, color: "#110f0d", fontFamily: "inherit",
+  fontSize: "14px", fontWeight: 600, border: "none", borderRadius: "8px",
+  cursor: "pointer", transition: "background 0.15s",
+};
+
+function PhaseChip({ phase }: { phase: string | null | undefined }) {
+  const label = phase === "survey" ? "Survey" : phase === "complete" ? "Complete" : "Discovery";
+  const done = phase === "complete";
+  return (
+    <span style={{
+      display: "inline-block", fontSize: "11px", fontWeight: 600,
+      letterSpacing: "0.04em", textTransform: "uppercase", borderRadius: "9999px",
+      padding: "3px 10px", flexShrink: 0, whiteSpace: "nowrap",
+      color: done ? accent : textMuted,
+      border: `1px solid ${done ? "rgba(240,182,94,0.3)" : border}`,
+      background: done ? "rgba(240,182,94,0.08)" : "transparent",
+    }}>
+      {label}
+    </span>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "16px 0", borderTop: `1px solid ${border}` }}>
+      <div style={{ width: 36, height: 36, borderRadius: "50%", background: surface, flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ width: "42%", height: 13, borderRadius: 4, background: surface, marginBottom: 6 }} />
+        <div style={{ width: "26%", height: 11, borderRadius: 4, background: surface }} />
+      </div>
+      <div style={{ width: 64, height: 20, borderRadius: 999, background: surface }} />
+    </div>
+  );
+}
+
+export default function ProjectsPage() {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery<Project[]>({
+  const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
   });
 
-  const { data: stages = [], isLoading: stagesLoading } = useQuery<Stage[]>({
-    queryKey: ["/api/projects", currentProjectId, "stages"],
-    enabled: !!currentProjectId,
-  });
+  const sorted = [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-  const currentProject = currentProjectId ? 
-    projects.find((p) => p.id === currentProjectId) : 
-    projects[0];
-
-  useEffect(() => {
-    if (!currentProjectId && projects.length > 0) {
-      setCurrentProjectId(projects[0].id);
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    setOpenMenuId(null);
+    try {
+      await apiRequest("DELETE", `/api/projects/${id}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+    } finally {
+      setDeletingId(null);
     }
-  }, [currentProjectId, projects]);
+  }
 
   return (
-    <div className="min-h-screen bg-surface-secondary">
-      <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="text-h2 font-medium text-contrast-high line-clamp-1">Product Development Assistant</h1>
-              <p className="text-description text-contrast-medium mt-1 hidden sm:block">
-                Guided workflow for systematic product development
-              </p>
-            </div>
-            <Button
-              onClick={() => setLocation("/details")}
-              className="btn-primary min-h-[44px] shrink-0"
-              data-testid="button-new-project"
-            >
-              <Plus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">New Product</span>
-            </Button>
-          </div>
-        </div>
-      </header>
+    <div style={{ minHeight: "100vh", background: bg, color: textPrimary, fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" }}>
+      {/* Nav injected by nav component */}
+      <Nav />
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {projectsLoading && (
-          <div className="space-y-4">
-            <Skeleton className="h-24 w-full" />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Skeleton className="h-40" />
-              <Skeleton className="h-40" />
-            </div>
-          </div>
-        )}
+      <main style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px 64px" }}>
 
-        {currentProject && (
-          <div className="mb-6">
-            <ContextFlow stages={stages} />
-          </div>
-        )}
-
-        {currentProject && (
-          <section>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-h3 font-medium text-contrast-high">Your Products</h2>
-              
-              {projects.length > 1 && (
-                <div className="flex items-center space-x-2">
-                  <span className="text-description text-contrast-medium">Viewing:</span>
-                  <select
-                    value={currentProjectId || ""}
-                    onChange={(e) => setCurrentProjectId(e.target.value)}
-                    className="text-description font-medium text-contrast-high bg-transparent border-none max-w-[200px] truncate"
-                    data-testid="select-current-project"
-                  >
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div
-                className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-6 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => setLocation(`/documents/${currentProject.id}`)}
-                data-testid="card-view-documents"
-              >
-                <div className="flex items-start space-x-4">
-                  <div className="p-3 bg-accent rounded-lg">
-                    <FileText className="w-6 h-6 text-surface-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-metadata text-contrast-medium mb-1 line-clamp-1">{currentProject.name}</p>
-                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">View Generated Documents</h3>
-                    <p className="text-description text-contrast-medium mb-3 line-clamp-2">
-                      See PRD, architecture, and all specs created for this project
-                    </p>
-                    <div className="flex items-center space-x-2 text-accent">
-                      <span className="text-description font-medium">Open Documents</span>
-                      <span>→</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-6 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => setLocation(`/session/survey?projectId=${currentProject.id}`)}
-                data-testid="card-continue-building"
-              >
-                <div className="flex items-start space-x-4">
-                  <div className="p-3 bg-surface-secondary rounded-lg">
-                    <MessageCircle className="w-6 h-6 text-contrast-high" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-metadata text-contrast-medium mb-1 line-clamp-1">{currentProject.name}</p>
-                    <h3 className="text-title text-contrast-high mb-1 line-clamp-1">Continue Survey Mode</h3>
-                    <p className="text-description text-contrast-medium mb-3 line-clamp-2">
-                      Answer AI questions to refine and generate your product specs
-                    </p>
-                    <div className="flex items-center space-x-2 text-accent">
-                      <span className="text-description font-medium">Resume Q&A</span>
-                      <span>→</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {!stagesLoading && stages.length > 0 && (
-              <div className="mt-8">
-                <h3 className="text-title text-contrast-high mb-4">Or work stage-by-stage</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {stages.map((stage) => (
-                    <StageCard key={stage.id} stage={stage} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {!currentProject && !projectsLoading && projects.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 space-y-4">
-            <div className="w-12 h-12 rounded-full bg-[rgba(240,182,94,0.1)] flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-[#f0b65e]" />
-            </div>
-            <h3 className="text-h4 font-medium text-contrast-high">No projects yet</h3>
-            <p className="text-description text-contrast-medium text-center max-w-sm">
-              Describe what you want to build and get a complete PRD, wireframes, architecture docs, and coding prompts.
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 36, flexWrap: "wrap" }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: textPrimary, margin: 0 }}>Your projects</h1>
+            <p style={{ fontSize: 14, color: textSecondary, marginTop: 6, lineHeight: 1.5 }}>
+              Resume where you left off or start a new product.
             </p>
-            <Button
+          </div>
+          {/* Desktop CTA */}
+          <button
+            onClick={() => setLocation("/details")}
+            data-testid="button-new-product"
+            style={{ ...ctaStyle, height: 40, padding: "0 18px" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
+            className="hidden-mobile"
+          >
+            Start new product
+          </button>
+        </div>
+
+        {/* Mobile CTA */}
+        <button
+          onClick={() => setLocation("/details")}
+          className="show-mobile"
+          style={{ ...ctaStyle, width: "100%", height: 48, fontSize: 15, borderRadius: 10, marginBottom: 28 }}
+        >
+          Start new product
+        </button>
+
+        <style>{`
+          .hidden-mobile { display: inline-flex !important; }
+          .show-mobile { display: none !important; }
+          @media (max-width: 639px) {
+            .hidden-mobile { display: none !important; }
+            .show-mobile { display: flex !important; }
+            .chip-desktop { display: none !important; }
+            .chip-mobile { display: inline-block !important; }
+          }
+          @media (min-width: 640px) {
+            .chip-desktop { display: inline-block !important; }
+            .chip-mobile { display: none !important; }
+          }
+          .project-row:hover { background: rgba(200,180,160,0.04) !important; }
+          .delete-btn:hover { background: rgba(229,115,115,0.08) !important; }
+          .menu-btn:hover { color: ${textSecondary} !important; }
+        `}</style>
+
+        {/* Loading */}
+        {isLoading && <><SkeletonRow /><SkeletonRow /><SkeletonRow /></>}
+
+        {/* Empty state */}
+        {!isLoading && sorted.length === 0 && (
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center",
+            padding: "48px 24px", border: `1px solid ${border}`, borderRadius: 12, background: surface, gap: 12,
+          }}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(240,182,94,0.10)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Sparkles size={20} color={accent} />
+            </div>
+            <p style={{ fontSize: 16, fontWeight: 600, color: textPrimary, margin: "0 0 4px" }}>No projects yet</p>
+            <p style={{ fontSize: 14, color: textSecondary, maxWidth: 340, lineHeight: 1.55, margin: "0 auto 8px" }}>
+              Describe your idea and we'll generate a PRD, design requirements, architecture spec, and coding prompts.
+            </p>
+            <button
               onClick={() => setLocation("/details")}
-              className="btn-primary min-h-[44px] px-8"
-              data-testid="button-start-first-project"
+              data-testid="button-start-first-product"
+              style={{ ...ctaStyle, height: 44, padding: "0 24px" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
             >
-              Start building
-            </Button>
+              Start your first product
+            </button>
+          </div>
+        )}
+
+        {/* Project list */}
+        {!isLoading && sorted.length > 0 && (
+          <div>
+            {sorted.map((project) => {
+              const relTime = formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true });
+              const menuOpen = openMenuId === project.id;
+
+              return (
+                <div key={project.id} style={{ position: "relative", borderTop: `1px solid ${border}`, opacity: deletingId === project.id ? 0.4 : 1, transition: "opacity 0.2s" }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="project-row"
+                    data-testid={`row-project-${project.id}`}
+                    onClick={() => { if (!menuOpen) setLocation(`/documents/${project.id}`); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLocation(`/documents/${project.id}`); }}
+                    style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", cursor: "pointer", minHeight: 60, userSelect: "none", borderRadius: 6, transition: "background 0.15s" }}
+                  >
+                    {/* Icon */}
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(240,182,94,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <FolderKanban size={16} color={accent} />
+                    </div>
+
+                    {/* Name + sub */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 15, fontWeight: 500, color: textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {project.name}
+                      </p>
+                      <p style={{ fontSize: 12, color: textMuted, margin: "3px 0 0" }}>Last updated {relTime}</p>
+                      {/* Mobile chip */}
+                      <span className="chip-mobile" style={{ marginTop: 6 }}>
+                        <PhaseChip phase={project.surveyPhase} />
+                      </span>
+                    </div>
+
+                    {/* Desktop chip */}
+                    <span className="chip-desktop"><PhaseChip phase={project.surveyPhase} /></span>
+
+                    {/* Ellipsis */}
+                    <button
+                      aria-label="Project options"
+                      className="menu-btn"
+                      onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : project.id); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: textMuted, padding: 4, borderRadius: 4, display: "flex", alignItems: "center", minHeight: 32, minWidth: 32, justifyContent: "center", transition: "color 0.15s" }}
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+
+                    <ChevronRight size={14} color={textMuted} style={{ flexShrink: 0 }} />
+                  </div>
+
+                  {/* Dropdown */}
+                  {menuOpen && (
+                    <>
+                      <div style={{ position: "fixed", inset: 0, zIndex: 9 }} onClick={() => setOpenMenuId(null)} />
+                      <div style={{ position: "absolute", right: 32, top: 12, zIndex: 10, background: surface, border: `1px solid ${border}`, borderRadius: 8, padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", minWidth: 140 }}>
+                        <button
+                          className="delete-btn"
+                          onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                          disabled={deletingId === project.id}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e57373", textAlign: "left", transition: "background 0.15s" }}
+                        >
+                          <Trash2 size={13} />
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </main>

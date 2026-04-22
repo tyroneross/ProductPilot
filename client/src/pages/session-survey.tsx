@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil, Menu, X, Check } from "lucide-react";
+import Nav from "@/components/nav";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1502,6 +1503,7 @@ export default function SessionSurveyPage() {
       }}
       className={surveyPhase !== "survey" ? "min-h-screen bg-surface-secondary flex flex-col" : ""}
     >
+      <Nav />
       {/* Discovery phase uses original header; survey phase sidebar has back button */}
       {surveyPhase === "discovery" && (
         <header className="border-b border-gray-200 bg-surface-primary px-6 py-4">

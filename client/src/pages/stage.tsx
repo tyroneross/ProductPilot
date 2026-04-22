@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, SkipForward } from "lucide-react";
+import Nav from "@/components/nav";
 import ChatInterface from "@/components/chat-interface";
 import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ export default function StagePage() {
 
   return (
     <div className="min-h-screen bg-surface-secondary flex flex-col">
+      <Nav />
       <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">

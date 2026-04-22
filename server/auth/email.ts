@@ -69,6 +69,23 @@ The link expires in 1 hour. If you didn't request this, you can safely ignore th
   });
 }
 
+export async function sendMagicLinkEmail(input: {
+  email: string;
+  url: string;
+}): Promise<void> {
+  const subject = "Sign in to ProductPilot";
+  const text = `Click this link to sign in to ProductPilot:\n\n${input.url}\n\nThe link expires in 15 minutes. If you didn't request this, you can ignore this email.`;
+  const html = `
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:480px;margin:0 auto;padding:32px;color:#1a1714">
+      <h2 style="margin:0 0 16px;color:#110f0d">Sign in to ProductPilot</h2>
+      <p style="margin:0 0 24px;color:#4a3f38;line-height:1.5">Click the button below to sign in. The link expires in 15 minutes.</p>
+      <a href="${input.url}" style="display:inline-block;background:#f0b65e;color:#110f0d;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Sign in to ProductPilot</a>
+      <p style="margin:24px 0 0;color:#6b5d52;font-size:13px">If you didn't request this, you can ignore this email.</p>
+    </div>
+  `;
+  await sendAuthEmail({ to: input.email, subject, html, text });
+}
+
 export async function sendVerificationEmail(input: {
   email: string;
   name?: string | null;

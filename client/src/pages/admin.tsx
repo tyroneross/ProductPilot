@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import Nav from "@/components/nav";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -704,6 +705,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#110f0d]">
+      <Nav />
 
       {/* ── Sticky header ──────────────────────────────────────────────────── */}
       <header className="bg-[#1a1714] border-b border-[rgba(200,180,160,0.08)] sticky top-0 z-10 h-[57px]">

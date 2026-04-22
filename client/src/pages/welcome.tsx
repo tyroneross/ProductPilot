@@ -1,9 +1,8 @@
 import { useLocation } from "wouter";
-import { useAuth } from "@/hooks/use-auth";
+import Nav from "@/components/nav";
 
 export default function WelcomePage() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, signOut } = useAuth();
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" }}>
@@ -19,86 +18,7 @@ export default function WelcomePage() {
         }}
       />
 
-      {/* Sticky Nav */}
-      <nav
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          height: "56px",
-          display: "flex",
-          alignItems: "center",
-          background: "rgba(17,15,13,0.72)",
-          backdropFilter: "blur(12px) saturate(1.2)",
-          WebkitBackdropFilter: "blur(12px) saturate(1.2)",
-          borderBottom: "1px solid rgba(200,180,160,0.08)",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "64rem",
-            width: "100%",
-            margin: "0 auto",
-            padding: "0 1.5rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          {/* Wordmark */}
-          <button
-            onClick={() => setLocation("/")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: "18px",
-              color: "#f5f0eb",
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-              padding: 0,
-              minHeight: "24px",
-              fontFamily: "inherit",
-            }}
-          >
-            {/* Amber diamond */}
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-              <rect x="1" y="1" width="8" height="8" rx="1.5" fill="#f0b65e" transform="rotate(45 5 5)" />
-            </svg>
-            ProductPilot
-          </button>
-
-          {/* Nav links */}
-          <ul style={{ display: "flex", alignItems: "center", gap: "1.5rem", listStyle: "none", margin: 0, padding: 0 }}>
-            {isAuthenticated ? (
-              <>
-                <li>
-                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#a89a8c" }}>
-                    {user?.name || user?.email}
-                  </span>
-                </li>
-                <li>
-                  <NavLink onClick={() => setLocation("/settings")}>Settings</NavLink>
-                </li>
-                <li>
-                  <NavLink onClick={() => setLocation("/projects")}>Projects</NavLink>
-                </li>
-                <li>
-                  <NavLink onClick={async () => { await signOut(); setLocation("/"); }}>Sign Out</NavLink>
-                </li>
-              </>
-            ) : (
-              <li>
-                <NavLink onClick={() => setLocation("/login")}>Sign In</NavLink>
-              </li>
-            )}
-          </ul>
-        </div>
-      </nav>
+      <Nav />
 
       {/* Hero */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative", zIndex: 1 }}>
@@ -223,25 +143,3 @@ export default function WelcomePage() {
   );
 }
 
-function NavLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: "none",
-        border: "none",
-        cursor: "pointer",
-        fontSize: "14px",
-        fontWeight: 500,
-        color: "#a89a8c",
-        fontFamily: "inherit",
-        padding: 0,
-        transition: "color 0.2s",
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#f0b65e"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#a89a8c"; }}
-    >
-      {children}
-    </button>
-  );
-}

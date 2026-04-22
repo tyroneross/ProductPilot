@@ -2,12 +2,13 @@ import type { RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
 import { betterAuth } from "better-auth";
+import { magicLink } from "better-auth/plugins";
 import { logger } from "../lib/logger";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
 import { db } from "../db";
-import { sendVerificationEmail, sendPasswordResetEmail } from "./email";
+import { sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from "./email";
 import * as authSchema from "./schema";
 
 const authDb = (() => {
@@ -130,6 +131,15 @@ export const auth = betterAuth({
           }),
         ]
       : []),
+    magicLink({
+      sendMagicLink: async ({ email, url }) => {
+        void sendMagicLinkEmail({ email, url }).catch((error) => {
+          logger.error({ err: error }, "[auth] Failed to send magic link email");
+        });
+      },
+      // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.
+      expiresIn: 60 * 15,
+    }),
   ],
 });
 

@@ -1213,6 +1213,7 @@ init_db();
 import fs from "fs";
 import path from "path";
 import { betterAuth } from "better-auth";
+import { magicLink } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
@@ -1268,6 +1269,23 @@ The link expires in 1 hour. If you didn't request this, you can safely ignore th
     html,
     text: text3
   });
+}
+async function sendMagicLinkEmail(input) {
+  const subject = "Sign in to ProductPilot";
+  const text3 = `Click this link to sign in to ProductPilot:
+
+${input.url}
+
+The link expires in 15 minutes. If you didn't request this, you can ignore this email.`;
+  const html = `
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:480px;margin:0 auto;padding:32px;color:#1a1714">
+      <h2 style="margin:0 0 16px;color:#110f0d">Sign in to ProductPilot</h2>
+      <p style="margin:0 0 24px;color:#4a3f38;line-height:1.5">Click the button below to sign in. The link expires in 15 minutes.</p>
+      <a href="${input.url}" style="display:inline-block;background:#f0b65e;color:#110f0d;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Sign in to ProductPilot</a>
+      <p style="margin:24px 0 0;color:#6b5d52;font-size:13px">If you didn't request this, you can ignore this email.</p>
+    </div>
+  `;
+  await sendAuthEmail({ to: input.email, subject, html, text: text3 });
 }
 async function sendVerificationEmail(input) {
   const greeting = input.name ? `Hi ${input.name},` : "Hi,";
@@ -1454,7 +1472,16 @@ var auth = betterAuth({
         kvUrl: process.env.BETTER_AUTH_KV_URL,
         apiKey: process.env.BETTER_AUTH_API_KEY
       })
-    ] : []
+    ] : [],
+    magicLink({
+      sendMagicLink: async ({ email, url }) => {
+        void sendMagicLinkEmail({ email, url }).catch((error) => {
+          logger.error({ err: error }, "[auth] Failed to send magic link email");
+        });
+      },
+      // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.
+      expiresIn: 60 * 15
+    })
   ]
 });
 var extractUser = async (req, _res, next) => {
