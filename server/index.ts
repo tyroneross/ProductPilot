@@ -1,5 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { toNodeHandler } from "better-auth/node";
 import { registerRoutes } from "./routes";
+import { auth } from "./auth";
 import { setupVite, serveStatic, log } from "./vite";
 import { runMigrations } from "./migrate";
 import fs from "fs";
@@ -7,6 +9,7 @@ import https from "https";
 import path from "path";
 
 const app = express();
+app.all("/api/auth/*", toNodeHandler(auth));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -29,7 +32,7 @@ app.use((req, res, next) => {
   try {
     await runMigrations();
   } catch (error) {
-    console.log("Skipping database migrations due to connection issues. Using in-memory storage.");
+    console.log("Skipping database migrations due to connection issues.");
   }
   
   const server = await registerRoutes(app);
@@ -56,9 +59,9 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '3000', 10);
-  const host = process.env.HOST || '127.0.0.1';
+  const host = process.env.HOST || 'localhost';
 
-  // Use HTTPS if local certs exist (required for Neon Auth cookies)
+  // Use HTTPS if local certs exist for local auth and OAuth testing.
   const certPath = path.resolve('.certs/localhost.pem');
   const keyPath = path.resolve('.certs/localhost-key.pem');
   const useHttps = fs.existsSync(certPath) && fs.existsSync(keyPath);

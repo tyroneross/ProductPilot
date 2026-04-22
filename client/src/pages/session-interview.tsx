@@ -48,6 +48,7 @@ export default function SessionInterviewPage() {
           description: productIdea.slice(0, 200),
           mode: "interview",
           aiModel: "claude-sonnet",
+          demoMode: true,
         });
         const newProject = await res.json();
         setProjectId(newProject.id);
@@ -124,6 +125,7 @@ export default function SessionInterviewPage() {
           description: productIdea.slice(0, 200),
           mode: "interview",
           aiModel: "claude-sonnet",
+          demoMode: true,
         });
         const newProject = await res.json();
         setProjectId(newProject.id);

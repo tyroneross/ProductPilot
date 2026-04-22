@@ -1,10 +1,27 @@
 import type { Express, RequestHandler } from "express";
+import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
 import { storage } from "./storage-hybrid";
 import { aiService, type AIMessage, type LLMConfig } from "./services/ai";
-import { insertProjectSchema, insertMessageSchema, updateStageSchema, insertAdminPromptSchema, INTERCEPTOR_PROMPTS } from "@shared/schema";
+import {
+  insertProjectSchema,
+  insertMessageSchema,
+  updateStageSchema,
+  insertAdminPromptSchema,
+  INTERCEPTOR_PROMPTS,
+  DEFAULT_STAGES,
+  type Project,
+  type Stage,
+} from "@shared/schema";
 import { z } from "zod";
-import { extractUser, requireAuth } from "./auth/neon-auth";
+import { extractUser, requireAuth } from "./auth";
+import {
+  buildDocumentGenerationPrompt,
+  buildMinimumDetailsDocumentPrompt,
+  buildProjectContext,
+  buildStageRuntimeSystemPrompt,
+  buildSurveyGenerationPrompt,
+} from "./prompt-builders";
 
 // Helper to resolve per-user LLM config from stored settings
 async function getLLMConfig(req: any): Promise<LLMConfig | null> {
@@ -19,128 +36,204 @@ async function getLLMConfig(req: any): Promise<LLMConfig | null> {
   };
 }
 
-// Admin usernames allowed to access the admin panel (can be expanded)
-const ADMIN_USERS = ["Glokta3000", "39614428", "tyrone.ross@gmail.com"]; // Add user ID or email here
+const ADMIN_USER_IDS = new Set(["Glokta3000", "39614428"]);
+const ADMIN_EMAILS = new Set(["tyrone.ross@gmail.com"]);
 
 // Helper to get interceptor prompt by targetKey
 const getInterceptorPrompt = (targetKey: string) =>
   INTERCEPTOR_PROMPTS.find(p => p.targetKey === targetKey);
 
+const hasAdminAccess = (req: any) => {
+  const email = typeof req.user?.email === "string" ? req.user.email.toLowerCase() : null;
+  return Boolean(
+    req.userId &&
+      (ADMIN_USER_IDS.has(req.userId) || (email && ADMIN_EMAILS.has(email))),
+  );
+};
+
 const isAdmin: RequestHandler = (req: any, res, next) => {
-  if (!req.userId || !ADMIN_USERS.includes(req.userId)) {
+  if (!hasAdminAccess(req)) {
     return res.status(403).json({ message: "Forbidden" });
   }
   next();
 };
 
+const DEMO_OWNER_COOKIE = "productpilot_demo_owner";
+const DEMO_OWNER_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+const SHOULD_SECURE_DEMO_COOKIE =
+  process.env.NODE_ENV === "production" || process.env.BETTER_AUTH_URL?.startsWith("https://");
+
+type ActorContext =
+  | { kind: "user"; id: string }
+  | { kind: "guest"; id: string }
+  | { kind: "none" };
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  if (!cookieHeader) {
+    return {};
+  }
+
+  return cookieHeader.split(";").reduce<Record<string, string>>((accumulator, pair) => {
+    const separatorIndex = pair.indexOf("=");
+    if (separatorIndex === -1) {
+      return accumulator;
+    }
+
+    const key = pair.slice(0, separatorIndex).trim();
+    const value = pair.slice(separatorIndex + 1).trim();
+    if (key) {
+      accumulator[key] = decodeURIComponent(value);
+    }
+    return accumulator;
+  }, {});
+}
+
+function getGuestOwnerId(req: any): string | null {
+  const cookies = parseCookies(req.headers?.cookie);
+  const guestOwnerId = cookies[DEMO_OWNER_COOKIE];
+  return typeof guestOwnerId === "string" && guestOwnerId.trim() ? guestOwnerId : null;
+}
+
+function setGuestOwnerCookie(res: any, guestOwnerId: string) {
+  res.cookie(DEMO_OWNER_COOKIE, guestOwnerId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: SHOULD_SECURE_DEMO_COOKIE,
+    maxAge: DEMO_OWNER_COOKIE_MAX_AGE_MS,
+    path: "/",
+  });
+}
+
+function clearGuestOwnerCookie(res: any) {
+  res.clearCookie(DEMO_OWNER_COOKIE, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: SHOULD_SECURE_DEMO_COOKIE,
+    path: "/",
+  });
+}
+
+function getActorContext(req: any): ActorContext {
+  if (req.userId) {
+    return { kind: "user", id: req.userId };
+  }
+
+  const guestOwnerId = getGuestOwnerId(req);
+  if (guestOwnerId) {
+    return { kind: "guest", id: guestOwnerId };
+  }
+
+  return { kind: "none" };
+}
+
+function projectBelongsToActor(
+  project: Project,
+  actor: Exclude<ActorContext, { kind: "none" }>,
+): boolean {
+  if (actor.kind === "user") {
+    return project.userId === actor.id;
+  }
+
+  return project.guestOwnerId === actor.id;
+}
+
+async function adoptLegacyProjectOwnership(
+  project: Project,
+  actor: Exclude<ActorContext, { kind: "none" }>,
+): Promise<Project> {
+  if (project.userId || project.guestOwnerId) {
+    return project;
+  }
+
+  const adoptedProject = await storage.updateProject(project.id, {
+    userId: actor.kind === "user" ? actor.id : null,
+    guestOwnerId: actor.kind === "guest" ? actor.id : null,
+  });
+
+  return adoptedProject || project;
+}
+
+function requireActor(
+  req: any,
+  res: any,
+): Exclude<ActorContext, { kind: "none" }> | null {
+  const actor = getActorContext(req);
+  if (actor.kind === "none") {
+    res.status(401).json({ message: "Authentication or demo mode is required" });
+    return null;
+  }
+
+  return actor;
+}
+
+async function loadOwnedProject(
+  req: any,
+  res: any,
+  projectId: string,
+): Promise<{ actor: Exclude<ActorContext, { kind: "none" }>; project: Project } | null> {
+  const actor = requireActor(req, res);
+  if (!actor) {
+    return null;
+  }
+
+  const project = await storage.getProject(projectId);
+  if (!project) {
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+
+  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
+  if (!projectBelongsToActor(accessibleProject, actor)) {
+    res.status(403).json({ message: "You do not have access to this project" });
+    return null;
+  }
+
+  return { actor, project: accessibleProject };
+}
+
+async function loadOwnedStage(
+  req: any,
+  res: any,
+  stageId: string,
+): Promise<{
+  actor: Exclude<ActorContext, { kind: "none" }>;
+  project: Project;
+  stage: Stage;
+} | null> {
+  const actor = requireActor(req, res);
+  if (!actor) {
+    return null;
+  }
+
+  const stage = await storage.getStage(stageId);
+  if (!stage) {
+    res.status(404).json({ message: "Stage not found" });
+    return null;
+  }
+
+  const project = await storage.getProject(stage.projectId);
+  if (!project) {
+    res.status(404).json({ message: "Project not found" });
+    return null;
+  }
+
+  const accessibleProject = await adoptLegacyProjectOwnership(project, actor);
+  if (!projectBelongsToActor(accessibleProject, actor)) {
+    res.status(403).json({ message: "You do not have access to this project" });
+    return null;
+  }
+
+  return { actor, project: accessibleProject, stage };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // ── Auth proxy routes (forward to Neon Auth API) ──
-  // These must be registered BEFORE extractUser middleware so they don't require auth.
-  const NEON_AUTH_URL = process.env.NEON_AUTH_URL || process.env.NEON_AUTH_BASE_URL;
-
-  // Proxy: GET /api/auth/google — initiate Google OAuth
-  app.get("/api/auth/google", async (_req, res) => {
-    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
-    try {
-      const response = await fetch(`${NEON_AUTH_URL}/sign-in/social`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Origin": _req.headers.origin || `${_req.protocol}://${_req.headers.host}` },
-        body: JSON.stringify({ provider: "google", callbackURL: `${_req.headers.origin || `${_req.protocol}://${_req.headers.host}`}/api/auth/callback` }),
-      });
-      const data = await response.json();
-      if (data.url) {
-        res.redirect(data.url);
-      } else {
-        res.status(400).json({ message: "Failed to initiate OAuth", data });
-      }
-    } catch (error) {
-      res.status(500).json({ message: "Auth service error" });
-    }
-  });
-
-  // Proxy: GET /api/auth/callback — handle OAuth callback, set local session cookie
-  app.get("/api/auth/callback", async (_req, res) => {
-    // The OAuth flow will redirect here with tokens/session info
-    // For now, redirect to settings page — the session should be set by Neon Auth
-    res.redirect("/projects");
-  });
-
-  // Proxy: POST /api/auth/signup — email sign-up
-  app.post("/api/auth/signup", async (req, res) => {
-    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
-    try {
-      const response = await fetch(`${NEON_AUTH_URL}/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req.body),
-      });
-      const data = await response.json();
-      // Forward any set-cookie headers from Neon Auth
-      const setCookie = response.headers.get("set-cookie");
-      if (setCookie) res.setHeader("set-cookie", setCookie);
-      res.status(response.status).json(data);
-    } catch (error) {
-      res.status(500).json({ message: "Sign-up failed" });
-    }
-  });
-
-  // Proxy: POST /api/auth/signin — email sign-in
-  app.post("/api/auth/signin", async (req, res) => {
-    if (!NEON_AUTH_URL) return res.status(500).json({ message: "Auth not configured" });
-    try {
-      const response = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req.body),
-      });
-      const data = await response.json();
-      const setCookie = response.headers.get("set-cookie");
-      if (setCookie) res.setHeader("set-cookie", setCookie);
-      res.status(response.status).json(data);
-    } catch (error) {
-      res.status(500).json({ message: "Sign-in failed" });
-    }
-  });
-
-  // Proxy: GET /api/auth/session — get current session
-  app.get("/api/auth/session", async (req, res) => {
-    if (!NEON_AUTH_URL) return res.json(null);
-    try {
-      const response = await fetch(`${NEON_AUTH_URL}/get-session`, {
-        headers: {
-          "Cookie": req.headers.cookie || "",
-        },
-      });
-      const data = await response.json();
-      res.json(data);
-    } catch {
-      res.json(null);
-    }
-  });
-
-  // Proxy: POST /api/auth/signout — clear session
-  app.post("/api/auth/signout", async (req, res) => {
-    if (!NEON_AUTH_URL) return res.json({ success: true });
-    try {
-      const response = await fetch(`${NEON_AUTH_URL}/sign-out`, {
-        method: "POST",
-        headers: { "Cookie": req.headers.cookie || "" },
-      });
-      const setCookie = response.headers.get("set-cookie");
-      if (setCookie) res.setHeader("set-cookie", setCookie);
-      res.json({ success: true });
-    } catch {
-      res.json({ success: true });
-    }
-  });
-
   app.use(extractUser);
 
   // Admin check endpoint
   app.get("/api/admin/check", requireAuth, (req: any, res) => {
     res.json({
-      isAdmin: ADMIN_USERS.includes(req.userId),
-      user: { id: req.userId }
+      isAdmin: hasAdminAccess(req),
+      user: { id: req.userId, email: req.user?.email ?? null },
     });
   });
 
@@ -166,11 +259,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!userId) {
         return res.status(401).json({ message: "Not authenticated" });
       }
+
       const project = await storage.getProject(req.params.id);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
-      const updatedProject = await storage.updateProject(req.params.id, { userId });
+
+      if (project.userId && project.userId !== userId) {
+        return res.status(403).json({ message: "Project already belongs to another user" });
+      }
+
+      const guestOwnerId = getGuestOwnerId(req);
+      const callerOwnsDemoProject =
+        !project.userId &&
+        Boolean(project.guestOwnerId) &&
+        project.guestOwnerId === guestOwnerId;
+      const legacyUnownedProject = !project.userId && !project.guestOwnerId;
+
+      if (project.userId !== userId && !callerOwnsDemoProject && !legacyUnownedProject) {
+        return res.status(403).json({ message: "You do not have access to claim this project" });
+      }
+
+      const updatedProject =
+        project.userId === userId
+          ? project
+          : await storage.updateProject(req.params.id, {
+              userId,
+              guestOwnerId: null,
+            });
+
+      clearGuestOwnerCookie(res);
       res.json(updatedProject);
     } catch (error) {
       console.error("Error claiming project:", error);
@@ -179,44 +297,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Projects
-  app.get("/api/projects", async (req, res) => {
+  app.get("/api/projects", async (req: any, res) => {
     try {
-      const projects = await storage.getAllProjects();
+      const actor = getActorContext(req);
+      const projects =
+        actor.kind === "user"
+          ? await storage.getProjectsByUserId(actor.id)
+          : actor.kind === "guest"
+            ? await storage.getProjectsByGuestOwnerId(actor.id)
+            : [];
       res.json(projects);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch projects" });
     }
   });
 
-  app.get("/api/projects/:id", async (req, res) => {
+  app.get("/api/projects/:id", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.id);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.id);
+      if (!projectAccess) {
+        return;
       }
-      res.json(project);
+      res.json(projectAccess.project);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch project" });
     }
   });
 
-  app.post("/api/projects", async (req, res) => {
+  app.post("/api/projects", async (req: any, res) => {
     try {
       const projectData = insertProjectSchema.parse(req.body);
-      const project = await storage.createProject(projectData);
+      const actor = getActorContext(req);
+      const demoModeRequested = req.body?.demoMode === true;
+
+      if (actor.kind === "none" && !demoModeRequested) {
+        return res.status(401).json({ message: "Sign in or explicitly start demo mode" });
+      }
+
+      const guestOwnerId =
+        actor.kind === "guest"
+          ? actor.id
+          : actor.kind === "none"
+            ? randomUUID()
+            : null;
+
+      if (guestOwnerId) {
+        setGuestOwnerCookie(res, guestOwnerId);
+      }
+
+      const project = await storage.createProject({
+        ...projectData,
+        userId: actor.kind === "user" ? actor.id : null,
+        guestOwnerId,
+      });
       res.status(201).json(project);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid project data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid project data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to create project" });
     }
   });
 
-  app.patch("/api/projects/:id", async (req, res) => {
+  app.patch("/api/projects/:id", async (req: any, res) => {
     try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.id);
+      if (!projectAccess) {
+        return;
+      }
+
       const updates = z.object({
-        userId: z.string().optional(),
         name: z.string().optional(),
         description: z.string().optional(),
         mode: z.enum(["interview", "stage-based", "survey"]).optional(),
@@ -229,25 +379,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         minimumDetails: z.any().optional(),
         appStyle: z.any().optional(),
       }).parse(req.body);
-      
-      const project = await storage.getProject(req.params.id);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
-      }
-      
-      const updatedProject = await storage.updateProject(req.params.id, updates);
+
+      const updatedProject = await storage.updateProject(projectAccess.project.id, updates);
       res.json(updatedProject);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid project data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid project data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to update project" });
     }
   });
 
-  app.delete("/api/projects/:id", async (req, res) => {
+  app.delete("/api/projects/:id", async (req: any, res) => {
     try {
-      const deleted = await storage.deleteProject(req.params.id);
+      const projectAccess = await loadOwnedProject(req, res, req.params.id);
+      if (!projectAccess) {
+        return;
+      }
+
+      const deleted = await storage.deleteProject(projectAccess.project.id);
       if (!deleted) {
         return res.status(404).json({ message: "Project not found" });
       }
@@ -258,9 +408,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Stages
-  app.get("/api/projects/:projectId/stages", async (req, res) => {
+  app.get("/api/projects/:projectId/stages", async (req: any, res) => {
     try {
-      const stages = await storage.getStagesByProject(req.params.projectId);
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
+      }
+
+      const stages = await storage.getStagesByProject(projectAccess.project.id);
       res.json(stages);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch stages" });
@@ -268,20 +423,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create stages for a project that doesn't have them (for legacy projects)
-  app.post("/api/projects/:projectId/ensure-stages", async (req, res) => {
+  app.post("/api/projects/:projectId/ensure-stages", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
       
-      const existingStages = await storage.getStagesByProject(req.params.projectId);
+      const existingStages = await storage.getStagesByProject(projectAccess.project.id);
       if (existingStages.length > 0) {
         return res.json(existingStages);
       }
       
       // Create stages using the storage method
-      const stages = await storage.ensureStagesForProject(req.params.projectId);
+      const stages = await storage.ensureStagesForProject(projectAccess.project.id);
       res.status(201).json(stages);
     } catch (error) {
       console.error("Error ensuring stages:", error);
@@ -289,20 +444,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/stages/:id", async (req, res) => {
+  app.get("/api/stages/:id", async (req: any, res) => {
     try {
-      const stage = await storage.getStage(req.params.id);
-      if (!stage) {
-        return res.status(404).json({ message: "Stage not found" });
+      const stageAccess = await loadOwnedStage(req, res, req.params.id);
+      if (!stageAccess) {
+        return;
       }
-      res.json(stage);
+      res.json(stageAccess.stage);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch stage" });
     }
   });
 
-  app.patch("/api/stages/:id", async (req, res) => {
+  app.patch("/api/stages/:id", async (req: any, res) => {
     try {
+      const stageAccess = await loadOwnedStage(req, res, req.params.id);
+      if (!stageAccess) {
+        return;
+      }
+
       const updates = updateStageSchema.parse(req.body);
       const stage = await storage.updateStage(req.params.id, updates);
       if (!stage) {
@@ -311,142 +471,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stage);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid stage data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid stage data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to update stage" });
     }
   });
 
   // Messages
-  app.get("/api/stages/:stageId/messages", async (req, res) => {
+  app.get("/api/stages/:stageId/messages", async (req: any, res) => {
     try {
-      const messages = await storage.getMessagesByStage(req.params.stageId);
+      const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+      if (!stageAccess) {
+        return;
+      }
+
+      const messages = await storage.getMessagesByStage(stageAccess.stage.id);
       res.json(messages);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch messages" });
     }
   });
 
-  app.post("/api/stages/:stageId/messages", async (req, res) => {
+  app.post("/api/stages/:stageId/messages", async (req: any, res) => {
     try {
+      const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+      if (!stageAccess) {
+        return;
+      }
+
       const messageData = insertMessageSchema.parse({
         ...req.body,
-        stageId: req.params.stageId,
+        stageId: stageAccess.stage.id,
       });
       
       const message = await storage.createMessage(messageData);
       
       // If this is a user message, generate AI response
       if (messageData.role === "user") {
-        const stage = await storage.getStage(req.params.stageId);
-        if (!stage) {
-          return res.status(404).json({ message: "Stage not found" });
-        }
-
-        // Get project to use its AI model as default
-        const project = await storage.getProject(stage.projectId);
-        if (!project) {
-          return res.status(404).json({ message: "Project not found" });
-        }
+        const { stage, project } = stageAccess;
 
         // Get existing messages (including the one we just created)
-        const existingMessages = await storage.getMessagesByStage(req.params.stageId);
+        const existingMessages = await storage.getMessagesByStage(stage.id);
         
         // Try to get admin prompt from database, fallback to stage's default systemPrompt
         const adminPrompt = await storage.getAdminPromptByTargetKey(`stage_${stage.stageNumber}`);
-        let systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
-        
-        // Build project context from intake answers and minimum details
-        let projectContext = "";
-        
-        // Helper to parse JSON safely (handles both objects and JSON strings)
-        const parseJsonField = (field: any): Record<string, any> | null => {
-          if (!field) return null;
-          if (typeof field === 'object') return field;
-          if (typeof field === 'string') {
-            try {
-              return JSON.parse(field);
-            } catch {
-              return null;
-            }
-          }
-          return null;
-        };
-        
-        if (project.description) {
-          projectContext += `\n\n=== PRODUCT IDEA ===\n${project.description}`;
-        }
-        
-        const intake = parseJsonField(project.intakeAnswers);
-        if (intake && Object.keys(intake).length > 0) {
-          projectContext += `\n\n=== INTAKE SURVEY RESPONSES ===`;
-          
-          const intakeLabels: Record<string, string> = {
-            intent: "What they're building",
-            platform: "Platform/Type",
-            aiFeatures: "AI Features",
-            dataComplexity: "Data Complexity",
-            qualityPriority: "Quality Priority",
-            launchTimeline: "Launch Timeline",
-            teamSize: "Team Size",
-            budget: "Budget"
-          };
-          
-          for (const [key, value] of Object.entries(intake)) {
-            if (value) {
-              const label = intakeLabels[key] || key;
-              projectContext += `\n- ${label}: ${value}`;
-            }
-          }
-        }
-        
-        const details = parseJsonField(project.minimumDetails);
-        if (details && Object.keys(details).length > 0) {
-          projectContext += `\n\n=== MINIMUM PRODUCT DETAILS ===`;
-          
-          if (details.problemStatement) {
-            projectContext += `\nProblem Statement: ${details.problemStatement}`;
-          }
-          if (details.userGoals && Array.isArray(details.userGoals)) {
-            const goals = details.userGoals.filter((g: string) => g.trim());
-            if (goals.length > 0) {
-              projectContext += `\nUser Goals: ${goals.join(", ")}`;
-            }
-          }
-          if (details.goals && Array.isArray(details.goals)) {
-            projectContext += `\nGoals: ${details.goals.join(", ")}`;
-          }
-          if (details.mainObjects && Array.isArray(details.mainObjects)) {
-            const objects = details.mainObjects.filter((o: string) => o.trim());
-            if (objects.length > 0) {
-              projectContext += `\nCore Objects/Entities: ${objects.join(", ")}`;
-            }
-          }
-          if (details.objects && Array.isArray(details.objects)) {
-            projectContext += `\nCore Objects/Entities: ${details.objects.join(", ")}`;
-          }
-          if (details.mainActions && Array.isArray(details.mainActions)) {
-            const actions = details.mainActions.filter((a: string) => a.trim());
-            if (actions.length > 0) {
-              projectContext += `\nKey Actions: ${actions.join(", ")}`;
-            }
-          }
-          if (details.actions && Array.isArray(details.actions)) {
-            projectContext += `\nKey Actions: ${details.actions.join(", ")}`;
-          }
-          if (details.v1Definition) {
-            projectContext += `\nV1 Scope: ${details.v1Definition}`;
-          }
-          if (details.inspirationLink) {
-            projectContext += `\nInspiration/Reference: ${details.inspirationLink}`;
-          }
-          if (details.mustUseTools) {
-            projectContext += `\nMUST use these tools/technologies: ${details.mustUseTools}`;
-          }
-          if (details.mustAvoidTools) {
-            projectContext += `\nMUST AVOID these tools/technologies: ${details.mustAvoidTools}`;
-          }
-        }
+        const projectContext = buildProjectContext(project);
         
         // Log when context extraction succeeds or fails for debugging
         if (projectContext.length > 0) {
@@ -454,22 +523,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (project.intakeAnswers || project.minimumDetails) {
           console.warn("Project has intake/details but context extraction failed");
         }
-        
-        // Append project context to system prompt if available
-        if (projectContext) {
-          systemPromptToUse += `\n\n${projectContext}\n\nUse this context to ask informed, specific follow-up questions. DO NOT re-ask for information already provided above.`;
-        }
-        
-        // Inject enforcement instructions upfront to avoid wasteful double-calls
         const userMessageCount = existingMessages.filter(m => m.role === "user").length;
-
-        if (stage.stageNumber === 2 && userMessageCount < 6) {
-          systemPromptToUse += `\n\n<ENFORCEMENT>You have received ${userMessageCount} user messages so far. Since this is less than 6, you MUST ONLY ask 1-2 brief follow-up questions. Do NOT generate any document sections, headers (##), PRD content, or formatted output. Keep your response under 300 characters.</ENFORCEMENT>`;
-        }
-
-        if (stage.stageNumber === 3) {
-          systemPromptToUse += `\n\n<ENFORCEMENT>You MUST include HTML wireframe code in \`\`\`html code blocks in every response. Use orange color scheme (#FF6B35 primary, #FFA500 accents). If the user hasn't specified what to wireframe yet, ask them, but still include a simple placeholder HTML wireframe.</ENFORCEMENT>`;
-        }
+        const systemPromptToUse = buildStageRuntimeSystemPrompt({
+          basePrompt: adminPrompt?.content || stage.systemPrompt,
+          projectContext,
+          stageNumber: stage.stageNumber,
+          userMessageCount,
+        });
 
         // Build conversation history (existingMessages already includes the new user message we just created)
         const aiMessages: AIMessage[] = [
@@ -480,26 +540,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
           const userConfig = await getLLMConfig(req);
-          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig);
+          // Conversation stages use 'chat' tier (Groq default); stages 4+ are complex reasoning.
+          const task = stage.stageNumber >= 4 ? 'complex' : 'chat';
+          const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task);
 
           // Create AI response message
           const aiMessage = await storage.createMessage({
-            stageId: req.params.stageId,
+            stageId: stage.id,
             role: "assistant",
             content: aiResponse.content,
           });
 
-          // Update stage progress — construct from what we already have, no extra DB call
-          const allMessages = [
-            ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-            { role: "assistant" as const, content: aiResponse.content }
-          ];
-          const progress = await aiService.calculateProgress(
-            allMessages,
-            [stage.description] // In production, define more specific goals
-          );
-          
-          await storage.updateStage(req.params.stageId, { progress });
+          // Throttle progress assessment — run on 1st user message and every 3rd after.
+          // Cuts progress-LLM calls by ~67% without meaningfully stale UI (stage.progress persists between checks).
+          const shouldAssessProgress = userMessageCount === 1 || userMessageCount % 3 === 0;
+          if (shouldAssessProgress) {
+            const allMessages = [
+              ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+              { role: "assistant" as const, content: aiResponse.content }
+            ];
+            const progress = await aiService.calculateProgress(
+              allMessages,
+              [stage.description] // In production, define more specific goals
+            );
+
+            await storage.updateStage(stage.id, { progress });
+          }
 
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
@@ -512,71 +578,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Message creation error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid message data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to create message", error: String(error) });
     }
   });
 
   // Survey endpoints
-  app.post("/api/projects/:projectId/generate-survey", async (req, res) => {
+  app.post("/api/projects/:projectId/generate-survey", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
+      const { project } = projectAccess;
 
       // Get the discovery chat messages to inform the survey
-      const stages = await storage.getStagesByProject(req.params.projectId);
+      const stages = await storage.getStagesByProject(project.id);
       const prdStage = stages.find(s => s.stageNumber === 2);
       const discoveryMessages = prdStage ? await storage.getMessagesByStage(prdStage.id) : [];
 
-      const surveyPrompt = `Generate a short, focused survey for this product idea. Keep it simple and conversational.
-
-Product: "${project.description}"
-
-${discoveryMessages.length > 0 ? `Context from user:\n${discoveryMessages.map(m => `${m.role}: ${m.content}`).join('\n')}` : ''}
-
-Rules:
-- 3 sections max, 2 questions per section (6 questions total)
-- Questions should feel like a quick conversation, not a formal survey
-- Use the user's own words and concepts — don't introduce jargon they didn't use
-- Keep option text SHORT (3-5 words each)
-- Default to "multi-select" — only use "single-select" for truly either/or choices (like timeline)
-- Do NOT use "slider" for vague questions like "How important are features?" — that's meaningless
-- Use "multi-select" to let users pick features they want
-- Only use "slider" for specific, concrete questions like "What's your budget?" or "How many users at launch?"
-- Every question must be answerable without needing context from other questions
-- It's OK for the user to not know the answer — make questions approachable
-- Skip obvious questions the user already answered in their description
-- Do NOT ask about development teams, hiring, agencies, or resource allocation — users build with AI coding tools
-- Focus on WHAT to build, not HOW it gets built
-
-Sections should cover:
-1. What they're building (users, core features)
-2. How it should work (platform, key interactions)
-3. Scope & priorities (MVP features, what to build first, launch goals)
-
-Respond with ONLY valid JSON:
-{
-  "sections": [
-    {
-      "id": "what",
-      "title": "What You're Building",
-      "description": "Quick questions about your product",
-      "questions": [
-        {
-          "id": "q1",
-          "section": "what",
-          "question": "Short, conversational question?",
-          "type": "multi-select",
-          "options": ["Short option", "Another option"],
-          "required": true
-        }
-      ]
-    }
-  ]
-}`;
+      const surveyPrompt = buildSurveyGenerationPrompt({
+        projectDescription: project.description,
+        discoveryMessages,
+      });
 
       // Use interceptor prompt from schema.ts for survey generation
       const surveyInterceptor = getInterceptorPrompt("survey_generation_system");
@@ -584,13 +609,14 @@ Respond with ONLY valid JSON:
         ? surveyInterceptor.systemPrompt 
         : "You are a product requirements expert. Generate surveys that efficiently capture high-value information using sliders and select inputs. Always return valid JSON.";
       
+      // Survey generation is structured + moderately complex — route to Sonnet-tier when Anthropic is set.
       const response = await aiService.generateStructuredOutput([
         { role: "system", content: systemPrompt },
         { role: "user", content: surveyPrompt }
-      ], "claude-sonnet");
+      ], "claude-sonnet", undefined, 'deliverable');
 
       // Update project with the survey definition
-      await storage.updateProject(req.params.projectId, {
+      await storage.updateProject(project.id, {
         surveyDefinition: response,
         surveyPhase: "survey",
       });
@@ -602,17 +628,18 @@ Respond with ONLY valid JSON:
     }
   });
 
-  app.post("/api/projects/:projectId/submit-survey", async (req, res) => {
+  app.post("/api/projects/:projectId/submit-survey", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
+      const { project } = projectAccess;
 
       const { responses } = req.body;
       
       // Save survey responses
-      await storage.updateProject(req.params.projectId, {
+      await storage.updateProject(project.id, {
         surveyResponses: responses,
         surveyPhase: "complete",
       });
@@ -623,12 +650,13 @@ Respond with ONLY valid JSON:
     }
   });
 
-  app.post("/api/projects/:projectId/generate-docs-from-survey", async (req, res) => {
+  app.post("/api/projects/:projectId/generate-docs-from-survey", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
+      const { project } = projectAccess;
 
       if (!project.surveyResponses || !project.surveyDefinition) {
         return res.status(400).json({ message: "Survey not completed" });
@@ -646,7 +674,7 @@ Respond with ONLY valid JSON:
       );
 
       // Get stages to update with generated content
-      const allStages = await storage.getStagesByProject(req.params.projectId);
+      const allStages = await storage.getStagesByProject(project.id);
       
       // Filter stages based on preferences (if provided), otherwise generate all
       const stages = documentPreferences.length > 0
@@ -656,28 +684,14 @@ Respond with ONLY valid JSON:
       // Get active custom prompts organized by category
       const customPrompts = (project.customPrompts || []) as { id: string; name: string; prompt: string; category: string; isActive: boolean; }[];
       const activePrompts = customPrompts.filter(p => p.isActive);
-      
-      // Create custom prompts context for AI
-      const customPromptsContext = activePrompts.length > 0 
-        ? `\n\nUSER'S CUSTOM PROMPTS (incorporate these into your response where appropriate):\n${activePrompts.map(p => `- ${p.name} [${p.category}]: ${p.prompt}`).join('\n')}`
-        : '';
-      
-      // Generate documentation for each stage based on survey responses
-      const surveyContext = `
-Product: ${project.description}
-Survey Definition: ${JSON.stringify(project.surveyDefinition)}
-Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsContext}
-`;
 
-      // Map stage numbers to categories for reliable routing
-      // Stage 1: Requirements Definition, Stage 2: PRD Writing, Stage 3: Architecture Design
-      // Stage 4: Coding Prompts, Stage 5: Development Guide
       const stageCategoryMap: Record<number, string> = {
         1: 'requirements',
         2: 'requirements',
-        3: 'architecture',
-        4: 'coding',
-        5: 'testing',
+        3: 'features',
+        4: 'architecture',
+        5: 'coding',
+        6: 'testing',
       };
 
       // Batch-fetch all admin prompts once to avoid N queries in the loop
@@ -702,32 +716,27 @@ Survey Responses: ${JSON.stringify(project.surveyResponses)}${customPromptsConte
         })();
         
         const relevantPrompts = activePrompts.filter(p => p.category === stageCategory || p.category === 'general');
-        const stagePromptsContext = relevantPrompts.length > 0
-          ? `\n\nRelevant custom prompts for this section:\n${relevantPrompts.map(p => `- ${p.name}: ${p.prompt}`).join('\n')}`
-          : '';
-        
-        // Adjust prompt based on detail level
-        const detailInstruction = detailLevel === "summary"
-          ? "Generate a CONCISE SUMMARY version - focus on key points, main decisions, and essential information only. Keep it brief but actionable (roughly 1/3 the length of a full document)."
-          : "Generate DETAILED, COMPREHENSIVE documentation with thorough explanations, examples, and specific recommendations.";
-        
-        const docPrompt = `Based on this survey data, generate content for the "${stage.title}" section.
-
-${surveyContext}${stagePromptsContext}
-
-${detailInstruction}
-
-Be thorough and specific based on the survey answers provided.`;
+        const docPrompt = buildDocumentGenerationPrompt({
+          stage,
+          surveyDefinition: project.surveyDefinition,
+          surveyResponses: project.surveyResponses,
+          detailLevel,
+          activePrompts,
+          relevantPrompts,
+          productDescription: project.description,
+        });
 
         try {
           // Use pre-fetched admin prompt map to avoid per-stage DB query
           const adminPrompt = adminPromptMap.get(`stage_${stage.stageNumber}`);
           const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
 
+          // Deliverable generation — route to Anthropic Sonnet when available (stage 4+ uses Opus).
+          const task = stage.stageNumber >= 4 ? 'complex' : 'deliverable';
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig);
+          ], "claude-sonnet", userConfig, task);
 
           // Create a message in the stage with the generated content
           await storage.createMessage({
@@ -751,12 +760,13 @@ Be thorough and specific based on the survey answers provided.`;
   });
 
   // Generate docs from minimum details only (faster path for quick start)
-  app.post("/api/projects/:projectId/generate-docs-from-minimum", async (req, res) => {
+  app.post("/api/projects/:projectId/generate-docs-from-minimum", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
+      const { project } = projectAccess;
 
       const minimumDetails = req.body.minimumDetails || project.minimumDetails;
       if (!minimumDetails) {
@@ -764,25 +774,19 @@ Be thorough and specific based on the survey answers provided.`;
       }
 
       // Ensure project has stages
-      let stages = await storage.getStagesByProject(req.params.projectId);
+      let stages = await storage.getStagesByProject(project.id);
       if (stages.length === 0) {
-        // Create default stages
-        const defaultStages = [
-          { stageNumber: 1, title: "Requirements Definition", description: "User personas, use cases, and MVP scope", progress: 0, systemPrompt: "You are a product manager helping define requirements." },
-          { stageNumber: 2, title: "Product Requirements Document", description: "User stories, features, and success metrics", progress: 0, systemPrompt: "You are a product manager writing a detailed PRD." },
-          { stageNumber: 3, title: "UI Design & Wireframes", description: "Simple wireframe mockups", progress: 0, systemPrompt: "You are a UI designer creating wireframes." },
-          { stageNumber: 4, title: "System Architecture", description: "Technical design and architecture", progress: 0, systemPrompt: "You are a software architect designing the system." },
-          { stageNumber: 5, title: "Coding Prompts", description: "AI-optimized implementation instructions", progress: 0, systemPrompt: "You are a senior developer creating coding prompts." },
-          { stageNumber: 6, title: "Development Guide", description: "Implementation roadmap and milestones", progress: 0, systemPrompt: "You are a tech lead writing a development guide." },
-        ];
-        
-        for (const stageData of defaultStages) {
+        for (const stageData of DEFAULT_STAGES) {
           await storage.createStage({
-            projectId: req.params.projectId,
-            ...stageData,
+            projectId: project.id,
+            stageNumber: stageData.stageNumber,
+            title: stageData.title,
+            description: stageData.description,
+            systemPrompt: stageData.systemPrompt,
+            aiModel: stageData.aiModel || null,
           });
         }
-        stages = await storage.getStagesByProject(req.params.projectId);
+        stages = await storage.getStagesByProject(project.id);
       }
 
       // Build context from minimum details
@@ -810,13 +814,15 @@ Be thorough and specific based on the survey answers provided.`;
       if (md.mustAvoidTools) contextParts.push(`MUST AVOID: ${md.mustAvoidTools}`);
 
       const appStyle = project.appStyle as { id: string; name: string; description?: string; tagline?: string; vibe?: string; bestFor?: string; brands?: string } | null;
+      let appStyleSummary: string | null = null;
       if (appStyle) {
         const styleParts = [`UI/UX STYLE: ${appStyle.name}`];
         if (appStyle.tagline) styleParts.push(`Style approach: ${appStyle.tagline}`);
         if (appStyle.vibe) styleParts.push(`Vibe: ${appStyle.vibe}`);
         if (appStyle.description) styleParts.push(`Custom description: ${appStyle.description}`);
         if (appStyle.brands) styleParts.push(`Reference brands: ${appStyle.brands}`);
-        contextParts.push(styleParts.join(". "));
+        appStyleSummary = styleParts.join(". ");
+        contextParts.push(appStyleSummary);
       }
 
       const minimalContext = contextParts.join("\n");
@@ -830,20 +836,21 @@ Be thorough and specific based on the survey answers provided.`;
       const userConfig = await getLLMConfig(req);
 
       await Promise.allSettled(coreStagesToGenerate.map(async (stage) => {
-        const docPrompt = `Based on this minimal product context, generate content for the "${stage.title}" section.
-
-${minimalContext}
-
-Generate practical, actionable documentation based on the information provided. Be specific but acknowledge where more detail would be helpful. Focus on the core requirements and make reasonable assumptions where needed.${appStyle ? ` The UI/UX should follow a "${appStyle.name}" style direction.` : ''}`;
+        const docPrompt = buildMinimumDetailsDocumentPrompt({
+          stage,
+          minimalContext,
+          appStyleSummary,
+        });
 
         try {
           const adminPrompt = adminPromptMap.get(`stage_${stage.stageNumber}`);
           const systemPromptToUse = adminPrompt?.content || stage.systemPrompt;
 
+          const task = stage.stageNumber >= 4 ? 'complex' : 'deliverable';
           const response = await aiService.chat([
             { role: "system", content: systemPromptToUse },
             { role: "user", content: docPrompt }
-          ], "claude-sonnet", userConfig);
+          ], "claude-sonnet", userConfig, task);
 
           await storage.createMessage({
             stageId: stage.id,
@@ -865,14 +872,15 @@ Generate practical, actionable documentation based on the information provided. 
   });
 
   // Export functionality
-  app.get("/api/projects/:projectId/export", async (req, res) => {
+  app.get("/api/projects/:projectId/export", async (req: any, res) => {
     try {
-      const project = await storage.getProject(req.params.projectId);
-      if (!project) {
-        return res.status(404).json({ message: "Project not found" });
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) {
+        return;
       }
+      const { project } = projectAccess;
 
-      const stages = await storage.getStagesByProject(req.params.projectId);
+      const stages = await storage.getStagesByProject(project.id);
       const exportData = {
         project,
         stages: await Promise.all(stages.map(async (stage) => {
@@ -922,7 +930,7 @@ Generate practical, actionable documentation based on the information provided. 
       res.status(201).json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid prompt data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid prompt data", errors: error.issues });
       }
       console.error("Error creating prompt:", error);
       res.status(500).json({ message: "Failed to create prompt" });
@@ -943,7 +951,7 @@ Generate practical, actionable documentation based on the information provided. 
       res.json(prompt);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid prompt data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid prompt data", errors: error.issues });
       }
       res.status(500).json({ message: "Failed to update prompt" });
     }
@@ -1003,7 +1011,7 @@ Generate practical, actionable documentation based on the information provided. 
   app.get("/api/settings", requireAuth, async (req: any, res) => {
     try {
       const settings = await storage.getUserSettings(req.userId);
-      const result = settings || { llmProvider: 'groq', llmModel: 'llama-3.3-70b-versatile', llmApiKey: null };
+      const result = settings || { llmProvider: 'groq', llmModel: 'openai/gpt-oss-120b', llmApiKey: null };
       // Mask API key in response
       const rawKey = result.llm_api_key || result.llmApiKey;
       if (rawKey) {

@@ -1,10 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import express, { type Request, Response, NextFunction } from "express";
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "../auth";
 import { registerRoutes } from "../routes";
 import { runMigrations } from "../migrate";
 
 let appInitialized = false;
 const app = express();
+app.all("/api/auth/*", toNodeHandler(auth));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 

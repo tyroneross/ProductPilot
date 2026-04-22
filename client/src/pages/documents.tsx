@@ -532,26 +532,6 @@ export default function DocumentsPage() {
               Refine with AI
             </button>
 
-            <button
-              style={{
-                background: "none",
-                border: "none",
-                color: "#6b5d52",
-                fontSize: 13,
-                fontFamily: "inherit",
-                cursor: "pointer",
-                padding: 0,
-                transition: "color 0.2s",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#a89a8c")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "#6b5d52")}
-              onClick={() => {
-                // TODO: Implement export — no backend endpoint exists yet
-                console.log("Export All clicked");
-              }}
-            >
-              Export All
-            </button>
           </div>
         </div>
       </main>

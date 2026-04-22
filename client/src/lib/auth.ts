@@ -1,7 +1,14 @@
-import { createAuthClient } from '@neondatabase/neon-js/auth';
+import { createAuthClient } from "better-auth/react";
 
-export const authClient = createAuthClient(import.meta.env.VITE_NEON_AUTH_URL as string, {
+const authOrigin =
+  typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:3000";
+
+export const authClient = createAuthClient({
+  baseURL: authOrigin,
+  basePath: "/api/auth",
   fetchOptions: {
-    credentials: 'include' as RequestCredentials,
+    credentials: "include" as RequestCredentials,
   },
 });

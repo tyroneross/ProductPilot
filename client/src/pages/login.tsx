@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { authClient } from "@/lib/auth";
@@ -19,14 +19,54 @@ const inputStyle: React.CSSProperties = {
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated, isLoading, signIn, signUp } = useAuth();
+  const { isAuthenticated, isLoading, signIn, signUp, sendVerificationEmail } = useAuth();
 
   const [authTab, setAuthTab] = useState<"signin" | "signup">("signin");
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authInfo, setAuthInfo] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [canResendVerification, setCanResendVerification] = useState(false);
+  const nameInputId = "auth-name";
+  const emailInputId = "auth-email";
+  const passwordInputId = "auth-password";
+
+  const verificationCallbackURL =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/login?verified=1`
+      : "/login?verified=1";
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("verified") !== "1") {
+      return;
+    }
+
+    setAuthTab("signin");
+    setAuthError("");
+    setAuthInfo("Email verified. Sign in to continue.");
+    setCanResendVerification(false);
+
+    params.delete("verified");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, []);
+
+  function isVerificationError(message: string) {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("email not verified") ||
+      normalized.includes("verify your email") ||
+      normalized.includes("verify your account")
+    );
+  }
 
   // Redirect if already authenticated
   if (!isLoading && isAuthenticated) {
@@ -60,36 +100,84 @@ export default function LoginPage() {
     );
   }
 
-  async function handleGoogleSignIn() {
-    try {
-      const result = await authClient.signIn.social({
+  function handleGoogleSignIn() {
+    setAuthError("");
+    setAuthInfo("");
+    setCanResendVerification(false);
+    setAuthLoading(true);
+
+    authClient
+      .signIn.social({
         provider: "google",
-        callbackURL: window.location.origin + "/projects",
+        callbackURL: `${window.location.origin}/projects`,
+      })
+      .then((result) => {
+        if (result.error) {
+          throw result.error;
+        }
+        const data = result as any;
+        const redirectUrl = data?.data?.url || data?.url;
+        if (typeof redirectUrl === "string" && redirectUrl) {
+          window.location.href = redirectUrl;
+          return;
+        }
+        setAuthLoading(false);
+      })
+      .catch((error) => {
+        setAuthError(error instanceof Error ? error.message : "Failed to start Google sign-in");
+        setAuthLoading(false);
       });
-      const data = result as any;
-      if (data?.data?.url) {
-        window.location.href = data.data.url;
-      } else if (data?.url) {
-        window.location.href = data.url;
-      }
-    } catch {
-      setAuthError("Failed to start Google sign-in. Please try again.");
-    }
   }
 
   async function handleAuthSubmit(e: React.FormEvent) {
     e.preventDefault();
     setAuthError("");
+    setAuthInfo("");
+    setCanResendVerification(false);
     setAuthLoading(true);
     try {
       if (authTab === "signin") {
-        await signIn(authEmail, authPassword);
+        await signIn(authEmail, authPassword, { callbackURL: verificationCallbackURL });
+        setLocation("/projects");
       } else {
-        await signUp(authEmail, authPassword, authName);
+        await signUp(authEmail, authPassword, authName, {
+          callbackURL: verificationCallbackURL,
+        });
+        setAuthTab("signin");
+        setAuthPassword("");
+        setAuthInfo("Check your email to verify your account, then sign in.");
+        setCanResendVerification(true);
       }
-      setLocation("/projects");
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Authentication failed");
+      const message = err instanceof Error ? err.message : "Authentication failed";
+      if (isVerificationError(message)) {
+        setAuthInfo("Check your email to verify your account, then sign in.");
+        setCanResendVerification(true);
+      } else {
+        setAuthError(message);
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    if (!authEmail.trim()) {
+      setAuthError("Enter your email address first.");
+      return;
+    }
+
+    setAuthError("");
+    setAuthInfo("");
+    setAuthLoading(true);
+
+    try {
+      await sendVerificationEmail(authEmail, { callbackURL: verificationCallbackURL });
+      setAuthInfo("Verification email sent. Check your inbox.");
+      setCanResendVerification(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send verification email";
+      setAuthError(message);
     } finally {
       setAuthLoading(false);
     }
@@ -304,10 +392,14 @@ export default function LoginPage() {
           >
             {authTab === "signup" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}>
+                <label
+                  htmlFor={nameInputId}
+                  style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}
+                >
                   Name
                 </label>
                 <input
+                  id={nameInputId}
                   type="text"
                   value={authName}
                   onChange={(e) => setAuthName(e.target.value)}
@@ -326,10 +418,14 @@ export default function LoginPage() {
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}>
+              <label
+                htmlFor={emailInputId}
+                style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}
+              >
                 Email
               </label>
               <input
+                id={emailInputId}
                 type="email"
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
@@ -347,10 +443,14 @@ export default function LoginPage() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}>
+              <label
+                htmlFor={passwordInputId}
+                style={{ fontSize: "13px", fontWeight: 500, color: "#a89a8c" }}
+              >
                 Password
               </label>
               <input
+                id={passwordInputId}
                 type="password"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
@@ -371,6 +471,33 @@ export default function LoginPage() {
               <p style={{ fontSize: "13px", color: "#e06356", margin: 0 }}>
                 {authError}
               </p>
+            )}
+
+            {authInfo && (
+              <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+                {authInfo}
+              </p>
+            )}
+
+            {canResendVerification && (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={authLoading}
+                style={{
+                  alignSelf: "flex-start",
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  fontSize: "13px",
+                  color: "#f0b65e",
+                  cursor: authLoading ? "not-allowed" : "pointer",
+                  textDecoration: "underline",
+                  textUnderlineOffset: "2px",
+                }}
+              >
+                Resend verification email
+              </button>
             )}
 
             <button
@@ -396,6 +523,12 @@ export default function LoginPage() {
                 ? "Sign In"
                 : "Sign Up"}
             </button>
+
+            {authTab === "signup" && (
+              <p style={{ fontSize: "12px", color: "#6b5d52", margin: 0, lineHeight: 1.5 }}>
+                Email sign-up sends a verification link before the account can sign in.
+              </p>
+            )}
           </form>
         </div>
 

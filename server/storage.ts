@@ -2,6 +2,8 @@ import { eq, desc, asc } from "drizzle-orm";
 import { db } from "./db";
 import { projects, stages, messages, type Project, type InsertProject, type Stage, type InsertStage, type Message, type InsertMessage, type UpdateStage, DEFAULT_STAGES } from "@shared/schema";
 
+const database = db as NonNullable<typeof db>;
+
 export interface IStorage {
   // Projects
   getProject(id: string): Promise<Project | undefined>;
@@ -27,16 +29,16 @@ export class PostgresStorage implements IStorage {
   constructor() {}
 
   async getProject(id: string): Promise<Project | undefined> {
-    const result = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+    const result = await database.select().from(projects).where(eq(projects.id, id)).limit(1);
     return result[0];
   }
 
   async getAllProjects(): Promise<Project[]> {
-    return await db.select().from(projects).orderBy(desc(projects.createdAt));
+    return await database.select().from(projects).orderBy(desc(projects.createdAt));
   }
 
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const [project] = await db.insert(projects).values({
+    const [project] = await database.insert(projects).values({
       ...insertProject,
       aiModel: insertProject.aiModel || "claude-sonnet",
     }).returning();
@@ -56,7 +58,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined> {
-    const [updatedProject] = await db.update(projects)
+    const [updatedProject] = await database.update(projects)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(projects.id, id))
       .returning();
@@ -64,17 +66,17 @@ export class PostgresStorage implements IStorage {
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const result = await db.delete(projects).where(eq(projects.id, id)).returning();
+    const result = await database.delete(projects).where(eq(projects.id, id)).returning();
     return result.length > 0;
   }
 
   async getStage(id: string): Promise<Stage | undefined> {
-    const result = await db.select().from(stages).where(eq(stages.id, id)).limit(1);
+    const result = await database.select().from(stages).where(eq(stages.id, id)).limit(1);
     return result[0];
   }
 
   async getStagesByProject(projectId: string): Promise<Stage[]> {
-    return await db.select().from(stages)
+    return await database.select().from(stages)
       .where(eq(stages.projectId, projectId))
       .orderBy(asc(stages.stageNumber));
   }
@@ -83,7 +85,7 @@ export class PostgresStorage implements IStorage {
     // Find default stage configuration
     const defaultStage = DEFAULT_STAGES.find(ds => ds.stageNumber === insertStage.stageNumber);
     
-    const [stage] = await db.insert(stages).values({
+    const [stage] = await database.insert(stages).values({
       ...insertStage,
       progress: 0,
       isUnlocked: true, // All stages unlocked by default now
@@ -110,7 +112,7 @@ export class PostgresStorage implements IStorage {
       }
     }
     
-    const [updatedStage] = await db.update(stages)
+    const [updatedStage] = await database.update(stages)
       .set(finalUpdates)
       .where(eq(stages.id, id))
       .returning();
@@ -119,23 +121,23 @@ export class PostgresStorage implements IStorage {
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
-    const result = await db.select().from(messages).where(eq(messages.id, id)).limit(1);
+    const result = await database.select().from(messages).where(eq(messages.id, id)).limit(1);
     return result[0];
   }
 
   async getMessagesByStage(stageId: string): Promise<Message[]> {
-    return await db.select().from(messages)
+    return await database.select().from(messages)
       .where(eq(messages.stageId, stageId))
       .orderBy(asc(messages.createdAt));
   }
 
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
-    const [message] = await db.insert(messages).values(insertMessage).returning();
+    const [message] = await database.insert(messages).values(insertMessage).returning();
     return message;
   }
 
   async deleteMessagesByStage(stageId: string): Promise<void> {
-    await db.delete(messages).where(eq(messages.stageId, stageId));
+    await database.delete(messages).where(eq(messages.stageId, stageId));
   }
 }
 

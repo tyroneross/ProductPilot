@@ -38,8 +38,8 @@ export default function SettingsPage() {
   // Load settings on mount when authenticated
   useEffect(() => {
     if (!isAuthenticated) return;
-    fetch("/api/settings", { credentials: "include" })
-      .then((r) => r.ok ? r.json() : null)
+    apiRequest("GET", "/api/settings")
+      .then((r) => r.json())
       .then((data: SettingsResponse | null) => {
         if (!data) return;
         const p: Provider = (data.llmProvider as Provider) || "groq";
@@ -77,8 +77,8 @@ export default function SettingsPage() {
       setApiKey("");
       setHasChanges(false);
       // Refresh masked key
-      fetch("/api/settings", { credentials: "include" })
-        .then((r) => r.ok ? r.json() : null)
+      apiRequest("GET", "/api/settings")
+        .then((r) => r.json())
         .then((data: SettingsResponse | null) => {
           if (data?.llmApiKeyMasked) setSavedKeyMasked(data.llmApiKeyMasked);
         })

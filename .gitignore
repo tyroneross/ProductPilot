@@ -10,4 +10,5 @@ vite.config.ts.*
 .vercel
 .ibr/
 .certs/
+.archive/
 api/

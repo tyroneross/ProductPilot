@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 export default function WelcomePage() {
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, signOut } = useAuth();
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, -apple-system, sans-serif" }}>
@@ -86,10 +86,13 @@ export default function WelcomePage() {
                 <li>
                   <NavLink onClick={() => setLocation("/projects")}>Projects</NavLink>
                 </li>
+                <li>
+                  <NavLink onClick={async () => { await signOut(); setLocation("/"); }}>Sign Out</NavLink>
+                </li>
               </>
             ) : (
               <li>
-                <NavLink onClick={() => setLocation("/settings")}>Sign In</NavLink>
+                <NavLink onClick={() => setLocation("/login")}>Sign In</NavLink>
               </li>
             )}
           </ul>

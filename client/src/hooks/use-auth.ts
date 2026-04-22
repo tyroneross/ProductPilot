@@ -1,53 +1,88 @@
-import { useState, useEffect, useCallback } from 'react';
-import { authClient } from '@/lib/auth';
+import { authClient } from "@/lib/auth";
+
+type AuthFlowOptions = {
+  callbackURL?: string;
+};
+
+function getAuthErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: string }).message;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+
+  return fallback;
+}
 
 export function useAuth() {
-  const [user, setUser] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [token, setToken] = useState<string | null>(null);
+  const sessionState = authClient.useSession();
+  const session = sessionState.data || null;
+  const user = session?.user || null;
 
-  const refreshSession = useCallback(async () => {
-    try {
-      const result = await authClient.getSession();
-      const session = result?.data || result;
-      setUser(session?.user || null);
-      setToken(session?.session?.token || session?.token || null);
-    } catch {
-      setUser(null);
-      setToken(null);
-    } finally {
-      setIsLoading(false);
+  const signIn = async (email: string, password: string, options?: AuthFlowOptions) => {
+    const result = await authClient.signIn.email({
+      email,
+      password,
+      callbackURL: options?.callbackURL,
+    });
+    if (result.error) {
+      throw new Error(getAuthErrorMessage(result.error, "Authentication failed"));
     }
-  }, []);
-
-  useEffect(() => { refreshSession(); }, [refreshSession]);
-
-  const signIn = async (email: string, password: string) => {
-    const result = await authClient.signIn.email({ email, password });
-    await refreshSession();
-    return result;
+    await sessionState.refetch();
+    return result.data;
   };
 
-  const signUp = async (email: string, password: string, name: string) => {
-    const result = await authClient.signUp.email({ email, password, name });
-    await refreshSession();
-    return result;
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    options?: AuthFlowOptions,
+  ) => {
+    const result = await authClient.signUp.email({
+      email,
+      password,
+      name,
+      callbackURL: options?.callbackURL,
+    });
+    if (result.error) {
+      throw new Error(getAuthErrorMessage(result.error, "Authentication failed"));
+    }
+    await sessionState.refetch();
+    return result.data;
+  };
+
+  const sendVerificationEmail = async (email: string, options?: AuthFlowOptions) => {
+    const result = await authClient.sendVerificationEmail({
+      email,
+      callbackURL: options?.callbackURL,
+    });
+    if (result.error) {
+      throw new Error(getAuthErrorMessage(result.error, "Failed to send verification email"));
+    }
+    return result.data;
   };
 
   const signOut = async () => {
-    await authClient.signOut();
-    setUser(null);
-    setToken(null);
+    const result = await authClient.signOut();
+    if ((result as { error?: unknown } | undefined)?.error) {
+      throw new Error(
+        getAuthErrorMessage((result as { error?: unknown }).error, "Failed to sign out"),
+      );
+    }
+    await sessionState.refetch();
   };
 
   return {
     user,
-    isLoading,
-    isAuthenticated: !!user,
-    token,
+    session: session?.session || null,
+    isLoading: sessionState.isPending,
+    isAuthenticated: !!session?.session,
     signIn,
     signUp,
+    sendVerificationEmail,
     signOut,
-    logout: signOut, // backwards compat with admin page
+    logout: signOut,
+    refreshSession: sessionState.refetch,
   };
 }

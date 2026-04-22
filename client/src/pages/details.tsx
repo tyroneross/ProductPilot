@@ -39,6 +39,7 @@ export default function DetailsPage() {
         name: productIdea.trim().substring(0, 50) + (productIdea.trim().length > 50 ? "..." : ""),
         description: productIdea.trim(),
         mode: "survey",
+        demoMode: true,
       });
       const project = await response.json();
       await apiRequest("POST", `/api/projects/${project.id}/generate-docs-from-minimum`, {

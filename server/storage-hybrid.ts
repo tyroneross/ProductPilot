@@ -1,5 +1,6 @@
 import type { Project, Stage, Message, InsertProject, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt } from "@shared/schema";
 import { projects, stages, messages, adminPrompts, DEFAULT_STAGES } from "@shared/schema";
+import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
 import { db } from "./db";
 
@@ -8,6 +9,8 @@ interface IStorage {
   createProject(project: InsertProject): Promise<Project>;
   getProject(id: string): Promise<Project | undefined>;
   getAllProjects(): Promise<Project[]>;
+  getProjectsByUserId(userId: string): Promise<Project[]>;
+  getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]>;
   getUserDraft(userId: string): Promise<Project | undefined>;
   updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
@@ -54,6 +57,7 @@ class MemStorage implements IStorage {
     const project: Project = {
       id: this.generateId(),
       userId: insertProject.userId || null,
+      guestOwnerId: insertProject.guestOwnerId || null,
       name: insertProject.name,
       description: insertProject.description,
       mode: insertProject.mode || "survey",
@@ -64,123 +68,11 @@ class MemStorage implements IStorage {
       customPrompts: insertProject.customPrompts || null,
       intakeAnswers: insertProject.intakeAnswers || null,
       minimumDetails: insertProject.minimumDetails || null,
+      appStyle: insertProject.appStyle || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     this.projects.set(project.id, project);
-    
-    // Create default stages for the project
-    const DEFAULT_STAGES = [
-      {
-        stageNumber: 1,
-        title: "Requirements Definition",
-        description: "Define core requirements and user needs",
-        systemPrompt: "You are a product requirements expert. Help define clear, actionable requirements.",
-        keyInsights: [
-          "What is the main problem you're solving?",
-          "Who is your target user?", 
-          "What's the core value proposition?",
-          "What are your key success metrics?",
-          "What's your MVP scope?"
-        ]
-      },
-      {
-        stageNumber: 2,
-        title: "PRD Writing",
-        description: "Create comprehensive Product Requirements Document",
-        systemPrompt: `<CRITICAL_INSTRUCTION>
-You are an interviewer gathering requirements. You MUST NOT generate any PRD document until AFTER at least 6 user responses.
-
-FIRST: Count how many USER messages exist in this conversation.
-- If USER messages < 6: Ask ONE question ONLY. DO NOT generate ANY document sections, headers, or formatted content.
-- If USER messages >= 6: You may offer to generate the PRD if you have sufficient information.
-
-IMPORTANT: ASK ONLY ONE QUESTION AT A TIME. This makes the conversation feel natural and less overwhelming.
-
-YOUR RESPONSE FORMAT when USER messages < 6:
-1. Briefly acknowledge their previous answer (1-2 sentences max)
-2. Ask exactly ONE focused follow-up question
-3. Keep your response short and conversational
-
-Example GOOD responses:
-"That makes sense! Who are the primary users of this app?"
-
-"Great context. What's the one problem they face that frustrates them most?"
-
-"Interesting! How do they currently handle this without your app?"
-
-Example BAD response (too many questions):
-"Let me understand better:
-1. Who are the primary users?
-2. What problem do they face?
-3. How do they handle it now?"
-<DO_NOT_ASK_MULTIPLE_QUESTIONS>
-
-CONVERSATION FLOW (one question per exchange):
-Exchange 1: Who are the target users?
-Exchange 2: What problem are they facing?
-Exchange 3: What's the core solution/value prop?
-Exchange 4: What are the must-have features?
-Exchange 5: Any technical or business constraints?
-Exchange 6: How will you measure success?
-Exchange 7+: Offer to generate the PRD
-
-QUESTION TOPICS (ask ONE per response):
-- Target users and their pain points
-- Core problem being solved
-- Essential features vs nice-to-haves
-- Key user workflows
-- Technical or business constraints
-- Success metrics
-</CRITICAL_INSTRUCTION>`,
-        keyInsights: [
-          "What are your key user stories?",
-          "What features are absolutely essential?",
-          "How will users interact with your product?",
-          "What's your technical approach?",
-          "What's your launch timeline?"
-        ]
-      },
-      {
-        stageNumber: 3,
-        title: "Architecture Design",
-        description: "Design system architecture and technical approach",
-        systemPrompt: "You are a software architect. Help design scalable, maintainable systems.",
-        keyInsights: [
-          "What's your overall system architecture?",
-          "What technology stack will you use?",
-          "How will data flow through your system?",
-          "What are your security requirements?",
-          "How will you handle scaling?"
-        ]
-      },
-      {
-        stageNumber: 4,
-        title: "Coding Prompts",
-        description: "Generate development prompts and implementation guides",
-        systemPrompt: "You are a senior developer. Help create clear coding guidelines and prompts.",
-        keyInsights: [
-          "What's your development approach?",
-          "How will you structure your code?",
-          "What are the key components to build?",
-          "What are your integration points?",
-          "What's your testing strategy?"
-        ]
-      },
-      {
-        stageNumber: 5,
-        title: "Development Guide",
-        description: "Create step-by-step implementation roadmap",
-        systemPrompt: "You are a development team lead. Help create actionable development plans.",
-        keyInsights: [
-          "What are your development phases?",
-          "What tasks should you prioritize?",
-          "What resources do you need?",
-          "What are the main risks?",
-          "What's your delivery timeline?"
-        ]
-      }
-    ];
 
     for (const defaultStage of DEFAULT_STAGES) {
       const stage: Stage = {
@@ -206,7 +98,19 @@ QUESTION TOPICS (ask ONE per response):
   }
 
   async getAllProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values());
+    return Array.from(this.projects.values()).sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+  }
+
+  async getProjectsByUserId(userId: string): Promise<Project[]> {
+    return (await this.getAllProjects()).filter((project) => project.userId === userId);
+  }
+
+  async getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]> {
+    return (await this.getAllProjects()).filter(
+      (project) => project.guestOwnerId === guestOwnerId,
+    );
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {
@@ -287,15 +191,6 @@ QUESTION TOPICS (ask ONE per response):
   async ensureStagesForProject(projectId: string): Promise<Stage[]> {
     const existing = await this.getStagesByProject(projectId);
     if (existing.length > 0) return existing;
-
-    const DEFAULT_STAGES = [
-      { stageNumber: 1, title: "Requirements Definition", description: "Define core requirements and user needs", systemPrompt: "You are a product requirements expert.", keyInsights: [] },
-      { stageNumber: 2, title: "PRD Writing", description: "Create comprehensive PRD", systemPrompt: "You are a PRD expert.", keyInsights: [] },
-      { stageNumber: 3, title: "UI Design", description: "Create UI wireframes", systemPrompt: "You are a UI/UX expert.", keyInsights: [] },
-      { stageNumber: 4, title: "Architecture", description: "Technical architecture design", systemPrompt: "You are a software architect.", keyInsights: [] },
-      { stageNumber: 5, title: "Coding Prompts", description: "Generate coding prompts", systemPrompt: "You are an AI prompt engineer.", keyInsights: [] },
-      { stageNumber: 6, title: "Development Guide", description: "Create development guide", systemPrompt: "You are a development guide expert.", keyInsights: [] },
-    ];
 
     const createdStages: Stage[] = [];
     for (const defaultStage of DEFAULT_STAGES) {
@@ -410,14 +305,7 @@ QUESTION TOPICS (ask ONE per response):
       targetKey: "discovery_initial",
       label: "Discovery Initial Prompt",
       description: "The initial prompt used to start the discovery conversation in Survey Mode",
-      content: `You are a product discovery expert helping users define their product vision. Ask clarifying questions one at a time to understand:
-- What problem they're solving
-- Who their target users are
-- Key features and functionality
-- Technical constraints or preferences
-- Success metrics
-
-Be conversational and encouraging. After 4-5 exchanges, you'll have enough context to generate a personalized survey.`,
+      content: DISCOVERY_INITIAL_PROMPT,
       isDefault: true,
       updatedBy: userId,
     });
@@ -472,6 +360,22 @@ class PostgresStorage implements IStorage {
 
   async getAllProjects(): Promise<Project[]> {
     return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+  }
+
+  async getProjectsByUserId(userId: string): Promise<Project[]> {
+    return await this.db
+      .select()
+      .from(projects)
+      .where(eq(projects.userId, userId))
+      .orderBy(desc(projects.createdAt));
+  }
+
+  async getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]> {
+    return await this.db
+      .select()
+      .from(projects)
+      .where(eq(projects.guestOwnerId, guestOwnerId))
+      .orderBy(desc(projects.createdAt));
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {
@@ -644,14 +548,7 @@ class PostgresStorage implements IStorage {
       targetKey: "discovery_initial",
       label: "Discovery Initial Prompt",
       description: "The initial prompt used to start the discovery conversation in Survey Mode",
-      content: `You are a product discovery expert helping users define their product vision. Ask clarifying questions one at a time to understand:
-- What problem they're solving
-- Who their target users are
-- Key features and functionality
-- Technical constraints or preferences
-- Success metrics
-
-Be conversational and encouraging. After 4-5 exchanges, you'll have enough context to generate a personalized survey.`,
+      content: DISCOVERY_INITIAL_PROMPT,
       isDefault: true,
       updatedBy: userId,
     });

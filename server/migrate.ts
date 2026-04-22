@@ -32,6 +32,8 @@ export async function runMigrations() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS "projects" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "user_id" varchar,
+        "guest_owner_id" varchar,
         "name" text NOT NULL,
         "description" text NOT NULL,
         "ai_model" text DEFAULT 'claude-sonnet' NOT NULL,
@@ -84,7 +86,7 @@ export async function runMigrations() {
       )
     `);
     
-    // Create sessions table for connect-pg-simple
+    // Create legacy sessions table (kept to avoid breaking older local data)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS "sessions" (
         "sid" varchar NOT NULL PRIMARY KEY,
@@ -96,6 +98,85 @@ export async function runMigrations() {
     // Create index on sessions expire
     await pool.query(`
       CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")
+    `);
+
+    // Create Better Auth tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "user" (
+        "id" text PRIMARY KEY NOT NULL,
+        "name" text NOT NULL,
+        "email" text NOT NULL,
+        "email_verified" boolean DEFAULT false NOT NULL,
+        "image" text,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        "id" text PRIMARY KEY NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "token" text NOT NULL,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL,
+        "ip_address" text,
+        "user_agent" text,
+        "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "account" (
+        "id" text PRIMARY KEY NOT NULL,
+        "account_id" text NOT NULL,
+        "provider_id" text NOT NULL,
+        "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+        "access_token" text,
+        "refresh_token" text,
+        "id_token" text,
+        "access_token_expires_at" timestamp,
+        "refresh_token_expires_at" timestamp,
+        "scope" text,
+        "password" text,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS "verification" (
+        "id" text PRIMARY KEY NOT NULL,
+        "identifier" text NOT NULL,
+        "value" text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "user_email_unique" ON "user" ("email")
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "session_token_unique" ON "session" ("token")
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "session_user_id_idx" ON "session" ("user_id")
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "account_user_id_idx" ON "account" ("user_id")
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "account_provider_account_unique" ON "account" ("provider_id", "account_id")
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier")
     `);
     
     // Create admin_prompts table (matching shared/schema.ts)
@@ -175,6 +256,9 @@ export async function runMigrations() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'user_id') THEN
           ALTER TABLE "projects" ADD COLUMN "user_id" varchar;
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'guest_owner_id') THEN
+          ALTER TABLE "projects" ADD COLUMN "guest_owner_id" varchar;
+        END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'mode') THEN
           ALTER TABLE "projects" ADD COLUMN "mode" text DEFAULT 'survey' NOT NULL;
         END IF;
@@ -201,6 +285,14 @@ export async function runMigrations() {
         END IF;
       END $$;
     `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "projects_user_id_idx" ON "projects" ("user_id")
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "projects_guest_owner_id_idx" ON "projects" ("guest_owner_id")
+    `);
     
     // Create user_settings table for BYOK LLM configuration
     await pool.query(`
@@ -221,10 +313,24 @@ export async function runMigrations() {
       DECLARE
         tbl TEXT;
       BEGIN
-        FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+        FOR tbl IN
+          SELECT tablename
+          FROM pg_tables
+          WHERE schemaname = 'public'
+            AND tablename NOT IN ('user', 'session', 'account', 'verification')
         LOOP
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
         END LOOP;
+      END $$;
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE IF EXISTS "user" DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE IF EXISTS "session" DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE IF EXISTS "account" DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE IF EXISTS "verification" DISABLE ROW LEVEL SECURITY;
       END $$;
     `);
 

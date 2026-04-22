@@ -14,6 +14,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Project, Stage, Message, SurveyDefinition, SurveyResponse, CustomPrompt } from "@shared/schema";
+import { SaveDialog } from "./session-survey/SaveDialog";
+import { PromptsDialog } from "./session-survey/PromptsDialog";
+import { AddEditPromptDialog } from "./session-survey/AddEditPromptDialog";
+import { ConfirmGenerateDialog } from "./session-survey/ConfirmGenerateDialog";
 
 export default function SessionSurveyPage() {
   const [, setLocation] = useLocation();
@@ -214,6 +218,7 @@ export default function SessionSurveyPage() {
         surveyPhase: "discovery",
         intakeAnswers: intakeAnswers,
         minimumDetails: minimumDetails,
+        demoMode: true,
       });
       const newProject = await res.json();
       setProjectId(newProject.id);
@@ -381,7 +386,9 @@ export default function SessionSurveyPage() {
     setCurrentSectionIndex((prev) => prev + 1);
   };
 
-  const handleReadyToGenerate = async () => {
+  const handleReadyToGenerate = async (
+    documentPreferences: Array<{ stageId: string; detailLevel: "detailed" | "summary" }> = [],
+  ) => {
     autoSaveSurveyMutation.mutate(surveyResponses);
     setIsGeneratingDocs(true);
     setGenerationProgress({ current: 0, total: stages.length, stageName: "Starting..." });
@@ -417,13 +424,27 @@ export default function SessionSurveyPage() {
 
     try {
       await apiRequest("POST", `/api/projects/${projectId}/submit-survey`, { responses: surveyResponses });
-      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {});
+      await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
+        documentPreferences,
+      });
       await checkProgress();
     } catch (error) {
       toast({ title: "Generation failed", description: "Please try again.", variant: "destructive" });
       setIsGeneratingDocs(false);
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
     }
+  };
+
+  const handleConfirmGenerate = () => {
+    const documentPreferences = Object.entries(documentSelections)
+      .filter(([, selection]) => selection.selected)
+      .map(([stageId, selection]) => ({
+        stageId,
+        detailLevel: selection.detailLevel,
+      }));
+
+    setShowDocumentSelection(false);
+    void handleReadyToGenerate(documentPreferences);
   };
 
   const handleSave = () => {
@@ -1365,7 +1386,9 @@ export default function SessionSurveyPage() {
 
                 {isLastSection ? (
                   <button
-                    onClick={handleReadyToGenerate}
+                    onClick={() => {
+                      void handleReadyToGenerate();
+                    }}
                     disabled={autoSaveSurveyMutation.isPending}
                     style={{
                       height: 40, padding: "0 24px",
@@ -1525,359 +1548,49 @@ export default function SessionSurveyPage() {
 
       {/* ── Dialogs (all preserved) ── */}
 
-      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Save Your Project</DialogTitle>
-            <DialogDescription>
-              Give your project a name so you can continue working on it later.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Input
-              placeholder="Project name"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              data-testid="input-save-project-name"
-            />
-            <div className="flex justify-end space-x-2">
-              <Button variant="ghost" onClick={() => setShowSaveDialog(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSaveWithName} disabled={!projectName.trim()}>
-                Save
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SaveDialog
+        open={showSaveDialog}
+        onOpenChange={setShowSaveDialog}
+        projectName={projectName}
+        setProjectName={setProjectName}
+        handleSaveWithName={handleSaveWithName}
+        isSaving={saveProjectMutation.isPending}
+      />
 
-      <Dialog open={showPromptsSection} onOpenChange={setShowPromptsSection}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Custom LLM Prompts</DialogTitle>
-            <DialogDescription>
-              Define custom prompts to use throughout your app. These prompts can be used for requirements, features, architecture, coding, or testing.
-            </DialogDescription>
-          </DialogHeader>
+      <PromptsDialog
+        open={showPromptsSection}
+        onOpenChange={setShowPromptsSection}
+        customPrompts={customPrompts}
+        handleOpenAddDialog={handleOpenAddDialog}
+        handleEditPrompt={handleEditPrompt}
+        handleTogglePrompt={handleTogglePrompt}
+        handleDeletePrompt={handleDeletePrompt}
+      />
 
-          <div className="space-y-4 py-4">
-            <div className="flex justify-between items-center">
-              <span className="text-description text-contrast-medium">
-                {customPrompts.length} prompt{customPrompts.length !== 1 ? "s" : ""} defined
-              </span>
-              <Button
-                onClick={handleOpenAddDialog}
-                className="btn-primary"
-                data-testid="button-add-prompt"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Prompt
-              </Button>
-            </div>
+      <AddEditPromptDialog
+        open={showAddPromptDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingPromptId(null);
+            setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
+          }
+          setShowAddPromptDialog(open);
+        }}
+        editingPromptId={editingPromptId}
+        newPrompt={newPrompt}
+        setNewPrompt={setNewPrompt}
+        handleAddPrompt={handleAddPrompt}
+      />
 
-            {customPrompts.length === 0 ? (
-              <div className="text-center py-8 text-contrast-medium">
-                <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p className="text-description">No custom prompts yet.</p>
-                <p className="text-metadata">Add prompts to customize AI behavior in your app.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {customPrompts.map((prompt) => (
-                  <div
-                    key={prompt.id}
-                    className={`bg-surface-secondary rounded-lg p-4 border ${
-                      prompt.isActive ? "border-accent" : "border-gray-200 opacity-60"
-                    }`}
-                    data-testid={`prompt-card-${prompt.id}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <h4 className="text-title font-medium text-contrast-high">{prompt.name}</h4>
-                          <span className="text-xs bg-surface-primary px-2 py-0.5 rounded text-contrast-medium">
-                            {prompt.category}
-                          </span>
-                        </div>
-                        {prompt.description && (
-                          <p className="text-metadata text-contrast-medium mb-2">{prompt.description}</p>
-                        )}
-                        <p className="text-description text-contrast-high line-clamp-2">{prompt.prompt}</p>
-                      </div>
-                      <div className="flex items-center space-x-2 ml-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEditPrompt(prompt)}
-                          className="text-contrast-medium hover:text-contrast-high"
-                          data-testid={`button-edit-prompt-${prompt.id}`}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleTogglePrompt(prompt.id)}
-                          className={prompt.isActive ? "text-accent" : "text-contrast-medium"}
-                          data-testid={`button-toggle-prompt-${prompt.id}`}
-                        >
-                          {prompt.isActive ? "Active" : "Inactive"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeletePrompt(prompt.id)}
-                          className="text-red-500 hover:text-red-700"
-                          data-testid={`button-delete-prompt-${prompt.id}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showAddPromptDialog} onOpenChange={(open) => {
-        if (!open) {
-          setEditingPromptId(null);
-          setNewPrompt({ name: "", description: "", prompt: "", category: "general", isActive: true });
-        }
-        setShowAddPromptDialog(open);
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingPromptId ? "Edit Custom Prompt" : "Add Custom Prompt"}</DialogTitle>
-            <DialogDescription>
-              {editingPromptId ? "Update your LLM prompt." : "Create a new LLM prompt for use in your application."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label className="text-description mb-2 block">Name</Label>
-              <Input
-                placeholder="e.g., Code Review Prompt"
-                value={newPrompt.name}
-                onChange={(e) => setNewPrompt({ ...newPrompt, name: e.target.value })}
-                data-testid="input-prompt-name"
-              />
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Category</Label>
-              <Select
-                value={newPrompt.category}
-                onValueChange={(value) => setNewPrompt({ ...newPrompt, category: value as CustomPrompt["category"] })}
-              >
-                <SelectTrigger data-testid="select-prompt-category">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="requirements">Requirements</SelectItem>
-                  <SelectItem value="features">Features</SelectItem>
-                  <SelectItem value="architecture">Architecture</SelectItem>
-                  <SelectItem value="coding">Coding</SelectItem>
-                  <SelectItem value="testing">Testing</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Description (optional)</Label>
-              <Input
-                placeholder="Brief description of what this prompt does"
-                value={newPrompt.description}
-                onChange={(e) => setNewPrompt({ ...newPrompt, description: e.target.value })}
-                data-testid="input-prompt-description"
-              />
-            </div>
-            <div>
-              <Label className="text-description mb-2 block">Prompt</Label>
-              <Textarea
-                placeholder="Enter your LLM prompt here..."
-                value={newPrompt.prompt}
-                onChange={(e) => setNewPrompt({ ...newPrompt, prompt: e.target.value })}
-                className="min-h-[150px]"
-                data-testid="textarea-prompt-content"
-              />
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button variant="ghost" onClick={() => setShowAddPromptDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddPrompt}
-                disabled={!newPrompt.name?.trim() || !newPrompt.prompt?.trim()}
-                data-testid="button-save-prompt"
-              >
-                {editingPromptId ? "Save Changes" : "Add Prompt"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Document Selection Dialog */}
-      <Dialog open={showDocumentSelection} onOpenChange={setShowDocumentSelection}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Ready to Generate Documentation</DialogTitle>
-            <DialogDescription>
-              Select which documents you want to generate and choose the detail level for each.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="flex justify-between items-center pb-2 border-b border-gray-200">
-              <span className="text-description text-contrast-medium">
-                {selectedCount} of {stages.length} documents selected
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
-                    stages.forEach(stage => {
-                      newSelections[stage.id] = {
-                        selected: true,
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed"
-                      };
-                    });
-                    setDocumentSelections(newSelections);
-                  }}
-                  data-testid="button-select-all"
-                >
-                  Select All
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const newSelections: Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }> = {};
-                    stages.forEach(stage => {
-                      newSelections[stage.id] = {
-                        selected: false,
-                        detailLevel: documentSelections[stage.id]?.detailLevel || "detailed"
-                      };
-                    });
-                    setDocumentSelections(newSelections);
-                  }}
-                  data-testid="button-deselect-all"
-                >
-                  Deselect All
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {stages
-                .sort((a, b) => a.stageNumber - b.stageNumber)
-                .map((stage) => (
-                  <div
-                    key={stage.id}
-                    className={`bg-surface-secondary rounded-lg p-4 border transition-colors ${
-                      documentSelections[stage.id]?.selected
-                        ? "border-accent bg-accent/5"
-                        : "border-gray-200"
-                    }`}
-                    data-testid={`doc-selection-${stage.id}`}
-                  >
-                    <div className="flex items-start gap-4">
-                      <Checkbox
-                        id={`doc-${stage.id}`}
-                        checked={documentSelections[stage.id]?.selected || false}
-                        onCheckedChange={(checked) => {
-                          setDocumentSelections(prev => ({
-                            ...prev,
-                            [stage.id]: {
-                              selected: !!checked,
-                              detailLevel: prev[stage.id]?.detailLevel || "detailed"
-                            }
-                          }));
-                        }}
-                        className="mt-1"
-                      />
-                      <div className="flex-1">
-                        <Label
-                          htmlFor={`doc-${stage.id}`}
-                          className="text-description font-medium text-contrast-high cursor-pointer"
-                        >
-                          {stage.title}
-                        </Label>
-                        <p className="text-metadata text-contrast-medium mt-1">
-                          {stage.description}
-                        </p>
-
-                        {documentSelections[stage.id]?.selected && (
-                          <div className="mt-3 flex items-center gap-2">
-                            <span className="text-metadata text-contrast-medium">Detail level:</span>
-                            <div className="flex rounded-lg overflow-hidden border border-gray-200">
-                              <button
-                                type="button"
-                                onClick={() => setDocumentSelections(prev => ({
-                                  ...prev,
-                                  [stage.id]: {
-                                    selected: prev[stage.id]?.selected ?? true,
-                                    detailLevel: "summary"
-                                  }
-                                }))}
-                                className={`px-3 py-1.5 text-sm transition-colors ${
-                                  documentSelections[stage.id]?.detailLevel === "summary"
-                                    ? "bg-accent text-white"
-                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
-                                }`}
-                                data-testid={`button-summary-${stage.id}`}
-                              >
-                                Summary
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDocumentSelections(prev => ({
-                                  ...prev,
-                                  [stage.id]: {
-                                    selected: prev[stage.id]?.selected ?? true,
-                                    detailLevel: "detailed"
-                                  }
-                                }))}
-                                className={`px-3 py-1.5 text-sm transition-colors ${
-                                  documentSelections[stage.id]?.detailLevel === "detailed"
-                                    ? "bg-accent text-white"
-                                    : "bg-surface-primary text-contrast-medium hover:bg-surface-secondary"
-                                }`}
-                                data-testid={`button-detailed-${stage.id}`}
-                              >
-                                Detailed
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-              <Button variant="ghost" onClick={() => setShowDocumentSelection(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleConfirmGenerate}
-                disabled={selectedCount === 0}
-                className="btn-primary"
-                data-testid="button-confirm-generate"
-              >
-                Generate {selectedCount} Document{selectedCount !== 1 ? "s" : ""}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmGenerateDialog
+        open={showDocumentSelection}
+        onOpenChange={setShowDocumentSelection}
+        stages={stages}
+        documentSelections={documentSelections}
+        setDocumentSelections={setDocumentSelections}
+        selectedCount={selectedCount}
+        handleConfirmGenerate={handleConfirmGenerate}
+      />
     </div>
   );
 }

@@ -41,13 +41,18 @@ interface ConfirmDialog {
   onConfirm: () => void;
 }
 
+type AdminPromptListItem = Omit<AdminPrompt, "createdAt" | "updatedAt"> & {
+  createdAt: Date | null;
+  updatedAt: Date | null;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function wordCount(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
 }
 
-function formatDate(date: string | null | undefined): string {
+function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "";
   return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -78,7 +83,7 @@ function PromptItem({
   onDelete,
   isSaving,
 }: {
-  prompt: AdminPrompt;
+  prompt: AdminPromptListItem;
   isEditing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
@@ -320,7 +325,7 @@ function PromptForm({
   onCancel,
   isLoading,
 }: {
-  initialData?: AdminPrompt;
+  initialData?: AdminPromptListItem;
   onSubmit: (data: Partial<AdminPrompt>) => void;
   onCancel: () => void;
   isLoading: boolean;
@@ -583,8 +588,8 @@ export default function AdminPage() {
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
-  const filteredPrompts = (() => {
-    const dbPrompts = prompts || [];
+  const filteredPrompts: AdminPromptListItem[] = (() => {
+    const dbPrompts = (prompts || []) as AdminPromptListItem[];
     const dbTargetKeys = new Set(dbPrompts.map((p) => p.targetKey));
 
     const defaultEntries = defaultStages
@@ -603,7 +608,7 @@ export default function AdminPage() {
             updatedBy: null,
             createdAt: null,
             updatedAt: null,
-          } as AdminPrompt)
+          } satisfies AdminPromptListItem)
       );
 
     return [...dbPrompts, ...defaultEntries].filter((p) => {
@@ -632,7 +637,7 @@ export default function AdminPage() {
     });
   }
 
-  function handleEditSave(prompt: AdminPrompt, data: Partial<AdminPrompt>) {
+  function handleEditSave(prompt: AdminPromptListItem, data: Partial<AdminPrompt>) {
     setPendingUpdateData({ id: prompt.id, data });
     setConfirmDialog({
       open: true,
@@ -644,7 +649,7 @@ export default function AdminPage() {
     });
   }
 
-  function handleDeleteConfirm(prompt: AdminPrompt) {
+  function handleDeleteConfirm(prompt: AdminPromptListItem) {
     setConfirmDialog({
       open: true,
       title: "Confirm Delete",
@@ -712,7 +717,7 @@ export default function AdminPage() {
               className="text-[12px] text-[#a89a8c] hidden sm:inline truncate max-w-[180px]"
               data-testid="text-admin-user"
             >
-              {user?.email || user?.firstName || "Admin"}
+              {user?.email || user?.name || "Admin"}
             </span>
             <Button
               variant="outline"
