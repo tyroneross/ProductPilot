@@ -35,6 +35,9 @@ function Router() {
       <Route path="/details" component={DetailsPage} />
       <Route path="/projects" component={ProjectsPage} />
       <Route path="/stage/:stageId" component={StagePage} />
+      <Route path="/documents">
+        <Redirect to="/projects" />
+      </Route>
       <Route path="/documents/:projectId" component={DocumentsPage} />
       <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />

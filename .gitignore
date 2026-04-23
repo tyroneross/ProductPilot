@@ -14,3 +14,6 @@ vite.config.ts.*
 .archive/
 .claude/
 meta.json
+
+# Bookmark snapshot data
+.claude/bookmarks/

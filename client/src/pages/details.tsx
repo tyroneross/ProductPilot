@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import Nav from "@/components/nav";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,6 +15,29 @@ const STYLES = [
 
 type StyleId = (typeof STYLES)[number]["id"];
 
+const EXAMPLE_IDEAS = [
+  "Habit tracker for couples",
+  "Invoice generator for freelancers",
+  "Podcast note-taker with summaries",
+  "Local farmers market finder",
+  "Budget-aware meal planner",
+  "Reading-list app with tags",
+] as const;
+
+const DRAFT_KEY = "productpilot.draft.idea";
+const DRAFT_SAVED_AT_KEY = "productpilot.draft.savedAt";
+
+function formatSavedAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 3_000) return "just now";
+  if (diff < 60_000) return `${Math.max(1, Math.floor(diff / 1000))}s ago`;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -22,9 +45,97 @@ export default function DetailsPage() {
   const [productIdea, setProductIdea] = useState("");
   const [selectedStyle, setSelectedStyle] = useState<StyleId>("minimal");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+
+  // Auto-save state
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [, forceTick] = useState(0);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedRef = useRef(false);
+
+  // Hydrate existing draft on mount
+  useEffect(() => {
+    try {
+      const existing = localStorage.getItem(DRAFT_KEY) ?? sessionStorage.getItem(DRAFT_KEY);
+      const existingTs = Number(localStorage.getItem(DRAFT_SAVED_AT_KEY) ?? sessionStorage.getItem(DRAFT_SAVED_AT_KEY));
+      if (existing && existing.trim().length > 0) {
+        setProductIdea(existing);
+        if (!Number.isNaN(existingTs) && existingTs > 0) setSavedAt(existingTs);
+      }
+    } catch {
+      // ignore storage errors (private mode, quota)
+    }
+    hydratedRef.current = true;
+  }, []);
+
+  // Debounced persist on change
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const trimmed = productIdea.trim();
+    saveTimerRef.current = setTimeout(() => {
+      try {
+        if (trimmed.length === 0) {
+          localStorage.removeItem(DRAFT_KEY);
+          sessionStorage.removeItem(DRAFT_KEY);
+          localStorage.removeItem(DRAFT_SAVED_AT_KEY);
+          sessionStorage.removeItem(DRAFT_SAVED_AT_KEY);
+          setSavedAt(null);
+          return;
+        }
+        const ts = Date.now();
+        localStorage.setItem(DRAFT_KEY, productIdea);
+        sessionStorage.setItem(DRAFT_KEY, productIdea);
+        localStorage.setItem(DRAFT_SAVED_AT_KEY, String(ts));
+        sessionStorage.setItem(DRAFT_SAVED_AT_KEY, String(ts));
+        setSavedAt(ts);
+      } catch {
+        // ignore
+      }
+    }, 500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [productIdea]);
+
+  // Refresh "saved Ns ago" label every 10s while visible
+  useEffect(() => {
+    if (savedAt == null) return;
+    const id = setInterval(() => forceTick((x) => x + 1), 10_000);
+    return () => clearInterval(id);
+  }, [savedAt]);
 
   const canContinue = productIdea.trim().length > 0;
   const showExtras = productIdea.trim().length > 10;
+  const canEnhance = productIdea.trim().length >= 3 && !isEnhancing;
+
+  const clearDraftStorage = () => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(DRAFT_SAVED_AT_KEY);
+      sessionStorage.removeItem(DRAFT_SAVED_AT_KEY);
+    } catch {}
+  };
+
+  const handleEnhance = async () => {
+    const idea = productIdea.trim();
+    if (idea.length < 3 || isEnhancing) return;
+    setIsEnhancing(true);
+    try {
+      const res = await apiRequest("POST", "/api/enhance-idea", { idea });
+      const data = (await res.json()) as { enhanced?: string };
+      if (data?.enhanced && typeof data.enhanced === "string") {
+        setProductIdea(data.enhanced);
+      } else {
+        toast({ title: "Enhance failed", description: "Try again in a moment.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Enhance failed", description: "Try again in a moment.", variant: "destructive" });
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
 
   const handleContinueToSurvey = () => {
     const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
@@ -42,6 +153,7 @@ export default function DetailsPage() {
       "minimumDetails",
       JSON.stringify({ problemStatement: idea, userGoals: [], v1Definition: "" }),
     );
+    clearDraftStorage();
     setLocation("/session/survey");
   };
 
@@ -58,6 +170,7 @@ export default function DetailsPage() {
       await apiRequest("POST", `/api/projects/${project.id}/generate-docs-from-minimum`, {
         minimumDetails: { problemStatement: productIdea.trim(), userGoals: [], v1Definition: "" },
       });
+      clearDraftStorage();
       setLocation(`/documents/${project.id}`);
     } catch {
       toast({ title: "Generation failed", description: "Please try again.", variant: "destructive" });
@@ -82,33 +195,150 @@ export default function DetailsPage() {
         </div>
 
         {/* The one input */}
-        <textarea
-          rows={5}
-          value={productIdea}
-          onChange={(e) => setProductIdea(e.target.value)}
-          placeholder="e.g. A meal planning app that suggests recipes based on dietary preferences and budget..."
-          className="w-full outline-none transition-colors caret-[#f0b65e]"
+        <div style={{ position: "relative" }}>
+          <textarea
+            rows={5}
+            value={productIdea}
+            onChange={(e) => setProductIdea(e.target.value)}
+            placeholder="e.g. A meal planning app that suggests recipes based on dietary preferences and budget..."
+            className="w-full outline-none transition-colors caret-[#f0b65e]"
+            style={{
+              minHeight: "140px",
+              background: "#1a1714",
+              border: "1px solid rgba(200,180,160,0.08)",
+              borderRadius: "10px",
+              color: "#f5f0eb",
+              fontFamily: "inherit",
+              fontSize: "16px",
+              lineHeight: "1.6",
+              padding: "16px 18px",
+              paddingBottom: "44px",
+              resize: "vertical",
+              width: "100%",
+              display: "block",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "#f0b65e";
+              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          />
+
+          {/* Enhance button — bottom-right inside the field */}
+          <button
+            type="button"
+            onClick={handleEnhance}
+            disabled={!canEnhance}
+            aria-label={canEnhance ? "Enhance prompt" : "Write an idea first"}
+            title={canEnhance ? "Expand this into a fuller description" : "Write an idea first"}
+            data-testid="button-enhance-prompt"
+            style={{
+              position: "absolute",
+              right: "10px",
+              bottom: "10px",
+              height: "30px",
+              padding: "0 10px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              fontSize: "12px",
+              fontWeight: 500,
+              fontFamily: "inherit",
+              background: "transparent",
+              color: canEnhance ? "#f0b65e" : "#6b5d52",
+              border: `1px solid ${canEnhance ? "rgba(240,182,94,0.3)" : "rgba(200,180,160,0.08)"}`,
+              borderRadius: "6px",
+              cursor: canEnhance ? "pointer" : "not-allowed",
+              transition: "background 0.15s, border-color 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              if (canEnhance) {
+                (e.currentTarget as HTMLButtonElement).style.background = "rgba(240,182,94,0.08)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            {isEnhancing ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            {isEnhancing ? "Enhancing..." : "Enhance"}
+          </button>
+        </div>
+
+        {/* Saved indicator */}
+        <div
+          aria-live="polite"
           style={{
-            minHeight: "140px",
-            background: "#1a1714",
-            border: "1px solid rgba(200,180,160,0.08)",
-            borderRadius: "10px",
-            color: "#f5f0eb",
-            fontFamily: "inherit",
-            fontSize: "16px",
-            lineHeight: "1.6",
-            padding: "16px 18px",
-            resize: "vertical",
+            minHeight: "18px",
+            marginTop: "8px",
+            fontSize: "11px",
+            color: "#6b5d52",
+            fontFamily: "'JetBrains Mono', monospace",
+            letterSpacing: "0.02em",
           }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = "#f0b65e";
-            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(240,182,94,0.14)";
+        >
+          {savedAt != null && productIdea.trim().length > 0
+            ? `Saved to this device · ${formatSavedAgo(savedAt)}`
+            : "\u00A0"}
+        </div>
+
+        {/* Example idea chips */}
+        <div
+          style={{
+            marginTop: "16px",
+            display: "flex",
+            gap: "8px",
+            overflowX: "auto",
+            paddingBottom: "4px",
+            WebkitOverflowScrolling: "touch",
           }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = "rgba(200,180,160,0.08)";
-            e.currentTarget.style.boxShadow = "none";
-          }}
-        />
+          role="list"
+          aria-label="Example ideas"
+        >
+          {EXAMPLE_IDEAS.map((example) => (
+            <button
+              key={example}
+              type="button"
+              role="listitem"
+              onClick={() => setProductIdea(example)}
+              data-testid={`chip-example-${example.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              style={{
+                height: "38px",
+                padding: "0 14px",
+                fontSize: "13px",
+                fontWeight: 500,
+                fontFamily: "inherit",
+                color: "#a89a8c",
+                background: "transparent",
+                border: "1px solid rgba(200,180,160,0.12)",
+                borderRadius: "999px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                transition: "background 0.15s, border-color 0.15s, color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
+                e.currentTarget.style.color = "#f5f0eb";
+                e.currentTarget.style.background = "rgba(240,182,94,0.06)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+                e.currentTarget.style.color = "#a89a8c";
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {example}
+            </button>
+          ))}
+        </div>
 
         {/* Style picker — appears after typing */}
         {showExtras && (

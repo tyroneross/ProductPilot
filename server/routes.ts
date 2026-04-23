@@ -1182,6 +1182,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/enhance-idea — unauth; uses demo Groq key (fast tier) to expand a short idea.
+  // Returns a 2-3 sentence description suitable for dropping into the details textarea.
+  app.post("/api/enhance-idea", async (req: any, res) => {
+    try {
+      const raw = typeof req.body?.idea === "string" ? req.body.idea : "";
+      const idea = raw.trim();
+      if (idea.length < 3) {
+        return res.status(400).json({ message: "Idea must be at least 3 characters." });
+      }
+      if (idea.length > 500) {
+        return res.status(400).json({ message: "Idea too long (max 500 chars)." });
+      }
+
+      // Use the same per-user LLM config if the user has one, else fall back to demo Groq.
+      const userConfig = await getLLMConfig(req);
+      const messages: AIMessage[] = [
+        {
+          role: "system",
+          content:
+            "You are a product-idea editor. Given a short product idea, rewrite it as a 2-3 sentence description. " +
+            "Keep the user's core concept. Add only obvious specifics (who it's for, what it does, the key value). " +
+            "Do not invent features the user didn't hint at. No headers, no markdown, no quotes — plain text only. " +
+            "Write in the same tone the user used. Keep it under 80 words.",
+        },
+        { role: "user", content: idea },
+      ];
+
+      const result = await aiService.chat(messages, "claude-sonnet", userConfig, "chat");
+      const enhanced = (result.content || "").trim().replace(/^["']|["']$/g, "");
+      if (!enhanced) {
+        return res.status(502).json({ message: "Empty response from model." });
+      }
+      return res.json({ enhanced });
+    } catch (error: any) {
+      logger.warn({ err: error?.message }, "enhance-idea failed");
+      return res.status(500).json({ message: "Failed to enhance idea." });
+    }
+  });
+
   // PUT /api/settings — update LLM settings
   app.put("/api/settings", requireAuth, async (req: any, res) => {
     try {

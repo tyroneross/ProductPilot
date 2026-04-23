@@ -113,12 +113,17 @@ export default function Nav() {
 
           <DropdownMenuContent
             align="end"
-            sideOffset={8}
+            sideOffset={10}
+            collisionPadding={16}
             style={{
+              // Nav is sticky at z-index 100, so the portaled menu must sit above it
+              // (and above any page CTAs like "Start new product" on /projects)
+              // to avoid visual overlap with the trigger column.
+              zIndex: 200,
               background: "#1a1714",
               border: "1px solid rgba(200,180,160,0.10)",
               borderRadius: "10px",
-              minWidth: "200px",
+              minWidth: "220px",
               padding: "6px",
               boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
             }}

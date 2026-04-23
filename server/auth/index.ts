@@ -54,12 +54,33 @@ const defaultPort = process.env.PORT || "3000";
 const baseURL =
   process.env.BETTER_AUTH_URL || `${defaultProtocol}://${defaultHost}:${defaultPort}`;
 
+// Better Auth validates every absolute `callbackURL` the client passes (e.g.
+// `${window.location.origin}/login?verified=1` from client/src/pages/login.tsx).
+// Without `trustedOrigins`, any absolute URL is rejected with "Invalid callbackURL",
+// blocking sign-in, sign-up, magic-link, and verification flows. We trust:
+//   - baseURL (Better Auth's canonical origin)
+//   - the origin the Express server is actually listening on (can differ from
+//     BETTER_AUTH_URL in dev when a shared .env sets the public origin but the
+//     process runs on a different port)
+//   - any explicit additions from BETTER_AUTH_TRUSTED_ORIGINS (comma-separated)
+const extraTrustedOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS || "")
+  .split(",")
+  .map((v) => v.trim())
+  .filter(Boolean);
+
+const listenOrigin = `${defaultProtocol}://${defaultHost}:${defaultPort}`;
+
+const trustedOrigins = Array.from(
+  new Set([baseURL, listenOrigin, ...extraTrustedOrigins]),
+);
+
 const googleEnabled = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
 );
 
 export const auth = betterAuth({
   baseURL,
+  trustedOrigins,
   secret: authSecret,
   database: drizzleAdapter(authDb, {
     provider: "pg",

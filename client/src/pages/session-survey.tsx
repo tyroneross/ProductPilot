@@ -1073,46 +1073,150 @@ export default function SessionSurveyPage() {
           >
             <div style={{ maxWidth: 640, margin: "0 auto" }}>
 
-              {/* Generating overlay (inline) */}
-              {isGeneratingDocs && (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "64px 24px",
-                  }}
-                  data-testid="generation-overlay"
-                >
-                  <Loader2
-                    style={{
-                      width: 40, height: 40, color: "#f0b65e",
-                      margin: "0 auto 20px",
-                      animation: "spin 1s linear infinite",
-                    }}
-                  />
-                  <h3 style={{ fontSize: 20, fontWeight: 700, color: "#f5f0eb", marginBottom: 8 }}>
-                    Generating Documentation
-                  </h3>
-                  <p style={{ color: "#a89a8c", marginBottom: 24 }}>{generationProgress.stageName}</p>
-                  <div style={{ maxWidth: 320, margin: "0 auto" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b5d52", marginBottom: 8 }}>
-                      <span>Progress</span>
-                      <span>{generationProgress.current} of {generationProgress.total} documents</span>
-                    </div>
-                    <div style={{ height: 4, background: "rgba(200,180,160,0.08)", borderRadius: 99, overflow: "hidden" }}>
-                      <div
+              {/* Generating overlay (inline) — phased skeleton (NN/g Skeleton Screens 101) */}
+              {isGeneratingDocs && (() => {
+                // Build a simple phase label from the real stageName — this maps the
+                // product's stage titles (e.g. "Requirements Definition", "Design Requirements")
+                // to a verb phrase for NN/g system-status feedback.
+                const raw = (generationProgress.stageName || "Starting").toLowerCase();
+                const phaseLabel =
+                  raw.includes("start") ? "Getting ready…" :
+                  raw.includes("requirements") && raw.includes("definition") ? "Drafting PRD…" :
+                  raw.includes("north star") ? "Drafting PRD…" :
+                  raw.includes("design") ? "Sketching wireframes…" :
+                  raw.includes("architecture") ? "Mapping architecture…" :
+                  raw.includes("coding") || raw.includes("prompt") ? "Writing coding prompts…" :
+                  raw.includes("development") || raw.includes("guide") ? "Wrapping up…" :
+                  raw.includes("finishing") ? "Wrapping up…" :
+                  generationProgress.stageName || "Generating…";
+
+                const phases = [
+                  "Drafting PRD…",
+                  "Sketching wireframes…",
+                  "Mapping architecture…",
+                  "Writing coding prompts…",
+                ];
+                // A phase is "done" if the current phase index is past it.
+                const currentIdx = Math.max(0, phases.indexOf(phaseLabel));
+                return (
+                  <div
+                    style={{ padding: "32px 8px 64px" }}
+                    data-testid="generation-overlay"
+                  >
+                    <style>{`
+                      @keyframes skeleton-shimmer {
+                        0%   { background-position: -200px 0; }
+                        100% { background-position: calc(200px + 100%) 0; }
+                      }
+                    `}</style>
+
+                    {/* Header */}
+                    <div style={{ textAlign: "center", marginBottom: 28 }}>
+                      <Loader2
                         style={{
-                          height: "100%",
-                          width: `${genProgressPercent}%`,
-                          background: "#f0b65e",
-                          borderRadius: 99,
-                          transition: "width 0.5s ease",
+                          width: 28, height: 28, color: "#f0b65e",
+                          margin: "0 auto 14px",
+                          animation: "spin 1s linear infinite",
                         }}
                       />
+                      <h3 style={{ fontSize: 20, fontWeight: 700, color: "#f5f0eb", margin: "0 0 6px" }}>
+                        Generating Documentation
+                      </h3>
+                      <p
+                        style={{ color: "#f0b65e", fontSize: 14, margin: 0, fontWeight: 500 }}
+                        data-testid="generation-phase-label"
+                      >
+                        {phaseLabel}
+                      </p>
                     </div>
-                    <p style={{ fontSize: 12, color: "#6b5d52", marginTop: 12 }}>This may take a minute...</p>
+
+                    {/* Phase step list */}
+                    <ol
+                      style={{
+                        maxWidth: 360, margin: "0 auto 28px", padding: 0, listStyle: "none",
+                        display: "flex", flexDirection: "column", gap: 10,
+                      }}
+                    >
+                      {phases.map((p, i) => {
+                        const isCurrent = i === currentIdx;
+                        const isDone = i < currentIdx || generationProgress.current >= generationProgress.total;
+                        return (
+                          <li
+                            key={p}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              fontSize: 13,
+                              color: isCurrent ? "#f5f0eb" : isDone ? "#a89a8c" : "#6b5d52",
+                              fontWeight: isCurrent ? 500 : 400,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: 8, height: 8, borderRadius: "50%",
+                                background: isDone ? "#f0b65e" : isCurrent ? "#f0b65e" : "rgba(200,180,160,0.15)",
+                                boxShadow: isCurrent ? "0 0 0 4px rgba(240,182,94,0.14)" : "none",
+                                flexShrink: 0,
+                                transition: "background 0.2s, box-shadow 0.2s",
+                              }}
+                              aria-hidden="true"
+                            />
+                            {p}
+                          </li>
+                        );
+                      })}
+                    </ol>
+
+                    {/* Skeleton block for the pending artifact */}
+                    <div
+                      style={{
+                        maxWidth: 520, margin: "0 auto 24px",
+                        padding: "20px 22px",
+                        background: "#1a1714",
+                        border: "1px solid rgba(200,180,160,0.08)",
+                        borderRadius: 10,
+                      }}
+                      aria-hidden="true"
+                    >
+                      {[68, 92, 44, 78, 56].map((w, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            height: 10,
+                            width: `${w}%`,
+                            borderRadius: 4,
+                            marginBottom: i === 4 ? 0 : 12,
+                            background: "linear-gradient(90deg, rgba(200,180,160,0.06) 0%, rgba(240,182,94,0.12) 40%, rgba(200,180,160,0.06) 80%)",
+                            backgroundSize: "200px 100%",
+                            backgroundRepeat: "no-repeat",
+                            animation: "skeleton-shimmer 1.6s linear infinite",
+                            animationDelay: `${i * 0.1}s`,
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Progress footer */}
+                    <div style={{ maxWidth: 360, margin: "0 auto", textAlign: "center" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b5d52", marginBottom: 8 }}>
+                        <span>Progress</span>
+                        <span>{generationProgress.current} of {generationProgress.total} documents</span>
+                      </div>
+                      <div style={{ height: 4, background: "rgba(200,180,160,0.08)", borderRadius: 99, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${genProgressPercent}%`,
+                            background: "#f0b65e",
+                            borderRadius: 99,
+                            transition: "width 0.5s ease",
+                          }}
+                        />
+                      </div>
+                      <p style={{ fontSize: 12, color: "#6b5d52", marginTop: 12 }}>This may take a minute…</p>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {!isGeneratingDocs && (
                 <>

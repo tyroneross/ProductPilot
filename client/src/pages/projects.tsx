@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { FolderKanban, Sparkles, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
@@ -50,11 +50,35 @@ function SkeletonRow() {
   );
 }
 
+const DRAFT_KEY = "productpilot.draft.idea";
+
+function readDraft(): string | null {
+  try {
+    const v = localStorage.getItem(DRAFT_KEY) ?? sessionStorage.getItem(DRAFT_KEY);
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  } catch {}
+  return null;
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem("productpilot.draft.savedAt");
+    sessionStorage.removeItem("productpilot.draft.savedAt");
+  } catch {}
+}
+
 export default function ProjectsPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(readDraft());
+  }, []);
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -130,6 +154,79 @@ export default function ProjectsPage() {
 
         {/* Loading */}
         {isLoading && <><SkeletonRow /><SkeletonRow /><SkeletonRow /></>}
+
+        {/* Resume draft card (shown when a draft exists, regardless of project count) */}
+        {draft && (
+          <div
+            data-testid="card-resume-draft"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: "14px 16px",
+              marginBottom: sorted.length === 0 ? 16 : 20,
+              border: `1px solid rgba(240,182,94,0.35)`,
+              borderRadius: 10,
+              background: "rgba(240,182,94,0.04)",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 12, color: accent, fontWeight: 600, margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Resume your draft
+              </p>
+              <p
+                style={{
+                  fontSize: 14,
+                  color: textPrimary,
+                  margin: "4px 0 0",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontStyle: "italic",
+                }}
+                title={draft}
+              >
+                &ldquo;{draft.length > 80 ? `${draft.slice(0, 80)}…` : draft}&rdquo;
+              </p>
+            </div>
+            <button
+              onClick={() => setLocation("/details")}
+              data-testid="button-resume-draft"
+              style={{ ...ctaStyle, height: 36, padding: "0 14px", fontSize: 13 }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
+            >
+              Continue →
+            </button>
+            <button
+              onClick={() => { clearDraft(); setDraft(null); }}
+              data-testid="button-discard-draft"
+              aria-label="Discard draft"
+              style={{
+                height: 36,
+                padding: "0 12px",
+                background: "transparent",
+                color: textMuted,
+                border: `1px solid ${border}`,
+                borderRadius: 8,
+                fontSize: 13,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                transition: "color 0.15s, border-color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#e57373";
+                e.currentTarget.style.borderColor = "rgba(229,115,115,0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = textMuted;
+                e.currentTarget.style.borderColor = border;
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        )}
 
         {/* Empty state */}
         {!isLoading && sorted.length === 0 && (

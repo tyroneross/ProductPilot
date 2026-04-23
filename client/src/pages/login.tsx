@@ -376,6 +376,7 @@ export default function LoginPage() {
                   placeholder="you@example.com"
                   required
                   autoFocus
+                  autoComplete="email"
                   style={inputStyle}
                   onFocus={(e) => {
                     e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
@@ -509,7 +510,7 @@ export default function LoginPage() {
               fontWeight: 600,
               fontFamily: "inherit",
               cursor: "pointer",
-              marginBottom: "1.25rem",
+              marginBottom: "0.75rem",
             }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24">
@@ -531,6 +532,46 @@ export default function LoginPage() {
               />
             </svg>
             Continue with Google
+          </button>
+
+          {/* Demo mode — promoted alternative path (NN/g: primary action visible, weighted appropriately) */}
+          <button
+            type="button"
+            onClick={() => setLocation("/details")}
+            data-testid="button-demo-mode"
+            style={{
+              width: "100%",
+              minHeight: "44px",
+              padding: "6px 12px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "2px",
+              background: "transparent",
+              color: "#f5f0eb",
+              border: "1px solid rgba(240,182,94,0.32)",
+              borderRadius: "8px",
+              fontSize: "14px",
+              fontWeight: 600,
+              fontFamily: "inherit",
+              cursor: "pointer",
+              marginBottom: "1.25rem",
+              transition: "border-color 0.15s, background 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+              e.currentTarget.style.background = "rgba(240,182,94,0.06)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "rgba(240,182,94,0.32)";
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <span>Try demo mode →</span>
+            <span style={{ fontSize: "11px", color: "#a89a8c", fontWeight: 400 }}>
+              No account · Groq Llama 3.3
+            </span>
           </button>
 
           {/* Divider */}
@@ -612,6 +653,7 @@ export default function LoginPage() {
                   onChange={(e) => setAuthName(e.target.value)}
                   placeholder="Your name"
                   required
+                  autoComplete="name"
                   style={inputStyle}
                   onFocus={(e) => {
                     e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
@@ -638,6 +680,7 @@ export default function LoginPage() {
                 onChange={(e) => setAuthEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                autoComplete="email"
                 style={inputStyle}
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
@@ -699,6 +742,7 @@ export default function LoginPage() {
                 onChange={(e) => setAuthPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                autoComplete={authTab === "signin" ? "current-password" : "new-password"}
                 style={inputStyle}
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = "rgba(240,182,94,0.4)";
@@ -821,37 +865,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Demo mode link */}
-        <p style={{ textAlign: "center", margin: 0 }}>
-          <button
-            type="button"
-            onClick={() => setLocation("/details")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "13px",
-              color: "#6b5d52",
-              fontFamily: "inherit",
-              textDecoration: "underline",
-              textDecorationColor: "rgba(107,93,82,0.4)",
-              textUnderlineOffset: "2px",
-              padding: 0,
-              minHeight: "44px",
-              display: "inline-flex",
-              alignItems: "center",
-              transition: "color 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "#a89a8c";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#6b5d52";
-            }}
-          >
-            Continue without signing in — demo mode with Groq Llama 3.3
-          </button>
-        </p>
       </div>
     </div>
   );
