@@ -3938,6 +3938,13 @@ async function stampPreExistingMigrations(pool2) {
   );
   const hasAuditEvents = Boolean(probeRows[0]?.to_regclass);
   if (existingRows === 0 && hasAuditEvents) {
+    await pool2.query(
+      `CREATE TABLE IF NOT EXISTS "rateLimit" (
+         "key" text PRIMARY KEY NOT NULL,
+         "count" integer NOT NULL,
+         "last_request" bigint NOT NULL
+       )`
+    );
     const now = Date.now();
     await pool2.query(
       `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
@@ -3950,7 +3957,7 @@ async function stampPreExistingMigrations(pool2) {
       ]
     );
     logger.info(
-      "Detected pre-existing schema. Stamped 0000 + 0001 as applied; migrator will resume from 0002."
+      "Detected pre-existing schema. Back-filled rateLimit if missing; stamped 0000 + 0001 as applied; migrator will resume from 0002."
     );
   }
 }
