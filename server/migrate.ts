@@ -86,9 +86,22 @@ async function stampPreExistingMigrations(pool: Pool): Promise<void> {
   const hasAuditEvents = Boolean(probeRows[0]?.to_regclass);
 
   if (existingRows === 0 && hasAuditEvents) {
+    // Back-fill any 0001 tables the old runtime loop missed. Stamping 0001 as applied
+    // skips its CREATE statements, so a table that existed only in schema.ts (not in
+    // the old loop's hardcoded list) would silently never get created. This closes
+    // that gap for the specific tables known to have been added late to the runtime
+    // loop. Idempotent — CREATE IF NOT EXISTS is a no-op when the table is present.
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS "rateLimit" (
+         "key" text PRIMARY KEY NOT NULL,
+         "count" integer NOT NULL,
+         "last_request" bigint NOT NULL
+       )`,
+    );
+
     // Stamp 0000 + 0001 as already applied. Hashes aren't verified at runtime;
     // drizzle only compares by index order in _journal.json, so tag-derived hashes
-    // are fine. The migrator will then run only unreached entries (0002).
+    // are fine. The migrator will then run only unreached entries (0002+).
     const now = Date.now();
     await pool.query(
       `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
@@ -101,7 +114,7 @@ async function stampPreExistingMigrations(pool: Pool): Promise<void> {
       ],
     );
     logger.info(
-      "Detected pre-existing schema. Stamped 0000 + 0001 as applied; migrator will resume from 0002.",
+      "Detected pre-existing schema. Back-filled rateLimit if missing; stamped 0000 + 0001 as applied; migrator will resume from 0002.",
     );
   }
 }
