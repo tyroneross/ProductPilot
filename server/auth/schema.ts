@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, index, integer, pgTable, text, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -55,3 +55,9 @@ export const verification = pgTable("verification", {
 }, (table) => [
   index("verification_identifier_idx").on(table.identifier),
 ]);
+
+export const rateLimit = pgTable("rateLimit", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});

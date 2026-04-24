@@ -3,12 +3,11 @@ import fs from "fs";
 import path from "path";
 import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins";
-import { logger } from "../lib/logger";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
 import { dash } from "@better-auth/infra";
 import { db } from "../db";
-import { sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from "./email";
+import { canSendAuthEmail, sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from "./email";
 import * as authSchema from "./schema";
 
 const authDb = (() => {
@@ -70,7 +69,7 @@ const extraTrustedOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS || "")
 
 const listenOrigin = `${defaultProtocol}://${defaultHost}:${defaultPort}`;
 
-const trustedOrigins = Array.from(
+export const trustedOrigins = Array.from(
   new Set([baseURL, listenOrigin, ...extraTrustedOrigins]),
 );
 
@@ -95,40 +94,56 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     maxPasswordLength: 128,
     sendResetPassword: async ({ user, url }: { user: { email: string; name: string }; url: string }) => {
-      void sendPasswordResetEmail({
+      await sendPasswordResetEmail({
         email: user.email,
         name: user.name,
         url,
-      }).catch((error) => {
-        logger.error({ err: error }, "[auth] Failed to send password reset email");
       });
     },
     resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
   },
   emailVerification: {
-    sendOnSignUp: true,
+    sendOnSignUp: canSendAuthEmail() || process.env.NODE_ENV !== "production",
     sendOnSignIn: false,
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
     sendVerificationEmail: async ({ user, url }) => {
-      void sendVerificationEmail({
+      await sendVerificationEmail({
         email: user.email,
         name: user.name,
         url,
-      }).catch((error) => {
-        logger.error({ err: error }, "[auth] Failed to send verification email");
       });
     },
   },
   account: {
-    // Account linking: if a user signs up with email/password and later uses Google OAuth
-    // (or vice versa), Better Auth merges the accounts IF the emails match.
+    encryptOAuthTokens: true,
+    // Account linking: if a user signs up with email/password and later uses Google OAuth,
+    // Better Auth merges the accounts IF the emails match and Google is trusted.
     // allowDifferentEmails: false means linking is blocked when emails differ — prevents
     // accidental merging of distinct identities.
     accountLinking: {
       enabled: true,
-      trustedProviders: ["google", "email-password"],
+      trustedProviders: ["google"],
       allowDifferentEmails: false,
+    },
+  },
+  rateLimit: {
+    enabled: true,
+    storage: "database",
+    window: 60,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/sign-up/email": { window: 60, max: 5 },
+      "/request-password-reset": { window: 60, max: 3 },
+      "/send-verification-email": { window: 60, max: 3 },
+      "/sign-in/magic-link": { window: 60, max: 3 },
+      "/magic-link/verify": { window: 60, max: 5 },
+    },
+  },
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-forwarded-for", "x-real-ip", "cf-connecting-ip"],
     },
   },
   socialProviders: googleEnabled
@@ -154,12 +169,15 @@ export const auth = betterAuth({
       : []),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        void sendMagicLinkEmail({ email, url }).catch((error) => {
-          logger.error({ err: error }, "[auth] Failed to send magic link email");
-        });
+        await sendMagicLinkEmail({ email, url });
       },
+      storeToken: "hashed",
       // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.
       expiresIn: 60 * 15,
+      rateLimit: {
+        window: 60,
+        max: 3,
+      },
     }),
   ],
 });

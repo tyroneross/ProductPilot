@@ -1,11 +1,11 @@
 # ProductPilot auth setup
 
-As of 2026-04-22 the app supports 4 sign-in methods, all optional. Users can mix and match; same email = same account (Better Auth account linking with `allowDifferentEmails: false`).
+As of 2026-04-24 the app supports 4 sign-in methods, all optional. Users can mix and match; same email = same account (Better Auth account linking with `allowDifferentEmails: false`).
 
 | Method | Status | Provider vars needed |
 |---|---|---|
-| Email + password | ✅ always on | none (verification email is optional; logs to console without Resend) |
-| Magic link | ✅ always on | `RESEND_API_KEY` + `AUTH_FROM_EMAIL` to actually send (without Resend, link is logged) |
+| Email + password | ✅ always on | none for sign-in; `RESEND_API_KEY` + `AUTH_FROM_EMAIL` to send verification/reset email |
+| Magic link | ✅ always on | `RESEND_API_KEY` + `AUTH_FROM_EMAIL` outside local development |
 | Google OAuth | conditional | `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` |
 | Reset password | ✅ always on | same as magic link |
 
@@ -40,7 +40,7 @@ Or via Vercel dashboard → Project → Settings → Environment Variables.
 vercel --prod --force
 ```
 
-After redeploy, verification emails + magic links + password-reset emails land in actual inboxes.
+After redeploy, verification emails + magic links + password-reset emails land in actual inboxes. In production, auth links are not logged when email delivery is missing; the email-dependent flow fails closed instead.
 
 ## Google OAuth — 5 minutes
 
@@ -66,13 +66,15 @@ UPDATE "user" SET email_verified = true WHERE email = 'user@example.com';
 
 If a user signs up with email+password first and later clicks "Sign in with Google" using the same email, Better Auth merges the two accounts. Different emails = linking blocked. This is controlled by `account.accountLinking` in `server/auth/index.ts`.
 
+Better Auth's email/password provider ID is `credential`. Google-first users who later want an email/password credential should use the password-reset flow for the same email; a normal sign-up attempt with that email is treated as an existing user.
+
 ## Troubleshooting
 
 **"I signed up but got no email."**
-Without `RESEND_API_KEY`, emails log to stdout on the Vercel function. Check `vercel logs productpilot-puce.vercel.app --level info --since 1h` — the URL and token appear in the body.
+Without `RESEND_API_KEY`, auth emails only log to stdout in local development. Production refuses to log URLs or tokens; configure Resend and redeploy.
 
 **"Magic link says expired."**
 TTL is 15 min. Click fast, or request a new one.
 
-**"Google button doesn't appear on /login."**
-`googleEnabled` in `server/auth/index.ts:56` returns false when either Google var is missing. Check `vercel env ls production` for both keys.
+**"Google sign-in fails on /login."**
+`googleEnabled` in `server/auth/index.ts` returns false when either Google var is missing. Check `vercel env ls production` for both keys.

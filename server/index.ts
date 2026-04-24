@@ -14,8 +14,8 @@ initSentry();
 
 const app = express();
 app.all("/api/auth/*", toNodeHandler(auth));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 
 app.use((req, res, next) => {
   const start = Date.now();

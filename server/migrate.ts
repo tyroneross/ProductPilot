@@ -157,6 +157,14 @@ export async function runMigrations() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS "rateLimit" (
+        "key" text PRIMARY KEY NOT NULL,
+        "count" integer NOT NULL,
+        "last_request" bigint NOT NULL
+      )
+    `);
+
+    await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS "user_email_unique" ON "user" ("email")
     `);
 
@@ -426,6 +434,24 @@ export async function runMigrations() {
       )
     `);
 
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'user_settings_user_id_user_id_fk' AND table_name = 'user_settings'
+        ) THEN
+          DELETE FROM "user_settings"
+          WHERE "user_id" IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "user_settings"."user_id");
+
+          ALTER TABLE "user_settings"
+          ADD CONSTRAINT "user_settings_user_id_user_id_fk"
+          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;
+        END IF;
+      END $$
+    `);
+
     // Enable RLS on all public tables
     await pool.query(`
       DO $$
@@ -436,7 +462,7 @@ export async function runMigrations() {
           SELECT tablename
           FROM pg_tables
           WHERE schemaname = 'public'
-            AND tablename NOT IN ('user', 'session', 'account', 'verification')
+            AND tablename NOT IN ('user', 'session', 'account', 'verification', 'rateLimit')
         LOOP
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
         END LOOP;
@@ -450,24 +476,135 @@ export async function runMigrations() {
         ALTER TABLE IF EXISTS "session" DISABLE ROW LEVEL SECURITY;
         ALTER TABLE IF EXISTS "account" DISABLE ROW LEVEL SECURITY;
         ALTER TABLE IF EXISTS "verification" DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE IF EXISTS "rateLimit" DISABLE ROW LEVEL SECURITY;
       END $$;
     `);
 
-    // RLS policies — projects scoped to user_id, user_settings scoped to user_id
+    // RLS policies — tenant tables scoped to the request actor set by storage-hybrid.ts.
     await pool.query(`
       DO $$
       BEGIN
-        -- Projects: users see their own + unowned projects (demo)
-        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'projects_user_isolation') THEN
-          CREATE POLICY projects_user_isolation ON projects
-            USING (user_id IS NULL OR user_id = current_setting('app.current_user_id', true));
-        END IF;
+        DROP POLICY IF EXISTS projects_user_isolation ON projects;
+        DROP POLICY IF EXISTS user_settings_isolation ON user_settings;
+        DROP POLICY IF EXISTS projects_actor_isolation ON projects;
+        DROP POLICY IF EXISTS stages_actor_isolation ON stages;
+        DROP POLICY IF EXISTS messages_actor_isolation ON messages;
+        DROP POLICY IF EXISTS user_settings_actor_isolation ON user_settings;
 
-        -- User settings: users see only their own
-        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_settings_isolation') THEN
-          CREATE POLICY user_settings_isolation ON user_settings
-            USING (user_id = current_setting('app.current_user_id', true));
-        END IF;
+        ALTER TABLE "projects" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "projects" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "stages" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "stages" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "messages" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "messages" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "user_settings" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "user_settings" FORCE ROW LEVEL SECURITY;
+
+        CREATE POLICY projects_actor_isolation ON projects
+          USING (
+            (
+              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+            )
+            OR (
+              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+            )
+          )
+          WITH CHECK (
+            (
+              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+            )
+            OR (
+              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+            )
+          );
+
+        CREATE POLICY stages_actor_isolation ON stages
+          USING (
+            EXISTS (
+              SELECT 1
+              FROM projects p
+              WHERE p.id = stages.project_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          )
+          WITH CHECK (
+            EXISTS (
+              SELECT 1
+              FROM projects p
+              WHERE p.id = stages.project_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          );
+
+        CREATE POLICY messages_actor_isolation ON messages
+          USING (
+            EXISTS (
+              SELECT 1
+              FROM stages s
+              JOIN projects p ON p.id = s.project_id
+              WHERE s.id = messages.stage_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          )
+          WITH CHECK (
+            EXISTS (
+              SELECT 1
+              FROM stages s
+              JOIN projects p ON p.id = s.project_id
+              WHERE s.id = messages.stage_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          );
+
+        CREATE POLICY user_settings_actor_isolation ON user_settings
+          USING (
+            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+          )
+          WITH CHECK (
+            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+          );
       END $$;
     `);
 

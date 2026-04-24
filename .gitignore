@@ -18,3 +18,5 @@ meta.json
 # Bookmark snapshot data
 .claude/bookmarks/
 AGENTS.md
+.build-loop/
+.build-loop/

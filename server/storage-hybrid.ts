@@ -1,5 +1,7 @@
 import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent } from "@shared/schema";
+import { AsyncLocalStorage } from "async_hooks";
 import { logger } from "./lib/logger";
+import { decryptSecret, encryptSecret } from "./lib/secret-crypto";
 import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
@@ -47,6 +49,24 @@ interface IStorage {
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<void>;
+}
+
+type DbActorContext = {
+  userId?: string | null;
+  guestOwnerId?: string | null;
+};
+
+const dbActorContext = new AsyncLocalStorage<DbActorContext>();
+
+export function runWithDbActorContext<T>(context: DbActorContext, callback: () => T): T {
+  return dbActorContext.run(context, callback);
+}
+
+export function updateDbActorContext(updates: DbActorContext): void {
+  const context = dbActorContext.getStore();
+  if (context) {
+    Object.assign(context, updates);
+  }
 }
 
 // In-memory storage fallback
@@ -322,14 +342,27 @@ class MemStorage implements IStorage {
 
   // User Settings - MemStorage implementation
   async getUserSettings(userId: string) {
-    return this.userSettingsMap.get(userId);
+    const settings = this.userSettingsMap.get(userId);
+    if (!settings) return undefined;
+    return {
+      ...settings,
+      llmApiKey: decryptSecret(settings.llmApiKey),
+      llm_api_key: decryptSecret(settings.llm_api_key),
+    };
   }
 
   async upsertUserSettings(userId: string, updates: Record<string, any>) {
     const existing = this.userSettingsMap.get(userId) || { userId, llmProvider: 'groq', llmModel: 'llama-3.3-70b-versatile' };
-    const merged = { ...existing, ...updates, userId, updatedAt: new Date() };
+    const encryptedUpdates = { ...updates };
+    if (Object.prototype.hasOwnProperty.call(encryptedUpdates, "llmApiKey")) {
+      encryptedUpdates.llmApiKey = encryptSecret(encryptedUpdates.llmApiKey);
+    }
+    if (Object.prototype.hasOwnProperty.call(encryptedUpdates, "llm_api_key")) {
+      encryptedUpdates.llm_api_key = encryptSecret(encryptedUpdates.llm_api_key);
+    }
+    const merged = { ...existing, ...encryptedUpdates, userId, updatedAt: new Date() };
     this.userSettingsMap.set(userId, merged);
-    return merged;
+    return this.getUserSettings(userId);
   }
 
   // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
@@ -355,9 +388,22 @@ class PostgresStorage implements IStorage {
     this.db = database;
   }
 
+  private async withActor(operation: (database: any) => any): Promise<any> {
+    const actor = dbActorContext.getStore();
+
+    return await this.db.transaction(async (tx: typeof this.db) => {
+      await tx.execute(sql`
+        SELECT
+          set_config('app.current_user_id', ${actor?.userId ?? ""}, true),
+          set_config('app.current_guest_owner_id', ${actor?.guestOwnerId ?? ""}, true)
+      `);
+      return operation(tx);
+    });
+  }
+
   async createProject(insertProject: InsertProjectWithOwner): Promise<Project> {
     // Project + default stages atomically — no orphan project rows if a stage insert fails.
-    return await this.db.transaction(async (tx: typeof this.db) => {
+    return await this.withActor(async (tx: typeof this.db) => {
       const [project] = await tx.insert(projects).values(insertProject).returning();
 
       const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
@@ -380,34 +426,44 @@ class PostgresStorage implements IStorage {
   }
 
   async getProject(id: string): Promise<Project | undefined> {
-    const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
+    const result = await this.withActor((tx) =>
+      tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+    );
     return result[0];
   }
 
   async getAllProjects(): Promise<Project[]> {
-    return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+    return await this.withActor((tx) =>
+      tx.select().from(projects).orderBy(desc(projects.createdAt))
+    );
   }
 
   async getProjectsByUserId(userId: string): Promise<Project[]> {
-    return await this.db
-      .select()
-      .from(projects)
-      .where(eq(projects.userId, userId))
-      .orderBy(desc(projects.createdAt));
+    return await this.withActor((tx) =>
+      tx
+        .select()
+        .from(projects)
+        .where(eq(projects.userId, userId))
+        .orderBy(desc(projects.createdAt))
+    );
   }
 
   async getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]> {
-    return await this.db
-      .select()
-      .from(projects)
-      .where(eq(projects.guestOwnerId, guestOwnerId))
-      .orderBy(desc(projects.createdAt));
+    return await this.withActor((tx) =>
+      tx
+        .select()
+        .from(projects)
+        .where(eq(projects.guestOwnerId, guestOwnerId))
+        .orderBy(desc(projects.createdAt))
+    );
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {
-    const result = await this.db.select().from(projects)
-      .where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete")))
-      .limit(1);
+    const result = await this.withActor((tx) =>
+      tx.select().from(projects)
+        .where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete")))
+        .limit(1)
+    );
     return result[0];
   }
 
@@ -417,31 +473,37 @@ class PostgresStorage implements IStorage {
       finalUpdates.updatedAt = new Date();
     }
     
-    const [updatedProject] = await this.db.update(projects)
-      .set(finalUpdates)
-      .where(eq(projects.id, id))
-      .returning();
+    const [updatedProject] = await this.withActor((tx) =>
+      tx.update(projects)
+        .set(finalUpdates)
+        .where(eq(projects.id, id))
+        .returning()
+    );
     
     return updatedProject;
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const result = await this.db.delete(projects).where(eq(projects.id, id));
+    const result = await this.withActor((tx) => tx.delete(projects).where(eq(projects.id, id)));
     return result.rowCount > 0;
   }
 
   async createStage(insertStage: InsertStage): Promise<Stage> {
-    const [stage] = await this.db.insert(stages).values(insertStage).returning();
+    const [stage] = await this.withActor((tx) => tx.insert(stages).values(insertStage).returning());
     return stage;
   }
 
   async getStage(id: string): Promise<Stage | undefined> {
-    const result = await this.db.select().from(stages).where(eq(stages.id, id)).limit(1);
+    const result = await this.withActor((tx) =>
+      tx.select().from(stages).where(eq(stages.id, id)).limit(1)
+    );
     return result[0];
   }
 
   async getStagesByProject(projectId: string): Promise<Stage[]> {
-    return await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+    return await this.withActor((tx) =>
+      tx.select().from(stages).where(eq(stages.projectId, projectId))
+    );
   }
 
   async updateStage(id: string, updates: Partial<Stage>): Promise<Stage> {
@@ -462,56 +524,68 @@ class PostgresStorage implements IStorage {
       }
     }
     
-    const [updatedStage] = await this.db.update(stages)
-      .set(finalUpdates)
-      .where(eq(stages.id, id))
-      .returning();
+    const [updatedStage] = await this.withActor((tx) =>
+      tx.update(stages)
+        .set(finalUpdates)
+        .where(eq(stages.id, id))
+        .returning()
+    );
     
     return updatedStage;
   }
 
   async ensureStagesForProject(projectId: string): Promise<Stage[]> {
     // Check if stages already exist
-    const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+    const existing = await this.withActor((tx) =>
+      tx.select().from(stages).where(eq(stages.projectId, projectId))
+    );
     if (existing.length > 0) return existing;
 
     // Create default stages
     const createdStages: Stage[] = [];
     for (const defaultStage of DEFAULT_STAGES) {
-      const [stage] = await this.db.insert(stages).values({
-        projectId,
-        stageNumber: defaultStage.stageNumber,
-        title: defaultStage.title,
-        description: defaultStage.description,
-        systemPrompt: defaultStage.systemPrompt,
-        keyInsights: defaultStage.keyInsights || [],
-        completedInsights: [],
-        progress: 0,
-        isUnlocked: true,
-      }).returning();
+      const [stage] = await this.withActor((tx) =>
+        tx.insert(stages).values({
+          projectId,
+          stageNumber: defaultStage.stageNumber,
+          title: defaultStage.title,
+          description: defaultStage.description,
+          systemPrompt: defaultStage.systemPrompt,
+          keyInsights: defaultStage.keyInsights || [],
+          completedInsights: [],
+          progress: 0,
+          isUnlocked: true,
+        }).returning()
+      );
       createdStages.push(stage);
     }
     return createdStages;
   }
 
   async getMessage(id: string): Promise<Message | undefined> {
-    const result = await this.db.select().from(messages).where(eq(messages.id, id)).limit(1);
+    const result = await this.withActor((tx) =>
+      tx.select().from(messages).where(eq(messages.id, id)).limit(1)
+    );
     return result[0];
   }
 
   async getMessagesByStage(stageId: string): Promise<Message[]> {
-    return await this.db.select().from(messages)
-      .where(eq(messages.stageId, stageId))
-      .orderBy(asc(messages.createdAt));
+    return await this.withActor((tx) =>
+      tx.select().from(messages)
+        .where(eq(messages.stageId, stageId))
+        .orderBy(asc(messages.createdAt))
+    );
   }
 
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
-    const [message] = await this.db.insert(messages).values(insertMessage).returning();
+    const [message] = await this.withActor((tx) =>
+      tx.insert(messages).values(insertMessage).returning()
+    );
     return message;
   }
 
   async deleteMessagesByStage(stageId: string): Promise<void> {
-    await this.db.delete(messages).where(eq(messages.stageId, stageId));
+    await this.withActor((tx) => tx.delete(messages).where(eq(messages.stageId, stageId)));
   }
 
   // Admin Prompts - PostgreSQL implementation
@@ -582,28 +656,41 @@ class PostgresStorage implements IStorage {
 
   // User Settings - PostgresStorage implementation
   async getUserSettings(userId: string) {
-    const result = await this.db.execute(
-      sql`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`
+    const result = await this.withActor((tx) =>
+      tx.execute(sql`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`)
     );
-    return result.rows?.[0] || undefined;
+    const settings = result.rows?.[0];
+    if (!settings) return undefined;
+    return {
+      ...settings,
+      llm_api_key: decryptSecret(settings.llm_api_key as string | null | undefined),
+      llmApiKey: decryptSecret(settings.llmApiKey as string | null | undefined),
+    };
   }
 
   async upsertUserSettings(userId: string, updates: Record<string, any>) {
     const existing = await this.getUserSettings(userId);
+    const encryptedApiKey =
+      updates.llmApiKey !== undefined ? encryptSecret(updates.llmApiKey) : undefined;
+
     if (existing) {
-      await this.db.execute(
+      await this.withActor((tx) =>
+        tx.execute(
         sql`UPDATE user_settings SET
           llm_provider = COALESCE(${updates.llmProvider ?? null}, llm_provider),
-          llm_api_key = ${updates.llmApiKey !== undefined ? updates.llmApiKey : sql`llm_api_key`},
+          llm_api_key = ${encryptedApiKey !== undefined ? encryptedApiKey : sql`llm_api_key`},
           llm_model = COALESCE(${updates.llmModel ?? null}, llm_model),
           updated_at = NOW()
         WHERE user_id = ${userId}`
+        )
       );
       return this.getUserSettings(userId);
     } else {
-      await this.db.execute(
+      await this.withActor((tx) =>
+        tx.execute(
         sql`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
-        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || 'groq'}, ${updates.llmApiKey || null}, ${updates.llmModel || 'llama-3.3-70b-versatile'})`
+        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || 'groq'}, ${encryptedApiKey ?? null}, ${updates.llmModel || 'llama-3.3-70b-versatile'})`
+        )
       );
       return this.getUserSettings(userId);
     }

@@ -8,41 +8,6 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// server/lib/logger.ts
-import pino from "pino";
-var logger;
-var init_logger = __esm({
-  "server/lib/logger.ts"() {
-    "use strict";
-    logger = pino({
-      level: process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug"),
-      // Serverless-friendly: no transports, JSON to stdout — Vercel/Axiom/BetterStack pipe from there.
-      // In dev, pretty-print for readability.
-      ...process.env.NODE_ENV !== "production" && {
-        transport: {
-          target: "pino-pretty",
-          options: { colorize: true, translateTime: "SYS:HH:MM:ss" }
-        }
-      },
-      base: {
-        service: "productpilot",
-        env: process.env.NODE_ENV || "development"
-      },
-      redact: {
-        paths: [
-          "req.headers.authorization",
-          "req.headers.cookie",
-          "*.password",
-          "*.apiKey",
-          "*.api_key",
-          "*.secret"
-        ],
-        censor: "[REDACTED]"
-      }
-    });
-  }
-});
-
 // shared/prompt-content.ts
 var DISCOVERY_INITIAL_PROMPT, DEFAULT_STAGE_TEMPLATES, DEFAULT_INTERCEPTOR_PROMPTS;
 var init_prompt_content = __esm({
@@ -55,22 +20,31 @@ Context:
 - This is the first conversational step before ProductPilot generates a structured survey and downstream documents.
 
 Task:
-- Identify the product's user, problem, core workflow, MVP scope, constraints, and success signal.
+- Identify the product's user, problem, core workflow, MVP scope, constraints, and success signal \u2014 in that order of importance when information is missing.
 - Move the conversation forward with the smallest number of high-value questions.
+
+Opening-turn rules (when the user has sent 0\u20131 messages):
+- Reference what the user actually wrote, using their own words \u2014 never paste a hypothetical ICP like "small-team engineering leads" unless the user said it.
+- Ask ONE focused question about the single biggest unknown. Priority order: audience \u2192 primary platform \u2192 scope/MVP \u2192 constraints \u2192 success signal. If the user already named an audience and platform, ask about core workflow or must-have v1 feature instead.
+- Do not ask about "pain point / emotional cost" on turn 1 unless the audience is already well defined \u2014 otherwise you are imagining pain for a user the builder has not named.
 
 Constraints:
 - Ask one focused question at a time unless the user explicitly asks for a summary.
 - Reuse the user's own language instead of introducing jargon.
 - Do not invent facts. If something is unclear, ask or label it as an open question.
 - Optimize for clarity about what to build, not staffing or implementation ceremony.
+- When the idea is very short (\u2264 10 words) or clearly under-specified, prefer ending your response with 3\u20134 quick-answer chips using this exact format on its own line:
+  Quick answers: chip one | chip two | chip three | chip four
+  The chips must be concrete, mutually distinct, and directly answer the question you asked.
 
 Output:
-- Default response: one brief acknowledgement plus one focused next question.
+- Default response: one brief acknowledgement referencing the user's idea, then one focused next question, then (if the idea is under-specified) a single \`Quick answers:\` line with 3\u20134 chips.
 - If the user asks for a summary: provide a short recap plus the single biggest open question.
 
 Acceptance criteria:
 - Each turn should reduce ambiguity about users, problem, scope, or constraints.
-- Questions should be specific enough that the next answer can change the product definition.`;
+- Questions should be specific enough that the next answer can change the product definition.
+- Opener never invents a persona the user did not name.`;
     DEFAULT_STAGE_TEMPLATES = [
       {
         stageNumber: 1,
@@ -92,9 +66,13 @@ Constraints:
 - Do not invent requirements. If information is missing, label it as an assumption or open question.
 - Prioritize concrete user value and MVP clarity over feature sprawl.
 - Keep language product-specific and decision-oriented.
+- On the opening turn (user has sent \u2264 1 messages), reference what the user actually wrote in their own words and ask about the single biggest unknown in this priority order: audience \u2192 platform \u2192 scope \u2192 constraints. Do not ask about pain or emotional cost before audience is named.
+- When the idea is short (\u2264 10 words) or under-specified, end your reply with a single line:
+  Quick answers: chip one | chip two | chip three | chip four
+  Provide 3\u20134 concrete, mutually distinct chips that would answer the question you just asked.
 
 Output:
-- Conversation mode: one short acknowledgement plus one focused question.
+- Conversation mode: one short acknowledgement plus one focused question, optionally followed by a single \`Quick answers:\` line with 3\u20134 chips.
 - Deliverable mode: markdown with sections for Problem, Target Users, Core Jobs, MVP Scope, Non-Goals, Constraints, Success Metrics, and Open Questions.
 
 Acceptance criteria:
@@ -124,13 +102,23 @@ Task:
 - In interview mode, probe for genuine pain (not generic), sharp ICP traits, and the Jobs-to-be-Done the product will get hired for.
 - In deliverable mode, produce a North Star doc that a future LLM can use to audit any decision ("is this change in service of the JTBD or against it?").
 
+Interview-mode opener rules (turn 1, user message count \u2264 1):
+- Reference what the user actually wrote, in their own words. Do NOT name a persona or pain the user has not named.
+- If the user's idea does not name a target audience, your first question MUST be about audience (who is this for?). Do not ask about "pain points" or "emotional cost" until the audience is known \u2014 you cannot imagine their pain yet.
+- If audience is already clear, ask about primary platform, then scope / must-have v1 feature, then constraints.
+- Ask exactly ONE question. No bullet lists of questions.
+- When the idea is short (\u2264 10 words) or under-specified, end your reply with a single line:
+  Quick answers: chip one | chip two | chip three | chip four
+  Provide 3\u20134 concrete, mutually distinct chips that would answer the question you just asked.
+
 Constraints:
 - Count user messages. If < 6 user messages and the user did not ask for the doc, ask exactly one focused question and do NOT generate sections.
-- ICP must be specific: demographic + behavioral + situational traits. Not "our users."
+- ICP must be specific: demographic + behavioral + situational traits. Not "our users." Never invent an ICP the user did not describe \u2014 ask instead.
 - Jobs to Be Done must follow Christensen framing: "When [situation], I want to [motivation], so I can [outcome]."
 - Success metrics: one North Star + 2-3 leading indicators. Each must be measurable.
 - Do not invent. Mark assumptions explicitly.
 - Keep each section tight \u2014 1-3 lines, decision-grade prose, no restated context.
+- Any persona example in these instructions is illustrative only \u2014 never echo it back to the user as if it were their target audience.
 
 Output sections (deliverable mode, markdown):
 - **User Pain Point** \u2014 What are users suffering today? Be specific about the emotional / economic cost.
@@ -143,7 +131,7 @@ Output sections (deliverable mode, markdown):
 
 Acceptance criteria:
 - A future LLM reading this doc can tell, without asking, whether a proposed feature serves the JTBD.
-- Each ICP trait narrows the target materially (not "busy professionals" \u2014 "small-team engineering leads at 20-100 person companies who are promoted ICs not trained in people management").
+- Each ICP trait narrows the target materially (e.g. move from a vague label like "busy professionals" to a specific combination of demographic + behavioral + situational traits \u2014 but derive the traits from the USER's input, never from examples in this prompt).
 - Every success metric is countable.`,
         isUnlocked: true,
         keyInsights: [
@@ -716,12 +704,113 @@ var init_db = __esm({
   }
 });
 
+// server/lib/logger.ts
+import pino from "pino";
+var logger;
+var init_logger = __esm({
+  "server/lib/logger.ts"() {
+    "use strict";
+    logger = pino({
+      level: process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug"),
+      // Serverless-friendly: no transports, JSON to stdout — Vercel/Axiom/BetterStack pipe from there.
+      // In dev, pretty-print for readability.
+      ...process.env.NODE_ENV !== "production" && {
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true, translateTime: "SYS:HH:MM:ss" }
+        }
+      },
+      base: {
+        service: "productpilot",
+        env: process.env.NODE_ENV || "development"
+      },
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          "*.password",
+          "*.apiKey",
+          "*.api_key",
+          "*.secret"
+        ],
+        censor: "[REDACTED]"
+      }
+    });
+  }
+});
+
+// server/lib/secret-crypto.ts
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
+function getEncryptionKey() {
+  const secret = process.env.DATA_ENCRYPTION_KEY || process.env.BETTER_AUTH_SECRET;
+  if (!secret) {
+    throw new Error("DATA_ENCRYPTION_KEY or BETTER_AUTH_SECRET is required for secret encryption.");
+  }
+  return createHash("sha256").update(secret).digest();
+}
+function toBase64Url(value) {
+  return value.toString("base64url");
+}
+function fromBase64Url(value) {
+  return Buffer.from(value, "base64url");
+}
+function isEncryptedSecret(value) {
+  return typeof value === "string" && value.startsWith(`${SECRET_PREFIX}:`);
+}
+function encryptSecret(value) {
+  if (value == null || value === "") {
+    return value ?? null;
+  }
+  if (isEncryptedSecret(value)) {
+    return value;
+  }
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [SECRET_PREFIX, toBase64Url(iv), toBase64Url(tag), toBase64Url(encrypted)].join(":");
+}
+function decryptSecret(value) {
+  if (value == null || value === "") {
+    return value ?? null;
+  }
+  if (!isEncryptedSecret(value)) {
+    return value;
+  }
+  const parts = value.split(":");
+  if (parts.length !== 5 || parts[0] !== "enc" || parts[1] !== "v1") {
+    throw new Error("Encrypted secret has an unsupported format.");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", getEncryptionKey(), fromBase64Url(parts[2]));
+  decipher.setAuthTag(fromBase64Url(parts[3]));
+  return Buffer.concat([decipher.update(fromBase64Url(parts[4])), decipher.final()]).toString("utf8");
+}
+var SECRET_PREFIX;
+var init_secret_crypto = __esm({
+  "server/lib/secret-crypto.ts"() {
+    "use strict";
+    SECRET_PREFIX = "enc:v1";
+  }
+});
+
 // server/storage-hybrid.ts
 var storage_hybrid_exports = {};
 __export(storage_hybrid_exports, {
-  storage: () => storage
+  runWithDbActorContext: () => runWithDbActorContext,
+  storage: () => storage,
+  updateDbActorContext: () => updateDbActorContext
 });
+import { AsyncLocalStorage } from "async_hooks";
 import { eq, and, ne, desc, asc, sql as sql2 } from "drizzle-orm";
+function runWithDbActorContext(context, callback) {
+  return dbActorContext.run(context, callback);
+}
+function updateDbActorContext(updates) {
+  const context = dbActorContext.getStore();
+  if (context) {
+    Object.assign(context, updates);
+  }
+}
 function createStorage() {
   const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
   if (hasDatabase && db) {
@@ -736,14 +825,16 @@ function createStorage() {
   logger.warn("Using in-memory storage (no database configured \u2014 dev only)");
   return new MemStorage();
 }
-var MemStorage, PostgresStorage, storage;
+var dbActorContext, MemStorage, PostgresStorage, storage;
 var init_storage_hybrid = __esm({
   "server/storage-hybrid.ts"() {
     "use strict";
     init_logger();
+    init_secret_crypto();
     init_schema();
     init_prompt_content();
     init_db();
+    dbActorContext = new AsyncLocalStorage();
     MemStorage = class {
       projects = /* @__PURE__ */ new Map();
       stages = /* @__PURE__ */ new Map();
@@ -977,13 +1068,26 @@ var init_storage_hybrid = __esm({
       }
       // User Settings - MemStorage implementation
       async getUserSettings(userId) {
-        return this.userSettingsMap.get(userId);
+        const settings = this.userSettingsMap.get(userId);
+        if (!settings) return void 0;
+        return {
+          ...settings,
+          llmApiKey: decryptSecret(settings.llmApiKey),
+          llm_api_key: decryptSecret(settings.llm_api_key)
+        };
       }
       async upsertUserSettings(userId, updates) {
         const existing = this.userSettingsMap.get(userId) || { userId, llmProvider: "groq", llmModel: "llama-3.3-70b-versatile" };
-        const merged = { ...existing, ...updates, userId, updatedAt: /* @__PURE__ */ new Date() };
+        const encryptedUpdates = { ...updates };
+        if (Object.prototype.hasOwnProperty.call(encryptedUpdates, "llmApiKey")) {
+          encryptedUpdates.llmApiKey = encryptSecret(encryptedUpdates.llmApiKey);
+        }
+        if (Object.prototype.hasOwnProperty.call(encryptedUpdates, "llm_api_key")) {
+          encryptedUpdates.llm_api_key = encryptSecret(encryptedUpdates.llm_api_key);
+        }
+        const merged = { ...existing, ...encryptedUpdates, userId, updatedAt: /* @__PURE__ */ new Date() };
         this.userSettingsMap.set(userId, merged);
-        return merged;
+        return this.getUserSettings(userId);
       }
       // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
       llmCallLog = [];
@@ -1001,8 +1105,19 @@ var init_storage_hybrid = __esm({
       constructor(database) {
         this.db = database;
       }
-      async createProject(insertProject) {
+      async withActor(operation) {
+        const actor = dbActorContext.getStore();
         return await this.db.transaction(async (tx) => {
+          await tx.execute(sql2`
+        SELECT
+          set_config('app.current_user_id', ${actor?.userId ?? ""}, true),
+          set_config('app.current_guest_owner_id', ${actor?.guestOwnerId ?? ""}, true)
+      `);
+          return operation(tx);
+        });
+      }
+      async createProject(insertProject) {
+        return await this.withActor(async (tx) => {
           const [project] = await tx.insert(projects).values(insertProject).returning();
           const stageRows = DEFAULT_STAGES.map((defaultStage) => ({
             projectId: project.id,
@@ -1022,20 +1137,30 @@ var init_storage_hybrid = __esm({
         });
       }
       async getProject(id) {
-        const result = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
+        const result = await this.withActor(
+          (tx) => tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+        );
         return result[0];
       }
       async getAllProjects() {
-        return await this.db.select().from(projects).orderBy(desc(projects.createdAt));
+        return await this.withActor(
+          (tx) => tx.select().from(projects).orderBy(desc(projects.createdAt))
+        );
       }
       async getProjectsByUserId(userId) {
-        return await this.db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.createdAt));
+        return await this.withActor(
+          (tx) => tx.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.createdAt))
+        );
       }
       async getProjectsByGuestOwnerId(guestOwnerId) {
-        return await this.db.select().from(projects).where(eq(projects.guestOwnerId, guestOwnerId)).orderBy(desc(projects.createdAt));
+        return await this.withActor(
+          (tx) => tx.select().from(projects).where(eq(projects.guestOwnerId, guestOwnerId)).orderBy(desc(projects.createdAt))
+        );
       }
       async getUserDraft(userId) {
-        const result = await this.db.select().from(projects).where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete"))).limit(1);
+        const result = await this.withActor(
+          (tx) => tx.select().from(projects).where(and(eq(projects.userId, userId), ne(projects.surveyPhase, "complete"))).limit(1)
+        );
         return result[0];
       }
       async updateProject(id, updates) {
@@ -1043,23 +1168,29 @@ var init_storage_hybrid = __esm({
         if (Object.keys(finalUpdates).length > 0 && !finalUpdates.updatedAt) {
           finalUpdates.updatedAt = /* @__PURE__ */ new Date();
         }
-        const [updatedProject] = await this.db.update(projects).set(finalUpdates).where(eq(projects.id, id)).returning();
+        const [updatedProject] = await this.withActor(
+          (tx) => tx.update(projects).set(finalUpdates).where(eq(projects.id, id)).returning()
+        );
         return updatedProject;
       }
       async deleteProject(id) {
-        const result = await this.db.delete(projects).where(eq(projects.id, id));
+        const result = await this.withActor((tx) => tx.delete(projects).where(eq(projects.id, id)));
         return result.rowCount > 0;
       }
       async createStage(insertStage) {
-        const [stage] = await this.db.insert(stages).values(insertStage).returning();
+        const [stage] = await this.withActor((tx) => tx.insert(stages).values(insertStage).returning());
         return stage;
       }
       async getStage(id) {
-        const result = await this.db.select().from(stages).where(eq(stages.id, id)).limit(1);
+        const result = await this.withActor(
+          (tx) => tx.select().from(stages).where(eq(stages.id, id)).limit(1)
+        );
         return result[0];
       }
       async getStagesByProject(projectId) {
-        return await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+        return await this.withActor(
+          (tx) => tx.select().from(stages).where(eq(stages.projectId, projectId))
+        );
       }
       async updateStage(id, updates) {
         const finalUpdates = { ...updates };
@@ -1075,42 +1206,54 @@ var init_storage_hybrid = __esm({
             finalUpdates.progress = Math.max(0, Math.min(100, Math.round(completedCount / totalCount * 100)));
           }
         }
-        const [updatedStage] = await this.db.update(stages).set(finalUpdates).where(eq(stages.id, id)).returning();
+        const [updatedStage] = await this.withActor(
+          (tx) => tx.update(stages).set(finalUpdates).where(eq(stages.id, id)).returning()
+        );
         return updatedStage;
       }
       async ensureStagesForProject(projectId) {
-        const existing = await this.db.select().from(stages).where(eq(stages.projectId, projectId));
+        const existing = await this.withActor(
+          (tx) => tx.select().from(stages).where(eq(stages.projectId, projectId))
+        );
         if (existing.length > 0) return existing;
         const createdStages = [];
         for (const defaultStage of DEFAULT_STAGES) {
-          const [stage] = await this.db.insert(stages).values({
-            projectId,
-            stageNumber: defaultStage.stageNumber,
-            title: defaultStage.title,
-            description: defaultStage.description,
-            systemPrompt: defaultStage.systemPrompt,
-            keyInsights: defaultStage.keyInsights || [],
-            completedInsights: [],
-            progress: 0,
-            isUnlocked: true
-          }).returning();
+          const [stage] = await this.withActor(
+            (tx) => tx.insert(stages).values({
+              projectId,
+              stageNumber: defaultStage.stageNumber,
+              title: defaultStage.title,
+              description: defaultStage.description,
+              systemPrompt: defaultStage.systemPrompt,
+              keyInsights: defaultStage.keyInsights || [],
+              completedInsights: [],
+              progress: 0,
+              isUnlocked: true
+            }).returning()
+          );
           createdStages.push(stage);
         }
         return createdStages;
       }
       async getMessage(id) {
-        const result = await this.db.select().from(messages).where(eq(messages.id, id)).limit(1);
+        const result = await this.withActor(
+          (tx) => tx.select().from(messages).where(eq(messages.id, id)).limit(1)
+        );
         return result[0];
       }
       async getMessagesByStage(stageId) {
-        return await this.db.select().from(messages).where(eq(messages.stageId, stageId)).orderBy(asc(messages.createdAt));
+        return await this.withActor(
+          (tx) => tx.select().from(messages).where(eq(messages.stageId, stageId)).orderBy(asc(messages.createdAt))
+        );
       }
       async createMessage(insertMessage) {
-        const [message] = await this.db.insert(messages).values(insertMessage).returning();
+        const [message] = await this.withActor(
+          (tx) => tx.insert(messages).values(insertMessage).returning()
+        );
         return message;
       }
       async deleteMessagesByStage(stageId) {
-        await this.db.delete(messages).where(eq(messages.stageId, stageId));
+        await this.withActor((tx) => tx.delete(messages).where(eq(messages.stageId, stageId)));
       }
       // Admin Prompts - PostgreSQL implementation
       async getAllAdminPrompts() {
@@ -1165,27 +1308,38 @@ var init_storage_hybrid = __esm({
       }
       // User Settings - PostgresStorage implementation
       async getUserSettings(userId) {
-        const result = await this.db.execute(
-          sql2`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`
+        const result = await this.withActor(
+          (tx) => tx.execute(sql2`SELECT * FROM user_settings WHERE user_id = ${userId} LIMIT 1`)
         );
-        return result.rows?.[0] || void 0;
+        const settings = result.rows?.[0];
+        if (!settings) return void 0;
+        return {
+          ...settings,
+          llm_api_key: decryptSecret(settings.llm_api_key),
+          llmApiKey: decryptSecret(settings.llmApiKey)
+        };
       }
       async upsertUserSettings(userId, updates) {
         const existing = await this.getUserSettings(userId);
+        const encryptedApiKey = updates.llmApiKey !== void 0 ? encryptSecret(updates.llmApiKey) : void 0;
         if (existing) {
-          await this.db.execute(
-            sql2`UPDATE user_settings SET
+          await this.withActor(
+            (tx) => tx.execute(
+              sql2`UPDATE user_settings SET
           llm_provider = COALESCE(${updates.llmProvider ?? null}, llm_provider),
-          llm_api_key = ${updates.llmApiKey !== void 0 ? updates.llmApiKey : sql2`llm_api_key`},
+          llm_api_key = ${encryptedApiKey !== void 0 ? encryptedApiKey : sql2`llm_api_key`},
           llm_model = COALESCE(${updates.llmModel ?? null}, llm_model),
           updated_at = NOW()
         WHERE user_id = ${userId}`
+            )
           );
           return this.getUserSettings(userId);
         } else {
-          await this.db.execute(
-            sql2`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
-        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || "groq"}, ${updates.llmApiKey || null}, ${updates.llmModel || "llama-3.3-70b-versatile"})`
+          await this.withActor(
+            (tx) => tx.execute(
+              sql2`INSERT INTO user_settings (id, user_id, llm_provider, llm_api_key, llm_model)
+        VALUES (gen_random_uuid(), ${userId}, ${updates.llmProvider || "groq"}, ${encryptedApiKey ?? null}, ${updates.llmModel || "llama-3.3-70b-versatile"})`
+            )
           );
           return this.getUserSettings(userId);
         }
@@ -1208,7 +1362,6 @@ import express from "express";
 import { toNodeHandler } from "better-auth/node";
 
 // server/auth/index.ts
-init_logger();
 init_db();
 import fs from "fs";
 import path from "path";
@@ -1221,13 +1374,27 @@ import { dash } from "@better-auth/infra";
 // server/auth/email.ts
 init_logger();
 var RESEND_API_URL = "https://api.resend.com/emails";
-function canSendWithResend() {
+function canSendAuthEmail() {
   return Boolean(process.env.RESEND_API_KEY && process.env.AUTH_FROM_EMAIL);
 }
+function shouldLogAuthEmailBody() {
+  return process.env.NODE_ENV !== "production";
+}
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 async function sendAuthEmail(payload) {
-  if (!canSendWithResend()) {
-    logger.info({ to: payload.to, subject: payload.subject, text: payload.text }, "[auth] Email provider not configured. Logging email instead.");
-    return;
+  if (!canSendAuthEmail()) {
+    if (shouldLogAuthEmailBody()) {
+      logger.info({ to: payload.to, subject: payload.subject, text: payload.text }, "[auth] Email provider not configured. Logging email instead.");
+      return;
+    }
+    logger.error({ to: payload.to, subject: payload.subject }, "[auth] Email provider not configured. Refusing to log auth email body in production.");
+    throw new Error("Auth email provider is not configured.");
+  }
+  if (!process.env.RESEND_API_KEY || !process.env.AUTH_FROM_EMAIL) {
+    logger.error({ to: payload.to, subject: payload.subject }, "[auth] Email provider configuration is incomplete.");
+    throw new Error("Auth email provider configuration is incomplete.");
   }
   const response = await fetch(RESEND_API_URL, {
     method: "POST",
@@ -1248,8 +1415,13 @@ async function sendAuthEmail(payload) {
     throw new Error(`Failed to send auth email (${response.status}): ${body}`);
   }
 }
+function escapeAuthUrl(url) {
+  return escapeHtml(url);
+}
 async function sendPasswordResetEmail(input) {
   const greeting = input.name ? `Hi ${input.name},` : "Hi,";
+  const safeGreeting = escapeHtml(greeting);
+  const safeUrl = escapeAuthUrl(input.url);
   const subject = "Reset your ProductPilot password";
   const text3 = `${greeting}
 
@@ -1257,11 +1429,11 @@ You (or someone with your email) requested a password reset. Click the link belo
 ${input.url}
 
 The link expires in 1 hour. If you didn't request this, you can safely ignore this email.`;
-  const html = `<p>${greeting}</p>
+  const html = `<p>${safeGreeting}</p>
 <p>You (or someone with your email) requested a password reset.</p>
-<p><a href="${input.url}">Reset your password</a></p>
+<p><a href="${safeUrl}">Reset your password</a></p>
 <p>If the button does not work, open this link:</p>
-<p>${input.url}</p>
+<p>${safeUrl}</p>
 <p>The link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>`;
   await sendAuthEmail({
     to: input.email,
@@ -1272,6 +1444,7 @@ The link expires in 1 hour. If you didn't request this, you can safely ignore th
 }
 async function sendMagicLinkEmail(input) {
   const subject = "Sign in to ProductPilot";
+  const safeUrl = escapeAuthUrl(input.url);
   const text3 = `Click this link to sign in to ProductPilot:
 
 ${input.url}
@@ -1281,7 +1454,7 @@ The link expires in 15 minutes. If you didn't request this, you can ignore this 
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:480px;margin:0 auto;padding:32px;color:#1a1714">
       <h2 style="margin:0 0 16px;color:#110f0d">Sign in to ProductPilot</h2>
       <p style="margin:0 0 24px;color:#4a3f38;line-height:1.5">Click the button below to sign in. The link expires in 15 minutes.</p>
-      <a href="${input.url}" style="display:inline-block;background:#f0b65e;color:#110f0d;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Sign in to ProductPilot</a>
+      <a href="${safeUrl}" style="display:inline-block;background:#f0b65e;color:#110f0d;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Sign in to ProductPilot</a>
       <p style="margin:24px 0 0;color:#6b5d52;font-size:13px">If you didn't request this, you can ignore this email.</p>
     </div>
   `;
@@ -1289,6 +1462,8 @@ The link expires in 15 minutes. If you didn't request this, you can ignore this 
 }
 async function sendVerificationEmail(input) {
   const greeting = input.name ? `Hi ${input.name},` : "Hi,";
+  const safeGreeting = escapeHtml(greeting);
+  const safeUrl = escapeAuthUrl(input.url);
   const subject = "Verify your ProductPilot email";
   const text3 = `${greeting}
 
@@ -1296,11 +1471,11 @@ Verify your email to finish setting up ProductPilot:
 ${input.url}
 
 If you did not request this, you can ignore this email.`;
-  const html = `<p>${greeting}</p>
+  const html = `<p>${safeGreeting}</p>
 <p>Verify your email to finish setting up ProductPilot.</p>
-<p><a href="${input.url}">Verify email</a></p>
+<p><a href="${safeUrl}">Verify email</a></p>
 <p>If the button does not work, open this link:</p>
-<p>${input.url}</p>
+<p>${safeUrl}</p>
 <p>If you did not request this, you can ignore this email.</p>`;
   await sendAuthEmail({
     to: input.email,
@@ -1314,11 +1489,12 @@ If you did not request this, you can ignore this email.`;
 var schema_exports2 = {};
 __export(schema_exports2, {
   account: () => account,
+  rateLimit: () => rateLimit,
   session: () => session,
   user: () => user,
   verification: () => verification
 });
-import { index as index2, pgTable as pgTable2, text as text2, timestamp as timestamp2, boolean as boolean2, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, index as index2, integer as integer2, pgTable as pgTable2, text as text2, timestamp as timestamp2, boolean as boolean2, uniqueIndex } from "drizzle-orm/pg-core";
 var user = pgTable2("user", {
   id: text2("id").primaryKey(),
   name: text2("name").notNull(),
@@ -1371,6 +1547,11 @@ var verification = pgTable2("verification", {
 }, (table) => [
   index2("verification_identifier_idx").on(table.identifier)
 ]);
+var rateLimit = pgTable2("rateLimit", {
+  key: text2("key").primaryKey(),
+  count: integer2("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull()
+});
 
 // server/auth/index.ts
 var authDb = (() => {
@@ -1400,11 +1581,17 @@ var defaultProtocol = process.env.BETTER_AUTH_URL?.startsWith("https://") || pro
 var defaultHost = process.env.HOST || "localhost";
 var defaultPort = process.env.PORT || "3000";
 var baseURL = process.env.BETTER_AUTH_URL || `${defaultProtocol}://${defaultHost}:${defaultPort}`;
+var extraTrustedOrigins = (process.env.BETTER_AUTH_TRUSTED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean);
+var listenOrigin = `${defaultProtocol}://${defaultHost}:${defaultPort}`;
+var trustedOrigins = Array.from(
+  /* @__PURE__ */ new Set([baseURL, listenOrigin, ...extraTrustedOrigins])
+);
 var googleEnabled = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
 );
 var auth = betterAuth({
   baseURL,
+  trustedOrigins,
   secret: authSecret,
   database: drizzleAdapter(authDb, {
     provider: "pg",
@@ -1419,41 +1606,57 @@ var auth = betterAuth({
     minPasswordLength: 8,
     maxPasswordLength: 128,
     sendResetPassword: async ({ user: user2, url }) => {
-      void sendPasswordResetEmail({
+      await sendPasswordResetEmail({
         email: user2.email,
         name: user2.name,
         url
-      }).catch((error) => {
-        logger.error({ err: error }, "[auth] Failed to send password reset email");
       });
     },
     resetPasswordTokenExpiresIn: 60 * 60
     // 1 hour
   },
   emailVerification: {
-    sendOnSignUp: true,
+    sendOnSignUp: canSendAuthEmail() || process.env.NODE_ENV !== "production",
     sendOnSignIn: false,
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
     sendVerificationEmail: async ({ user: user2, url }) => {
-      void sendVerificationEmail({
+      await sendVerificationEmail({
         email: user2.email,
         name: user2.name,
         url
-      }).catch((error) => {
-        logger.error({ err: error }, "[auth] Failed to send verification email");
       });
     }
   },
   account: {
-    // Account linking: if a user signs up with email/password and later uses Google OAuth
-    // (or vice versa), Better Auth merges the accounts IF the emails match.
+    encryptOAuthTokens: true,
+    // Account linking: if a user signs up with email/password and later uses Google OAuth,
+    // Better Auth merges the accounts IF the emails match and Google is trusted.
     // allowDifferentEmails: false means linking is blocked when emails differ — prevents
     // accidental merging of distinct identities.
     accountLinking: {
       enabled: true,
-      trustedProviders: ["google", "email-password"],
+      trustedProviders: ["google"],
       allowDifferentEmails: false
+    }
+  },
+  rateLimit: {
+    enabled: true,
+    storage: "database",
+    window: 60,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/sign-up/email": { window: 60, max: 5 },
+      "/request-password-reset": { window: 60, max: 3 },
+      "/send-verification-email": { window: 60, max: 3 },
+      "/sign-in/magic-link": { window: 60, max: 3 },
+      "/magic-link/verify": { window: 60, max: 5 }
+    }
+  },
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-forwarded-for", "x-real-ip", "cf-connecting-ip"]
     }
   },
   socialProviders: googleEnabled ? {
@@ -1475,12 +1678,15 @@ var auth = betterAuth({
     ] : [],
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        void sendMagicLinkEmail({ email, url }).catch((error) => {
-          logger.error({ err: error }, "[auth] Failed to send magic link email");
-        });
+        await sendMagicLinkEmail({ email, url });
       },
+      storeToken: "hashed",
       // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.
-      expiresIn: 60 * 15
+      expiresIn: 60 * 15,
+      rateLimit: {
+        window: 60,
+        max: 3
+      }
     })
   ]
 });
@@ -2357,6 +2563,7 @@ var isAdmin = (req, res, next) => {
 var DEMO_OWNER_COOKIE = "productpilot_demo_owner";
 var DEMO_OWNER_COOKIE_MAX_AGE_MS = 1e3 * 60 * 60 * 24 * 30;
 var SHOULD_SECURE_DEMO_COOKIE = process.env.NODE_ENV === "production" || process.env.BETTER_AUTH_URL?.startsWith("https://");
+var SAFE_METHODS = /* @__PURE__ */ new Set(["GET", "HEAD", "OPTIONS"]);
 function parseCookies(cookieHeader) {
   if (!cookieHeader) {
     return {};
@@ -2373,6 +2580,32 @@ function parseCookies(cookieHeader) {
     }
     return accumulator;
   }, {});
+}
+function getOrigin(value) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+function validateUnsafeRequestOrigin(req, res, next) {
+  if (!req.path.startsWith("/api") || req.path.startsWith("/api/auth") || SAFE_METHODS.has(req.method)) {
+    return next();
+  }
+  const allowedOrigins = new Set(trustedOrigins.map((origin) => getOrigin(origin)).filter(Boolean));
+  const originHeader = req.get("origin");
+  const refererHeader = req.get("referer");
+  const requestOrigin = getOrigin(originHeader) || getOrigin(refererHeader);
+  if ((originHeader || refererHeader) && !requestOrigin) {
+    return res.status(403).json({ message: "Request origin is not allowed" });
+  }
+  if (requestOrigin && !allowedOrigins.has(requestOrigin)) {
+    return res.status(403).json({ message: "Request origin is not allowed" });
+  }
+  next();
 }
 function getGuestOwnerId(req) {
   const cookies = parseCookies(req.headers?.cookie);
@@ -2476,6 +2709,18 @@ async function loadOwnedStage(req, res, stageId) {
 }
 async function registerRoutes(app2) {
   app2.use(extractUser);
+  app2.use(validateUnsafeRequestOrigin);
+  app2.use((req, _res, next) => {
+    const actor = getActorContext(req);
+    const guestOwnerId = getGuestOwnerId(req);
+    runWithDbActorContext(
+      {
+        userId: actor.kind === "user" ? actor.id : null,
+        guestOwnerId
+      },
+      next
+    );
+  });
   app2.get("/api/admin/check", requireAuth, (req, res) => {
     res.json({
       isAdmin: hasAdminAccess(req),
@@ -2555,6 +2800,7 @@ async function registerRoutes(app2) {
       const guestOwnerId = actor.kind === "guest" ? actor.id : actor.kind === "none" ? randomUUID() : null;
       if (guestOwnerId) {
         setGuestOwnerCookie(res, guestOwnerId);
+        updateDbActorContext({ guestOwnerId });
       }
       const project = await storage.createProject({
         ...projectData,
@@ -3227,6 +3473,127 @@ data: ${JSON.stringify(data)}
       res.status(500).json({ message: "Failed to get settings" });
     }
   });
+  app2.post("/api/enhance-idea", async (req, res) => {
+    try {
+      const raw = typeof req.body?.idea === "string" ? req.body.idea : "";
+      const idea = raw.trim();
+      if (idea.length < 3) {
+        return res.status(400).json({ message: "Idea must be at least 3 characters." });
+      }
+      if (idea.length > 500) {
+        return res.status(400).json({ message: "Idea too long (max 500 chars)." });
+      }
+      const userConfig = await getLLMConfig(req);
+      const messages2 = [
+        {
+          role: "system",
+          content: "You are a product-idea editor. Given a short product idea, rewrite it as a 2-3 sentence description. Keep the user's core concept. Add only obvious specifics (who it's for, what it does, the key value). Do not invent features the user didn't hint at. No headers, no markdown, no quotes \u2014 plain text only. Write in the same tone the user used. Keep it under 80 words."
+        },
+        { role: "user", content: idea }
+      ];
+      const result = await aiService.chat(messages2, "claude-sonnet", userConfig, "chat");
+      const enhanced = (result.content || "").trim().replace(/^["']|["']$/g, "");
+      if (!enhanced) {
+        return res.status(502).json({ message: "Empty response from model." });
+      }
+      return res.json({ enhanced });
+    } catch (error) {
+      logger.warn({ err: error?.message }, "enhance-idea failed");
+      return res.status(500).json({ message: "Failed to enhance idea." });
+    }
+  });
+  app2.post("/api/clarify", async (req, res) => {
+    try {
+      const raw = typeof req.body?.idea === "string" ? req.body.idea : "";
+      const idea = raw.trim();
+      if (idea.length < 3) {
+        return res.status(400).json({ message: "Idea must be at least 3 characters." });
+      }
+      if (idea.length > 2e3) {
+        return res.status(400).json({ message: "Idea too long (max 2000 chars)." });
+      }
+      const priorAnswers = req.body?.priorAnswers && typeof req.body.priorAnswers === "object" ? req.body.priorAnswers : {};
+      const userConfig = await getLLMConfig(req);
+      const systemPrompt = `You are ProductPilot's clarification step. The user typed a product idea and is about to generate PRD/architecture/coding docs. Your job is to decide whether the idea is well-enough specified to generate good docs, and if not, to ask the 2\u20134 highest-leverage clarifying questions before generation starts.
+
+Priority of missing information: audience \u2192 primary platform \u2192 scope (must-have v1) \u2192 budget/timeline \u2192 constraints.
+
+You MUST return valid JSON only, matching this schema:
+{
+  "needsClarification": true,
+  "summary": "One short sentence restating the idea in the user's own words.",
+  "questions": [
+    {
+      "id": "audience",
+      "question": "Short, single-focus question in plain English.",
+      "chips": ["Concrete option 1", "Concrete option 2", "Concrete option 3", "Concrete option 4"]
+    }
+  ]
+}
+
+Rules:
+- Ask 2\u20134 questions when needsClarification is true. Never only 1 \u2014 that wastes a turn. If you can only think of one, also ask about scope or primary platform.
+- Each question must be answerable by tapping exactly one chip. Chips must be concrete, mutually exclusive, 3 or 4 per question, never longer than 4 words each.
+- If the idea already names an audience, do NOT ask about audience \u2014 skip to the next missing slot.
+- If the idea already names a platform, do NOT ask about platform \u2014 skip to scope or constraints.
+- Never ask about team size, hiring, agencies, or staffing.
+- Never echo the idea back as a question.
+- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.`;
+      const userPrompt = `Idea: "${idea}"
+
+Prior answers from the user (may be empty): ${JSON.stringify(priorAnswers)}
+
+Return the JSON now.`;
+      const result = await aiService.generateStructuredOutput(
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        "claude-sonnet",
+        userConfig,
+        "chat"
+      );
+      const questions = Array.isArray(result?.questions) ? result.questions.slice(0, 4).map((q, i) => ({
+        id: typeof q?.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`,
+        question: typeof q?.question === "string" ? q.question.slice(0, 180) : "",
+        chips: Array.isArray(q?.chips) ? q.chips.filter((c) => typeof c === "string" && c.trim()).slice(0, 5).map((c) => c.slice(0, 32)) : []
+      })).filter((q) => q.question && q.chips.length >= 2) : [];
+      const FALLBACK_QUESTIONS = [
+        {
+          id: "platform",
+          question: "What's the primary surface you want to ship on first?",
+          chips: ["Web", "iOS", "Android", "Desktop"]
+        },
+        {
+          id: "scope",
+          question: "For a first version, which feels most important?",
+          chips: ["Fast to ship", "Beautiful UI", "Power-user depth", "Rock-solid data"]
+        },
+        {
+          id: "audience",
+          question: "Who is this mostly for?",
+          chips: ["Just me", "Small team", "A community", "Customers"]
+        }
+      ];
+      const needs = Boolean(result?.needsClarification) && questions.length > 0;
+      if (needs && questions.length === 1) {
+        const takenIds = new Set(questions.map((q) => q.id.toLowerCase()));
+        for (const fb of FALLBACK_QUESTIONS) {
+          if (!takenIds.has(fb.id) && questions.length < 2) {
+            questions.push(fb);
+          }
+        }
+      }
+      return res.json({
+        needsClarification: needs,
+        summary: typeof result?.summary === "string" ? result.summary.slice(0, 240) : "",
+        questions
+      });
+    } catch (error) {
+      logger.warn({ err: error?.message }, "clarify failed");
+      return res.json({ needsClarification: false, summary: "", questions: [] });
+    }
+  });
   app2.put("/api/settings", requireAuth, async (req, res) => {
     try {
       const { llmProvider, llmApiKey, llmModel } = req.body;
@@ -3383,6 +3750,13 @@ async function runMigrations() {
         "expires_at" timestamp NOT NULL,
         "created_at" timestamp DEFAULT now() NOT NULL,
         "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await pool2.query(`
+      CREATE TABLE IF NOT EXISTS "rateLimit" (
+        "key" text PRIMARY KEY NOT NULL,
+        "count" integer NOT NULL,
+        "last_request" bigint NOT NULL
       )
     `);
     await pool2.query(`
@@ -3623,6 +3997,23 @@ async function runMigrations() {
     `);
     await pool2.query(`
       DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE constraint_name = 'user_settings_user_id_user_id_fk' AND table_name = 'user_settings'
+        ) THEN
+          DELETE FROM "user_settings"
+          WHERE "user_id" IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "user_settings"."user_id");
+
+          ALTER TABLE "user_settings"
+          ADD CONSTRAINT "user_settings_user_id_user_id_fk"
+          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;
+        END IF;
+      END $$
+    `);
+    await pool2.query(`
+      DO $$
       DECLARE
         tbl TEXT;
       BEGIN
@@ -3630,7 +4021,7 @@ async function runMigrations() {
           SELECT tablename
           FROM pg_tables
           WHERE schemaname = 'public'
-            AND tablename NOT IN ('user', 'session', 'account', 'verification')
+            AND tablename NOT IN ('user', 'session', 'account', 'verification', 'rateLimit')
         LOOP
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
         END LOOP;
@@ -3643,22 +4034,133 @@ async function runMigrations() {
         ALTER TABLE IF EXISTS "session" DISABLE ROW LEVEL SECURITY;
         ALTER TABLE IF EXISTS "account" DISABLE ROW LEVEL SECURITY;
         ALTER TABLE IF EXISTS "verification" DISABLE ROW LEVEL SECURITY;
+        ALTER TABLE IF EXISTS "rateLimit" DISABLE ROW LEVEL SECURITY;
       END $$;
     `);
     await pool2.query(`
       DO $$
       BEGIN
-        -- Projects: users see their own + unowned projects (demo)
-        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'projects_user_isolation') THEN
-          CREATE POLICY projects_user_isolation ON projects
-            USING (user_id IS NULL OR user_id = current_setting('app.current_user_id', true));
-        END IF;
+        DROP POLICY IF EXISTS projects_user_isolation ON projects;
+        DROP POLICY IF EXISTS user_settings_isolation ON user_settings;
+        DROP POLICY IF EXISTS projects_actor_isolation ON projects;
+        DROP POLICY IF EXISTS stages_actor_isolation ON stages;
+        DROP POLICY IF EXISTS messages_actor_isolation ON messages;
+        DROP POLICY IF EXISTS user_settings_actor_isolation ON user_settings;
 
-        -- User settings: users see only their own
-        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'user_settings_isolation') THEN
-          CREATE POLICY user_settings_isolation ON user_settings
-            USING (user_id = current_setting('app.current_user_id', true));
-        END IF;
+        ALTER TABLE "projects" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "projects" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "stages" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "stages" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "messages" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "messages" FORCE ROW LEVEL SECURITY;
+        ALTER TABLE "user_settings" ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE "user_settings" FORCE ROW LEVEL SECURITY;
+
+        CREATE POLICY projects_actor_isolation ON projects
+          USING (
+            (
+              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+            )
+            OR (
+              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+            )
+          )
+          WITH CHECK (
+            (
+              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+            )
+            OR (
+              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+            )
+          );
+
+        CREATE POLICY stages_actor_isolation ON stages
+          USING (
+            EXISTS (
+              SELECT 1
+              FROM projects p
+              WHERE p.id = stages.project_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          )
+          WITH CHECK (
+            EXISTS (
+              SELECT 1
+              FROM projects p
+              WHERE p.id = stages.project_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          );
+
+        CREATE POLICY messages_actor_isolation ON messages
+          USING (
+            EXISTS (
+              SELECT 1
+              FROM stages s
+              JOIN projects p ON p.id = s.project_id
+              WHERE s.id = messages.stage_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          )
+          WITH CHECK (
+            EXISTS (
+              SELECT 1
+              FROM stages s
+              JOIN projects p ON p.id = s.project_id
+              WHERE s.id = messages.stage_id
+                AND (
+                  (
+                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+                  )
+                  OR (
+                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
+                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
+                  )
+                )
+            )
+          );
+
+        CREATE POLICY user_settings_actor_isolation ON user_settings
+          USING (
+            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+          )
+          WITH CHECK (
+            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
+            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
+          );
       END $$;
     `);
     logger.info("Database migrations completed successfully");
@@ -3703,8 +4205,8 @@ initSentry();
 var appInitialized = false;
 var app = express();
 app.all("/api/auth/*", toNodeHandler(auth));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 async function ensureInitialized() {
   if (appInitialized) return;
   try {

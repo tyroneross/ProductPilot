@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from "express";
 import { logger } from "./lib/logger";
 import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
-import { storage } from "./storage-hybrid";
+import { runWithDbActorContext, storage, updateDbActorContext } from "./storage-hybrid";
 import { aiService, type AIMessage, type LLMConfig } from "./services/ai";
 import {
   insertProjectSchema,
@@ -15,7 +15,7 @@ import {
   type Stage,
 } from "@shared/schema";
 import { z } from "zod";
-import { extractUser, requireAuth } from "./auth";
+import { extractUser, requireAuth, trustedOrigins as authTrustedOrigins } from "./auth";
 import {
   buildDocumentGenerationPrompt,
   buildMinimumDetailsDocumentPrompt,
@@ -60,6 +60,7 @@ const DEMO_OWNER_COOKIE = "productpilot_demo_owner";
 const DEMO_OWNER_COOKIE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
 const SHOULD_SECURE_DEMO_COOKIE =
   process.env.NODE_ENV === "production" || process.env.BETTER_AUTH_URL?.startsWith("https://");
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 type ActorContext =
   | { kind: "user"; id: string }
@@ -84,6 +85,39 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
     }
     return accumulator;
   }, {});
+}
+
+function getOrigin(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function validateUnsafeRequestOrigin(req: any, res: any, next: any) {
+  if (!req.path.startsWith("/api") || req.path.startsWith("/api/auth") || SAFE_METHODS.has(req.method)) {
+    return next();
+  }
+
+  const allowedOrigins = new Set(authTrustedOrigins.map((origin) => getOrigin(origin)).filter(Boolean));
+  const originHeader = req.get("origin");
+  const refererHeader = req.get("referer");
+  const requestOrigin = getOrigin(originHeader) || getOrigin(refererHeader);
+
+  if ((originHeader || refererHeader) && !requestOrigin) {
+    return res.status(403).json({ message: "Request origin is not allowed" });
+  }
+
+  if (requestOrigin && !allowedOrigins.has(requestOrigin)) {
+    return res.status(403).json({ message: "Request origin is not allowed" });
+  }
+
+  next();
 }
 
 function getGuestOwnerId(req: any): string | null {
@@ -232,6 +266,18 @@ async function loadOwnedStage(
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.use(extractUser);
+  app.use(validateUnsafeRequestOrigin);
+  app.use((req: any, _res, next) => {
+    const actor = getActorContext(req);
+    const guestOwnerId = getGuestOwnerId(req);
+    runWithDbActorContext(
+      {
+        userId: actor.kind === "user" ? actor.id : null,
+        guestOwnerId,
+      },
+      next,
+    );
+  });
 
   // Admin check endpoint
   app.get("/api/admin/check", requireAuth, (req: any, res) => {
@@ -348,6 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (guestOwnerId) {
         setGuestOwnerCookie(res, guestOwnerId);
+        updateDbActorContext({ guestOwnerId });
       }
 
       const project = await storage.createProject({
