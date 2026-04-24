@@ -8,6 +8,20 @@
       "when": 1754519486014,
       "tag": "0000_happy_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777058041863,
+      "tag": "0001_consolidate_from_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777058042000,
+      "tag": "0002_rls_policies_and_cross_schema_fks",
+      "breakpoints": true
     }
   ]
 }

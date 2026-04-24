@@ -5,6 +5,8 @@ import { z } from "zod";
 import { DEFAULT_INTERCEPTOR_PROMPTS, DEFAULT_STAGE_TEMPLATES } from "./prompt-content";
 
 // Admin prompts table for managing all app prompts
+import { uniqueIndex } from "drizzle-orm/pg-core";
+
 export const adminPrompts = pgTable("admin_prompts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   scope: text("scope").notNull(), // "stage" | "system" | "discovery"
@@ -17,7 +19,35 @@ export const adminPrompts = pgTable("admin_prompts", {
   updatedBy: varchar("updated_by"), // GitHub username of last editor
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  // UNIQUE target_key — seedDefaultPrompts relies on this to avoid duplicates on re-run.
+  uniqueIndex("admin_prompts_target_key_unique").on(table.targetKey),
+]);
+
+// Legacy express-session/connect-pg-simple store. Kept so older local data isn't
+// dropped; unused by Better Auth. No FK, no dependencies.
+export const legacySessions = pgTable("sessions", {
+  sid: varchar("sid").primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => [
+  index("IDX_sessions_expire").on(table.expire),
+]);
+
+// User-scoped BYOK LLM settings. userId → user.id FK is declared in a follow-up
+// migration (shared/schema.ts can't import server/auth/schema.ts cleanly).
+export const userSettings = pgTable("user_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 255 }).notNull().unique(),
+  llmProvider: text("llm_provider").default("groq"),
+  llmApiKey: text("llm_api_key"), // encrypted at rest (see server/lib/secret-crypto.ts)
+  llmModel: text("llm_model").default("llama-3.3-70b-versatile"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export type UserSettings = typeof userSettings.$inferSelect;
+export type InsertUserSettings = typeof userSettings.$inferInsert;
 
 export const insertAdminPromptSchema = createInsertSchema(adminPrompts).omit({
   id: true,
@@ -65,7 +95,9 @@ export const stages = pgTable("stages", {
   completedInsights: jsonb("completed_insights"), // insights marked as complete
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("stages_project_id_idx").on(table.projectId),
+]);
 
 export const messages = pgTable("messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -78,7 +110,11 @@ export const messages = pgTable("messages", {
   // version bumps on regenerate; older versions are retained for history
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Hot-path: message reads always filter by stage_id and order by created_at.
+  index("messages_stage_id_created_at_idx").on(table.stageId, table.createdAt),
+  index("messages_stage_kind_idx").on(table.stageId, table.kind),
+]);
 
 // LLM call telemetry. Written by AIService at call boundary. Used for cost
 // attribution, latency/error tracking, and BYOK spend caps.
