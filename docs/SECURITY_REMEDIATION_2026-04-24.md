@@ -78,11 +78,11 @@ Change: JSON bodies are limited to `1mb`; URL-encoded bodies are limited to `100
 
 ### DEP-001: Moderate dependency advisories remain
 
-Status: Not fixed upstream.
+Status: Partially remediated.
 
-Evidence: `npm audit --omit=dev` previously reported moderate advisories through `esbuild` and `uuid` dependency chains with no available fix in the current installed tree.
+Evidence: The optional `@better-auth/infra` dashboard dependency was removed to eliminate the `@better-auth/sso -> samlify -> uuid` production advisory chain, and Better Auth was updated from `1.6.6` to `1.6.9`. `npm audit --omit=dev` now reports 5 moderate advisories, all from the `esbuild` advisory through Better Auth's Drizzle tooling path, with no available upstream fix in the current installed tree.
 
-Recommended action: Track upstream Better Auth/infra and Drizzle/esbuild releases. Consider removing `@better-auth/infra` from production dependencies if the dashboard plugin is not needed.
+Recommended action: Track upstream Better Auth and Drizzle/esbuild releases. Do not expose Vite/esbuild dev servers publicly.
 
 ### OPS-001: Migration not applied in this session
 
@@ -96,4 +96,5 @@ Reason: Applying the migration would mutate the live database and delete orphane
 - `npm run build`
 - `npm run build:api`
 - `git diff --check`
-- Local Better Auth 1.6.6 source/type inspection for `rateLimit`, `encryptOAuthTokens`, `accountLinking`, `advanced.ipAddress`, and `magicLink.storeToken`
+- `npm audit --omit=dev`
+- Local Better Auth source/type inspection for `rateLimit`, `encryptOAuthTokens`, `accountLinking`, `advanced.ipAddress`, and `magicLink.storeToken`

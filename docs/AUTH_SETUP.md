@@ -56,7 +56,7 @@ After redeploy, verification emails + magic links + password-reset emails land i
 
 ## Already-signed-up users without verification
 
-Because `requireEmailVerification` is false, existing users already have active accounts. To manually verify someone in the DB (e.g. for the dash plugin which may check `emailVerified`):
+Because `requireEmailVerification` is false, existing users already have active accounts. To manually verify someone in the DB:
 
 ```sql
 UPDATE "user" SET email_verified = true WHERE email = 'user@example.com';

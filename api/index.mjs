@@ -1369,7 +1369,6 @@ import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { fromNodeHeaders } from "better-auth/node";
-import { dash } from "@better-auth/infra";
 
 // server/auth/email.ts
 init_logger();
@@ -1667,15 +1666,6 @@ var auth = betterAuth({
     }
   } : void 0,
   plugins: [
-    // Dashboard / analytics / audit log plugin. Only activates when the three env vars are set;
-    // otherwise the constructor is skipped so local dev without Upstash still works.
-    ...process.env.BETTER_AUTH_API_KEY && process.env.BETTER_AUTH_KV_URL ? [
-      dash({
-        apiUrl: process.env.BETTER_AUTH_API_URL,
-        kvUrl: process.env.BETTER_AUTH_KV_URL,
-        apiKey: process.env.BETTER_AUTH_API_KEY
-      })
-    ] : [],
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         await sendMagicLinkEmail({ email, url });
