@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Nav from "@/components/nav";
@@ -61,6 +61,8 @@ export default function DocumentViewPage() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
 
   const { data: project } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -100,6 +102,18 @@ export default function DocumentViewPage() {
     },
     [projectId, setLocation]
   );
+
+  // Scroll active tab into view on mount / stage change — important on mobile viewports
+  // where the 6-tab row overflows and the current doc might be off-screen otherwise.
+  useEffect(() => {
+    if (activeTabRef.current && tablistRef.current) {
+      activeTabRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, [stageId]);
 
   // J/K keyboard navigation
   useEffect(() => {
@@ -344,6 +358,7 @@ export default function DocumentViewPage() {
 
         {/* Artifact stepper — horizontal scroll on narrow screens */}
         <div
+          ref={tablistRef}
           role="tablist"
           aria-label="Documents"
           style={{
@@ -360,13 +375,20 @@ export default function DocumentViewPage() {
             const isActive = doc.stageNumber === stage.stageNumber;
             const isReady = doc.stage && doc.stage.progress === 100;
             const DocIcon = doc.icon;
+            const firstIncomplete = orderedDocs.find((d) => !(d.stage && d.stage.progress === 100));
+            const tipForIncomplete =
+              !isReady && firstIncomplete
+                ? `Complete ${firstIncomplete.shortLabel} first`
+                : undefined;
 
             return (
               <button
                 key={doc.stageNumber}
+                ref={isActive ? activeTabRef : null}
                 role="tab"
                 aria-selected={isActive}
                 aria-disabled={!isReady}
+                title={!isReady ? tipForIncomplete : undefined}
                 onClick={() => navigateToDoc(doc)}
                 style={{
                   display: "flex",

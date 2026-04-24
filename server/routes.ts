@@ -1293,8 +1293,39 @@ Return the JSON now.`;
           : [],
       })).filter((q: any) => q.question && q.chips.length >= 2) : [];
 
+      // Deterministic fallback: if the model decided clarification is needed but only returned
+      // 1 question, append a high-leverage follow-up (platform, then scope) from a short canned
+      // list of slots that aren't already covered. Avoids a second LLM round-trip while keeping
+      // the "never only 1 question" invariant the system prompt promises.
+      const FALLBACK_QUESTIONS: Array<{ id: string; question: string; chips: string[] }> = [
+        {
+          id: "platform",
+          question: "What's the primary surface you want to ship on first?",
+          chips: ["Web", "iOS", "Android", "Desktop"],
+        },
+        {
+          id: "scope",
+          question: "For a first version, which feels most important?",
+          chips: ["Fast to ship", "Beautiful UI", "Power-user depth", "Rock-solid data"],
+        },
+        {
+          id: "audience",
+          question: "Who is this mostly for?",
+          chips: ["Just me", "Small team", "A community", "Customers"],
+        },
+      ];
+      const needs = Boolean(result?.needsClarification) && questions.length > 0;
+      if (needs && questions.length === 1) {
+        const takenIds = new Set(questions.map((q: any) => q.id.toLowerCase()));
+        for (const fb of FALLBACK_QUESTIONS) {
+          if (!takenIds.has(fb.id) && questions.length < 2) {
+            questions.push(fb);
+          }
+        }
+      }
+
       return res.json({
-        needsClarification: Boolean(result?.needsClarification) && questions.length > 0,
+        needsClarification: needs,
         summary: typeof result?.summary === "string" ? result.summary.slice(0, 240) : "",
         questions,
       });
