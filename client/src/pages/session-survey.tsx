@@ -663,6 +663,42 @@ export default function SessionSurveyPage() {
     : 0;
   const selectedCount = Object.values(documentSelections).filter(s => s.selected).length;
 
+  // ── Quick-answer chip parsing ────────────────────────────────────────
+  // The stage-2 system prompt instructs the AI to end its reply with a line like:
+  //   Quick answers: Option A | Option B | Option C
+  // We parse that trailing line, strip it from the displayed message, and surface
+  // the chips as buttons beneath the message so users can reply in one tap.
+  const parseQuickAnswers = (content: string): { clean: string; chips: string[] } => {
+    if (!content) return { clean: content, chips: [] };
+    const match = content.match(/(^|\n)\s*Quick answers?:\s*([^\n]+)\s*$/i);
+    if (!match) return { clean: content, chips: [] };
+    const chips = match[2]
+      .split(/\s*\|\s*|\s*•\s*|\s*;\s*/)
+      .map((s) => s.trim().replace(/^["'`]|["'`]$/g, "").replace(/[.]+$/, ""))
+      .filter((s) => s.length > 0 && s.length <= 40);
+    const clean = content.slice(0, match.index ?? content.length).trim();
+    // Dedupe + cap at 5 chips
+    const seen = new Set<string>();
+    const uniqueChips: string[] = [];
+    for (const c of chips) {
+      const k = c.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      uniqueChips.push(c);
+      if (uniqueChips.length >= 5) break;
+    }
+    return { clean, chips: uniqueChips };
+  };
+
+  const lastAssistantMessage = [...messages].reverse().find((m) => m.role === "assistant");
+  const lastAssistantChips = lastAssistantMessage ? parseQuickAnswers(lastAssistantMessage.content).chips : [];
+  const canSendChip = !isStreaming && !!prdStage;
+
+  const handleChipTap = (chip: string) => {
+    if (!canSendChip) return;
+    void sendMessageStream(chip);
+  };
+
   // ── Discovery phase (unchanged visual) ────────────────────────────────
   const renderDiscoveryPhase = () => (
     <div className="flex-1 flex flex-col">
@@ -712,36 +748,41 @@ export default function SessionSurveyPage() {
           </div>
         </div>
 
-        {messages.map((message: Message) => (
-          <div
-            key={message.id}
-            className={`flex items-start space-x-3 ${
-              message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
-            }`}
-            data-testid={`message-${message.role}-${message.id}`}
-          >
+        {messages.map((message: Message) => {
+          const display = message.role === "assistant"
+            ? parseQuickAnswers(message.content).clean
+            : message.content;
+          return (
             <div
-              className={`w-10 h-10 rounded-full flex items-center justify-center text-description font-medium ${
-                message.role === "user"
-                  ? "bg-contrast-high text-surface-primary"
-                  : "bg-accent text-surface-primary"
+              key={message.id}
+              className={`flex items-start space-x-3 ${
+                message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
               }`}
+              data-testid={`message-${message.role}-${message.id}`}
             >
-              {message.role === "user" ? "You" : "AI"}
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-description font-medium ${
+                  message.role === "user"
+                    ? "bg-contrast-high text-surface-primary"
+                    : "bg-accent text-surface-primary"
+                }`}
+              >
+                {message.role === "user" ? "You" : "AI"}
+              </div>
+              <div
+                className={`flex-1 rounded-lg p-4 ${
+                  message.role === "user"
+                    ? "bg-accent text-surface-primary"
+                    : "bg-surface-primary border border-gray-200 text-contrast-high"
+                }`}
+              >
+                <p className="text-description whitespace-pre-wrap leading-relaxed">
+                  {display}
+                </p>
+              </div>
             </div>
-            <div
-              className={`flex-1 rounded-lg p-4 ${
-                message.role === "user"
-                  ? "bg-accent text-surface-primary"
-                  : "bg-surface-primary border border-gray-200 text-contrast-high"
-              }`}
-            >
-              <p className="text-description whitespace-pre-wrap leading-relaxed">
-                {message.content}
-              </p>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {isStreaming && (
           <div className="flex items-start space-x-3" data-testid="ai-streaming">
@@ -792,6 +833,36 @@ export default function SessionSurveyPage() {
                 </>
               )}
             </Button>
+          </div>
+        )}
+
+        {lastAssistantChips.length > 0 && (
+          <div
+            role="list"
+            aria-label="Suggested answers"
+            className="flex flex-wrap gap-2 mb-3"
+            data-testid="suggested-reply-chips"
+          >
+            {lastAssistantChips.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                role="listitem"
+                onClick={() => handleChipTap(chip)}
+                disabled={!canSendChip}
+                data-testid={`chip-reply-${chip.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                className="inline-flex items-center rounded-full border px-3 py-1.5 text-description transition-colors disabled:opacity-50"
+                style={{
+                  minHeight: 32,
+                  color: "#f5f0eb",
+                  borderColor: "rgba(240,182,94,0.35)",
+                  background: "rgba(240,182,94,0.06)",
+                  cursor: canSendChip ? "pointer" : "not-allowed",
+                }}
+              >
+                {chip}
+              </button>
+            ))}
           </div>
         )}
 

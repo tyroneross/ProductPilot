@@ -38,6 +38,8 @@ function formatSavedAgo(ts: number): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+type ClarifyQuestion = { id: string; question: string; chips: string[] };
+
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -46,6 +48,12 @@ export default function DetailsPage() {
   const [selectedStyle, setSelectedStyle] = useState<StyleId>("minimal");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
+
+  // Clarify step state — shown inline when the idea is under-specified.
+  const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
+  const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({});
+  const [clarifySummary, setClarifySummary] = useState<string>("");
+  const [isClarifying, setIsClarifying] = useState(false);
 
   // Auto-save state
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -137,25 +145,93 @@ export default function DetailsPage() {
     }
   };
 
-  const handleContinueToSurvey = () => {
+  // Decide locally whether to show clarify step. The server is authoritative (it returns 0 questions
+  // for well-specified ideas), but we can skip the round-trip when the idea is clearly rich.
+  const looksUnderspecified = (idea: string) => {
+    const words = idea.trim().split(/\s+/).filter(Boolean).length;
+    return words < 25;
+  };
+
+  const proceedToSurvey = (extraAnswers: Record<string, string> = {}) => {
     const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
     const idea = productIdea.trim();
+
+    // Build a richer problem statement by folding clarify answers back into the idea —
+    // downstream prompts read minimumDetails.problemStatement, so the clarifications
+    // flow directly into Stage 1/2 context without new schema changes.
+    const clarifyLines = Object.entries(extraAnswers)
+      .filter(([, v]) => v && v.trim())
+      .map(([k, v]) => `- ${k}: ${v.trim()}`)
+      .join("\n");
+    const enrichedProblem = clarifyLines
+      ? `${idea}\n\nClarifications:\n${clarifyLines}`
+      : idea;
+
     sessionStorage.setItem("productIdea", idea);
     sessionStorage.setItem("appStyle", JSON.stringify(styleObj));
-    // Seed the survey's expected context shape so discovery-stage prompts get the user's idea.
-    // Without this, session-survey.tsx reads intakeAnswers/minimumDetails from sessionStorage
-    // and finds nothing, falling through to a generic "Tell me more about your idea" prompt.
     sessionStorage.setItem(
       "intakeAnswers",
-      JSON.stringify({ intent: "build", qualityPriority: "balanced" }),
+      JSON.stringify({ intent: "build", qualityPriority: "balanced", ...extraAnswers }),
     );
     sessionStorage.setItem(
       "minimumDetails",
-      JSON.stringify({ problemStatement: idea, userGoals: [], v1Definition: "" }),
+      JSON.stringify({
+        problemStatement: enrichedProblem,
+        userGoals: [],
+        v1Definition: "",
+        clarifyAnswers: extraAnswers,
+      }),
     );
     clearDraftStorage();
     setLocation("/session/survey");
   };
+
+  const handleContinueToSurvey = async () => {
+    const idea = productIdea.trim();
+    if (!idea) return;
+
+    // If clarify panel already visible with answers, user is submitting.
+    if (clarifyQuestions && clarifyQuestions.length > 0) {
+      proceedToSurvey(clarifyAnswers);
+      return;
+    }
+
+    // If idea is already substantial, skip the clarify round-trip.
+    if (!looksUnderspecified(idea)) {
+      proceedToSurvey();
+      return;
+    }
+
+    setIsClarifying(true);
+    try {
+      const res = await apiRequest("POST", "/api/clarify", { idea });
+      const data = (await res.json()) as {
+        needsClarification?: boolean;
+        summary?: string;
+        questions?: ClarifyQuestion[];
+      };
+      if (data?.needsClarification && Array.isArray(data.questions) && data.questions.length > 0) {
+        setClarifyQuestions(data.questions);
+        setClarifySummary(data.summary || "");
+        setClarifyAnswers({});
+      } else {
+        // Server says well-specified — proceed.
+        proceedToSurvey();
+      }
+    } catch {
+      // Fail open — never block the user from continuing.
+      proceedToSurvey();
+    } finally {
+      setIsClarifying(false);
+    }
+  };
+
+  const handleSkipClarify = () => {
+    proceedToSurvey(clarifyAnswers);
+  };
+
+  const allClarifyAnswered =
+    clarifyQuestions != null && clarifyQuestions.every((q) => (clarifyAnswers[q.id] || "").trim().length > 0);
 
   const handleBuildDocsNow = async () => {
     setIsGenerating(true);
@@ -340,6 +416,118 @@ export default function DetailsPage() {
           ))}
         </div>
 
+        {/* Clarify panel — appears after Continue when the AI has targeted questions */}
+        {clarifyQuestions && clarifyQuestions.length > 0 && (
+          <div
+            role="region"
+            aria-label="Clarifying questions"
+            style={{
+              marginTop: "24px",
+              padding: "20px",
+              borderRadius: "12px",
+              background: "#1a1714",
+              border: "1px solid rgba(240,182,94,0.25)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <Sparkles size={14} style={{ color: "#f0b65e" }} />
+              <p style={{ color: "#f0b65e", fontSize: "12px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", margin: 0 }}>
+                Quick context
+              </p>
+            </div>
+            {clarifySummary && (
+              <p style={{ color: "#a89a8c", fontSize: "13px", marginBottom: "18px", lineHeight: 1.5 }}>
+                {clarifySummary}
+              </p>
+            )}
+            <p style={{ color: "#a89a8c", fontSize: "13px", marginBottom: "14px", lineHeight: 1.5 }}>
+              A few quick answers will sharpen the docs. Tap the option that best fits — or write your own.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {clarifyQuestions.map((q) => {
+                const current = clarifyAnswers[q.id] || "";
+                return (
+                  <div key={q.id}>
+                    <p style={{ color: "#f5f0eb", fontSize: "14px", fontWeight: 500, marginBottom: "8px" }}>
+                      {q.question}
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+                      {q.chips.map((chip) => {
+                        const selected = current === chip;
+                        return (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() =>
+                              setClarifyAnswers((prev) => ({ ...prev, [q.id]: prev[q.id] === chip ? "" : chip }))
+                            }
+                            data-testid={`clarify-chip-${q.id}-${chip.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                            style={{
+                              height: "32px",
+                              padding: "0 12px",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                              fontFamily: "inherit",
+                              color: selected ? "#1a0f00" : "#a89a8c",
+                              background: selected ? "#f0b65e" : "transparent",
+                              border: `1px solid ${selected ? "#f0b65e" : "rgba(200,180,160,0.18)"}`,
+                              borderRadius: "999px",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              transition: "background 0.15s, border-color 0.15s, color 0.15s",
+                            }}
+                          >
+                            {chip}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <input
+                      type="text"
+                      value={current && !q.chips.includes(current) ? current : ""}
+                      onChange={(e) =>
+                        setClarifyAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                      }
+                      placeholder="Or type your own…"
+                      aria-label={`Custom answer for: ${q.question}`}
+                      data-testid={`clarify-input-${q.id}`}
+                      style={{
+                        width: "100%",
+                        height: "36px",
+                        padding: "0 12px",
+                        background: "#110f0d",
+                        border: "1px solid rgba(200,180,160,0.1)",
+                        borderRadius: "8px",
+                        color: "#f5f0eb",
+                        fontFamily: "inherit",
+                        fontSize: "13px",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: "12px", marginTop: "18px", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={handleSkipClarify}
+                style={{
+                  height: "32px",
+                  padding: "0 12px",
+                  fontSize: "13px",
+                  color: "#a89a8c",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Style picker — appears after typing */}
         {showExtras && (
           <div style={{ paddingTop: "32px" }}>
@@ -397,19 +585,39 @@ export default function DetailsPage() {
           <div className="mx-auto flex items-center gap-4" style={{ maxWidth: "672px" }}>
             <button
               onClick={handleContinueToSurvey}
-              disabled={isGenerating}
+              disabled={
+                isGenerating ||
+                isClarifying ||
+                (clarifyQuestions != null && clarifyQuestions.length > 0 && !allClarifyAnswered)
+              }
               className="flex-1 inline-flex items-center justify-center font-bold transition-all"
+              data-testid="button-continue"
               style={{
                 height: "48px",
-                background: "#f0b65e",
-                color: "#1a0f00",
+                background:
+                  clarifyQuestions != null && clarifyQuestions.length > 0 && !allClarifyAnswered
+                    ? "#6b5d52"
+                    : "#f0b65e",
+                color:
+                  clarifyQuestions != null && clarifyQuestions.length > 0 && !allClarifyAnswered
+                    ? "#2a241f"
+                    : "#1a0f00",
                 fontSize: "15px",
                 border: "none",
                 borderRadius: "10px",
-                cursor: "pointer",
+                cursor:
+                  isGenerating || isClarifying ||
+                  (clarifyQuestions != null && clarifyQuestions.length > 0 && !allClarifyAnswered)
+                    ? "not-allowed"
+                    : "pointer",
+                opacity: isClarifying ? 0.8 : 1,
               }}
             >
-              Continue →
+              {isClarifying
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Thinking…</>
+                : clarifyQuestions != null && clarifyQuestions.length > 0
+                  ? (allClarifyAnswered ? "Generate docs →" : `Answer ${clarifyQuestions.length - Object.values(clarifyAnswers).filter(v => v && v.trim()).length} more →`)
+                  : "Continue →"}
             </button>
             <button
               onClick={handleBuildDocsNow}

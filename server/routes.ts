@@ -1221,6 +1221,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/clarify — unauth; returns 2-4 targeted clarifying questions with quick-answer chips
+  // for an under-specified product idea. Used by the /details page before starting generation,
+  // so that the AI asks the user load-bearing things (audience, platform, scope) BEFORE kicking
+  // off an expensive survey + doc pipeline.
+  app.post("/api/clarify", async (req: any, res) => {
+    try {
+      const raw = typeof req.body?.idea === "string" ? req.body.idea : "";
+      const idea = raw.trim();
+      if (idea.length < 3) {
+        return res.status(400).json({ message: "Idea must be at least 3 characters." });
+      }
+      if (idea.length > 2000) {
+        return res.status(400).json({ message: "Idea too long (max 2000 chars)." });
+      }
+      const priorAnswers = req.body?.priorAnswers && typeof req.body.priorAnswers === "object"
+        ? req.body.priorAnswers : {};
+
+      const userConfig = await getLLMConfig(req);
+
+      const systemPrompt = `You are ProductPilot's clarification step. The user typed a product idea and is about to generate PRD/architecture/coding docs. Your job is to decide whether the idea is well-enough specified to generate good docs, and if not, to ask the 2–4 highest-leverage clarifying questions before generation starts.
+
+Priority of missing information: audience → primary platform → scope (must-have v1) → budget/timeline → constraints.
+
+You MUST return valid JSON only, matching this schema:
+{
+  "needsClarification": true,
+  "summary": "One short sentence restating the idea in the user's own words.",
+  "questions": [
+    {
+      "id": "audience",
+      "question": "Short, single-focus question in plain English.",
+      "chips": ["Concrete option 1", "Concrete option 2", "Concrete option 3", "Concrete option 4"]
+    }
+  ]
+}
+
+Rules:
+- Ask 2–4 questions when needsClarification is true. Never only 1 — that wastes a turn. If you can only think of one, also ask about scope or primary platform.
+- Each question must be answerable by tapping exactly one chip. Chips must be concrete, mutually exclusive, 3 or 4 per question, never longer than 4 words each.
+- If the idea already names an audience, do NOT ask about audience — skip to the next missing slot.
+- If the idea already names a platform, do NOT ask about platform — skip to scope or constraints.
+- Never ask about team size, hiring, agencies, or staffing.
+- Never echo the idea back as a question.
+- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.`;
+
+      const userPrompt = `Idea: "${idea}"
+
+Prior answers from the user (may be empty): ${JSON.stringify(priorAnswers)}
+
+Return the JSON now.`;
+
+      // Use 'chat' tier (Groq fast or Sonnet depending on config) rather than classification
+      // so Haiku doesn't under-deliver — we want 2–4 rich questions, not a single safe one.
+      const result = await aiService.generateStructuredOutput(
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        "claude-sonnet",
+        userConfig,
+        "chat",
+      );
+
+      // Coerce shape — belt-and-braces in case the model drifted.
+      const questions = Array.isArray(result?.questions) ? result.questions.slice(0, 4).map((q: any, i: number) => ({
+        id: typeof q?.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`,
+        question: typeof q?.question === "string" ? q.question.slice(0, 180) : "",
+        chips: Array.isArray(q?.chips)
+          ? q.chips.filter((c: any) => typeof c === "string" && c.trim()).slice(0, 5).map((c: string) => c.slice(0, 32))
+          : [],
+      })).filter((q: any) => q.question && q.chips.length >= 2) : [];
+
+      return res.json({
+        needsClarification: Boolean(result?.needsClarification) && questions.length > 0,
+        summary: typeof result?.summary === "string" ? result.summary.slice(0, 240) : "",
+        questions,
+      });
+    } catch (error: any) {
+      logger.warn({ err: error?.message }, "clarify failed");
+      // Fail open — never block the user from continuing. Frontend treats no questions as "skip clarify".
+      return res.json({ needsClarification: false, summary: "", questions: [] });
+    }
+  });
+
   // PUT /api/settings — update LLM settings
   app.put("/api/settings", requireAuth, async (req: any, res) => {
     try {
