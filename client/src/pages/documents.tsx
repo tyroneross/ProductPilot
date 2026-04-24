@@ -439,7 +439,57 @@ export default function DocumentsPage() {
               Refine with AI
             </button>
 
+            {completedDocs.length > 0 && completedDocs[0].stage && (
+              <button
+                onClick={() =>
+                  setLocation(`/document/${projectId}/${completedDocs[0].stage!.id}`)
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 16px",
+                  border: "none",
+                  borderRadius: 6,
+                  background: "#f0b65e",
+                  color: "#110f0d",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#d4a04e";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#f0b65e";
+                }}
+                data-testid="button-read-through"
+              >
+                Read through
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M6 12l4-4-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
           </div>
+
+          {/* Keyboard hint — shown when ≥2 docs are ready */}
+          {completedDocs.length >= 2 && (
+            <p
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                color: "#3d3228",
+                marginTop: "1rem",
+                textAlign: "right",
+              }}
+              aria-hidden="true"
+            >
+              J / K to navigate between documents in the reader
+            </p>
+          )}
         </div>
       </main>
     </div>

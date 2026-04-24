@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Nav from "@/components/nav";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, ChevronDown, ChevronUp, Copy, Check, Download } from "lucide-react";
+import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -12,6 +12,45 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Project, Stage, Message } from "@shared/schema";
+
+const DOC_TYPES = [
+  {
+    stageNumber: 1,
+    shortLabel: "Requirements",
+    title: "Requirements Definition",
+    icon: FileText,
+  },
+  {
+    stageNumber: 2,
+    shortLabel: "PRD",
+    title: "Product Requirements",
+    icon: ListTodo,
+  },
+  {
+    stageNumber: 3,
+    shortLabel: "Wireframes",
+    title: "UI Wireframes",
+    icon: Palette,
+  },
+  {
+    stageNumber: 4,
+    shortLabel: "Architecture",
+    title: "System Architecture",
+    icon: Layout,
+  },
+  {
+    stageNumber: 5,
+    shortLabel: "Coding Prompts",
+    title: "Coding Prompts",
+    icon: Code,
+  },
+  {
+    stageNumber: 6,
+    shortLabel: "Dev Guide",
+    title: "Development Guide",
+    icon: ListTodo,
+  },
+];
 
 export default function DocumentViewPage() {
   const { projectId, stageId } = useParams();
@@ -42,16 +81,50 @@ export default function DocumentViewPage() {
 
   const documentContent = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
 
-  const getStageIcon = (stageNumber: number) => {
-    const icons: Record<number, typeof FileText> = {
-      1: FileText,
-      2: ListTodo,
-      3: Palette,
-      4: Layout,
-      5: Code,
-      6: ListTodo,
+  // Build ordered list of docs with their stage data
+  const orderedDocs = DOC_TYPES.map((dt) => ({
+    ...dt,
+    stage: stages.find((s) => s.stageNumber === dt.stageNumber) ?? null,
+  }));
+
+  const currentIndex = stage ? orderedDocs.findIndex((d) => d.stageNumber === stage.stageNumber) : -1;
+
+  const prevDoc = currentIndex > 0 ? orderedDocs[currentIndex - 1] : null;
+  const nextDoc = currentIndex >= 0 && currentIndex < orderedDocs.length - 1 ? orderedDocs[currentIndex + 1] : null;
+
+  const navigateToDoc = useCallback(
+    (doc: typeof orderedDocs[number]) => {
+      if (doc.stage && doc.stage.progress === 100) {
+        setLocation(`/document/${projectId}/${doc.stage.id}`);
+      }
+    },
+    [projectId, setLocation]
+  );
+
+  // J/K keyboard navigation
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement ||
+        (e.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+      if (e.key === "j" && nextDoc) {
+        navigateToDoc(nextDoc);
+      } else if (e.key === "k" && prevDoc) {
+        navigateToDoc(prevDoc);
+      }
     };
-    return icons[stageNumber] || FileText;
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [nextDoc, prevDoc, navigateToDoc]);
+
+  const getStageIcon = (stageNumber: number) => {
+    const dt = DOC_TYPES.find((d) => d.stageNumber === stageNumber);
+    return dt ? dt.icon : FileText;
   };
 
   const handleCopy = async () => {
@@ -63,7 +136,7 @@ export default function DocumentViewPage() {
         title: "Copied to clipboard",
         description: "Document content has been copied.",
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Failed to copy",
         description: "Please try selecting and copying manually.",
@@ -78,7 +151,6 @@ export default function DocumentViewPage() {
     try {
       const res = await apiRequest("GET", `/api/projects/${projectId}/export`);
       const data = await res.json();
-      // Build markdown from the returned JSON shape: { project, stages: [{ ...stage, messages }], exportedAt }
       const lines: string[] = [];
       lines.push(`# ${data.project?.name ?? "ProductPilot Export"}\n`);
       lines.push(`Exported: ${data.exportedAt ?? new Date().toISOString()}\n`);
@@ -109,23 +181,23 @@ export default function DocumentViewPage() {
 
   const handleRegenerate = async () => {
     if (!stage || !project) return;
-    
+
     setIsRegenerating(true);
     setShowRegenerateDialog(false);
-    
+
     try {
       await apiRequest("POST", `/api/projects/${projectId}/generate-docs-from-survey`, {
         documentPreferences: [{ stageId: stage.id, detailLevel }],
       });
-      
+
       await refetchMessages();
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
-      
+
       toast({
         title: "Document regenerated",
         description: `${stage.title} has been regenerated with ${detailLevel} level.`,
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Regeneration failed",
         description: "Please try again.",
@@ -138,8 +210,18 @@ export default function DocumentViewPage() {
 
   if (!project || !stage) {
     return (
-      <div className="min-h-screen bg-surface-secondary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#110f0d" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            border: "2px solid rgba(240,182,94,0.2)",
+            borderTopColor: "#f0b65e",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -147,97 +229,334 @@ export default function DocumentViewPage() {
   const Icon = getStageIcon(stage.stageNumber);
 
   return (
-    <div className="min-h-screen bg-surface-secondary">
+    <div className="min-h-screen flex flex-col" style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Nav />
-      <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocation(`/documents/${projectId}`)}
-              className="min-h-[44px] min-w-[44px]"
-              data-testid="button-back-documents"
+
+      {/* Sticky header */}
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          background: "#1a1714",
+          borderBottom: "1px solid rgba(200,180,160,0.08)",
+        }}
+      >
+        {/* Top bar: back + title + actions */}
+        <div
+          style={{
+            maxWidth: "52rem",
+            margin: "0 auto",
+            padding: "12px 24px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          {/* Back to docs list */}
+          <button
+            onClick={() => setLocation(`/documents/${projectId}`)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+              border: "1px solid rgba(200,180,160,0.12)",
+              background: "transparent",
+              color: "#a89a8c",
+              cursor: "pointer",
+              flexShrink: 0,
+              transition: "color 0.15s, border-color 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#f5f0eb";
+              e.currentTarget.style.borderColor = "rgba(200,180,160,0.25)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "#a89a8c";
+              e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+            }}
+            aria-label="Back to documents"
+            data-testid="button-back-documents"
+          >
+            <ArrowLeft style={{ width: 14, height: 14 }} />
+          </button>
+
+          {/* Title */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "#f5f0eb",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
             >
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg bg-accent">
-                <Icon className="w-5 h-5 text-surface-primary" />
-              </div>
-              <div>
-                <h1 className="text-title font-medium text-contrast-high">{stage.title}</h1>
-                <p className="text-metadata text-contrast-medium">{project.name}</p>
-              </div>
+              {stage.title}
+            </div>
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                color: "#6b5d52",
+                marginTop: 1,
+              }}
+            >
+              {project.name}
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
+
+          {/* Actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <ActionButton
               onClick={handleCopy}
-              className="min-h-[44px]"
               data-testid="button-copy-document"
+              aria-label={copied ? "Copied" : "Copy document"}
             >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+              {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
+              <span>{copied ? "Copied" : "Copy"}</span>
+            </ActionButton>
+            <ActionButton
               onClick={handleExport}
               disabled={isExporting}
-              className="min-h-[44px]"
               data-testid="button-export-all"
+              aria-label="Export all documents"
             >
-              <Download className="w-4 h-4 mr-2" />
-              {isExporting ? "Exporting..." : "Export All"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
+              <Download style={{ width: 13, height: 13 }} />
+              <span>{isExporting ? "Exporting…" : "Export All"}</span>
+            </ActionButton>
+            <ActionButton
               onClick={() => setShowRegenerateDialog(true)}
               disabled={isRegenerating}
-              className="min-h-[44px]"
               data-testid="button-regenerate-document"
+              aria-label="Regenerate document"
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isRegenerating ? "animate-spin" : ""}`} />
-              {isRegenerating ? "Regenerating..." : "Regenerate"}
-            </Button>
+              <RefreshCw style={{ width: 13, height: 13, animation: isRegenerating ? "spin 0.8s linear infinite" : "none" }} />
+              <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
+            </ActionButton>
           </div>
+        </div>
+
+        {/* Artifact stepper — horizontal scroll on narrow screens */}
+        <div
+          role="tablist"
+          aria-label="Documents"
+          style={{
+            maxWidth: "52rem",
+            margin: "0 auto",
+            padding: "0 24px",
+            display: "flex",
+            gap: 0,
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
+          {orderedDocs.map((doc, idx) => {
+            const isActive = doc.stageNumber === stage.stageNumber;
+            const isReady = doc.stage && doc.stage.progress === 100;
+            const DocIcon = doc.icon;
+
+            return (
+              <button
+                key={doc.stageNumber}
+                role="tab"
+                aria-selected={isActive}
+                aria-disabled={!isReady}
+                onClick={() => navigateToDoc(doc)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "9px 12px",
+                  border: "none",
+                  borderBottom: isActive
+                    ? "2px solid #f0b65e"
+                    : "2px solid transparent",
+                  background: "transparent",
+                  color: isActive
+                    ? "#f5f0eb"
+                    : isReady
+                    ? "#a89a8c"
+                    : "#3d3228",
+                  cursor: isReady ? "pointer" : "default",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  fontWeight: isActive ? 500 : 400,
+                  whiteSpace: "nowrap",
+                  transition: "color 0.15s",
+                  flexShrink: 0,
+                  marginBottom: -1,
+                }}
+                onMouseEnter={(e) => {
+                  if (isReady && !isActive) e.currentTarget.style.color = "#f5f0eb";
+                }}
+                onMouseLeave={(e) => {
+                  if (isReady && !isActive) e.currentTarget.style.color = "#a89a8c";
+                }}
+                data-testid={`tab-doc-${doc.stageNumber}`}
+              >
+                <DocIcon style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
+                {doc.shortLabel}
+              </button>
+            );
+          })}
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      {/* Main content */}
+      <main
+        style={{
+          flex: 1,
+          maxWidth: "52rem",
+          margin: "0 auto",
+          width: "100%",
+          padding: "32px 24px 80px",
+        }}
+      >
         {isRegenerating ? (
-          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-12 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent mx-auto mb-4"></div>
-            <p className="text-description text-contrast-medium">
-              Regenerating document with {detailLevel} level...
+          <div
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: "1px solid rgba(200,180,160,0.08)",
+              padding: "80px 24px",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                border: "2px solid rgba(240,182,94,0.2)",
+                borderTopColor: "#f0b65e",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+                margin: "0 auto 16px",
+              }}
+            />
+            <p style={{ fontSize: 13, color: "#a89a8c" }}>
+              Regenerating with {detailLevel} level…
             </p>
           </div>
         ) : documentContent ? (
-          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-8">
-            <div className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e]">
+          <div
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: "1px solid rgba(200,180,160,0.08)",
+              padding: "32px 36px",
+            }}
+          >
+            <div
+              className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e] prose-p:text-[#c8b4a0] prose-li:text-[#c8b4a0]"
+              style={{ fontSize: 14, lineHeight: 1.7 }}
+            >
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown>
             </div>
           </div>
         ) : (
-          <div className="bg-surface-primary rounded-lg border border-[rgba(200,180,160,0.08)] p-12 text-center">
-            <p className="text-description text-contrast-medium mb-4">
+          <div
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: "1px solid rgba(200,180,160,0.08)",
+              padding: "80px 24px",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ fontSize: 13, color: "#a89a8c", marginBottom: 16 }}>
               No content has been generated for this document yet.
             </p>
-            <Button
+            <button
               onClick={() => setShowRegenerateDialog(true)}
-              className="btn-primary min-h-[44px]"
+              style={{
+                padding: "8px 16px",
+                background: "#f0b65e",
+                color: "#110f0d",
+                border: "none",
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                minHeight: 36,
+              }}
               data-testid="button-generate-document"
             >
               Generate Document
-            </Button>
+            </button>
           </div>
         )}
       </main>
 
+      {/* J/K keyboard nav footer — quiet hint */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          bottom: 20,
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "6px 14px",
+          background: "rgba(17,15,13,0.85)",
+          border: "1px solid rgba(200,180,160,0.10)",
+          borderRadius: 20,
+          backdropFilter: "blur(8px)",
+          pointerEvents: "none",
+        }}
+      >
+        {prevDoc && prevDoc.stage?.progress === 100 && (
+          <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6b5d52" }}>
+            <kbd
+              style={{
+                display: "inline-block",
+                padding: "1px 5px",
+                border: "1px solid rgba(200,180,160,0.15)",
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: "#a89a8c",
+                lineHeight: 1.6,
+              }}
+            >
+              K
+            </kbd>
+            {prevDoc.shortLabel}
+          </span>
+        )}
+        {prevDoc && nextDoc && prevDoc.stage?.progress === 100 && nextDoc.stage?.progress === 100 && (
+          <span style={{ color: "rgba(200,180,160,0.15)", fontSize: 10 }}>·</span>
+        )}
+        {nextDoc && nextDoc.stage?.progress === 100 && (
+          <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6b5d52" }}>
+            {nextDoc.shortLabel}
+            <kbd
+              style={{
+                display: "inline-block",
+                padding: "1px 5px",
+                border: "1px solid rgba(200,180,160,0.15)",
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: "#a89a8c",
+                lineHeight: 1.6,
+              }}
+            >
+              J
+            </kbd>
+          </span>
+        )}
+      </div>
+
+      {/* Regenerate dialog */}
       <Dialog open={showRegenerateDialog} onOpenChange={setShowRegenerateDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -246,28 +565,36 @@ export default function DocumentViewPage() {
               Choose the level of detail for this document. This will replace the current content.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="py-4">
             <RadioGroup value={detailLevel} onValueChange={(v) => setDetailLevel(v as "detailed" | "summary")}>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] mb-2 cursor-pointer hover:bg-surface-secondary"
-                   onClick={() => setDetailLevel("summary")}>
+              <div
+                className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] mb-2 cursor-pointer hover:bg-surface-secondary"
+                onClick={() => setDetailLevel("summary")}
+              >
                 <RadioGroupItem value="summary" id="summary" className="mt-1" />
                 <div>
-                  <Label htmlFor="summary" className="text-title font-medium cursor-pointer">Summary</Label>
+                  <Label htmlFor="summary" className="text-title font-medium cursor-pointer">
+                    Summary
+                  </Label>
                   <p className="text-description text-contrast-medium">Concise overview with key points</p>
                 </div>
               </div>
-              <div className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] cursor-pointer hover:bg-surface-secondary"
-                   onClick={() => setDetailLevel("detailed")}>
+              <div
+                className="flex items-start space-x-3 p-3 rounded-lg border border-[rgba(200,180,160,0.08)] cursor-pointer hover:bg-surface-secondary"
+                onClick={() => setDetailLevel("detailed")}
+              >
                 <RadioGroupItem value="detailed" id="detailed" className="mt-1" />
                 <div>
-                  <Label htmlFor="detailed" className="text-title font-medium cursor-pointer">Detailed</Label>
+                  <Label htmlFor="detailed" className="text-title font-medium cursor-pointer">
+                    Detailed
+                  </Label>
                   <p className="text-description text-contrast-medium">Comprehensive document with full details</p>
                 </div>
               </div>
             </RadioGroup>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowRegenerateDialog(false)}>
               Cancel
@@ -279,5 +606,59 @@ export default function DocumentViewPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Small inline action button component — keeps header DRY
+function ActionButton({
+  children,
+  onClick,
+  disabled = false,
+  "aria-label": ariaLabel,
+  "data-testid": testId,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  "aria-label"?: string;
+  "data-testid"?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      data-testid={testId}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "5px 10px",
+        height: 30,
+        border: "1px solid rgba(200,180,160,0.12)",
+        borderRadius: 5,
+        background: "transparent",
+        color: disabled ? "#3d3228" : "#a89a8c",
+        fontFamily: "inherit",
+        fontSize: 12,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "color 0.15s, border-color 0.15s",
+        whiteSpace: "nowrap",
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.color = "#f5f0eb";
+          e.currentTarget.style.borderColor = "rgba(200,180,160,0.25)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.color = "#a89a8c";
+          e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+        }
+      }}
+    >
+      {children}
+    </button>
   );
 }
