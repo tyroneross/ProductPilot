@@ -20,6 +20,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { AdminPrompt } from "@shared/schema";
+import { AdminTabs } from "@/pages/admin-audit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -715,11 +716,13 @@ export default function AdminPage() {
         <div className="max-w-4xl mx-auto px-4 h-full flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-[#a89a8c] shrink-0" />
-            <span className="text-[15px] font-semibold text-[#f5f0eb]">Prompt Manager</span>
+            <span className="text-[15px] font-semibold text-[#f5f0eb] hidden sm:inline">Prompt Manager</span>
+            <span className="text-[15px] font-semibold text-[#f5f0eb] sm:hidden">Prompts</span>
           </div>
           <div className="flex items-center gap-3">
+            <AdminTabs current="prompts" />
             <span
-              className="text-[12px] text-[#a89a8c] hidden sm:inline truncate max-w-[180px]"
+              className="text-[12px] text-[#a89a8c] hidden lg:inline truncate max-w-[180px]"
               data-testid="text-admin-user"
             >
               {user?.email || user?.name || "Admin"}

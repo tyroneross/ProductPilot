@@ -1,4 +1,4 @@
-import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent } from "@shared/schema";
+import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent, AuditEvent, LlmCall } from "@shared/schema";
 import { AsyncLocalStorage } from "async_hooks";
 import { logger } from "./lib/logger";
 import { decryptSecret, encryptSecret } from "./lib/secret-crypto";
@@ -46,10 +46,38 @@ interface IStorage {
 
   // LLM Telemetry
   createLlmCall(call: InsertLlmCall): Promise<void>;
+  listLlmCalls(filters: LlmCallListFilters): Promise<{ rows: LlmCall[]; total: number }>;
+  getLlmCall(id: string): Promise<LlmCall | undefined>;
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<void>;
+  listAuditEvents(filters: AuditEventListFilters): Promise<{ rows: AuditEvent[]; total: number }>;
+  getAuditEvent(id: string): Promise<AuditEvent | undefined>;
 }
+
+// Filter shape for admin observability pages. All fields optional.
+export type AuditEventListFilters = {
+  actorType?: string;
+  actorId?: string;
+  action?: string;
+  resourceType?: string;
+  resourceId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type LlmCallListFilters = {
+  userId?: string;
+  guestOwnerId?: string;
+  projectId?: string;
+  stageId?: string;
+  provider?: string;
+  model?: string;
+  task?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+};
 
 type DbActorContext = {
   userId?: string | null;
@@ -366,17 +394,89 @@ class MemStorage implements IStorage {
   }
 
   // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
-  private llmCallLog: InsertLlmCall[] = [];
+  private llmCallLog: LlmCall[] = [];
 
   async createLlmCall(call: InsertLlmCall): Promise<void> {
-    this.llmCallLog.push(call);
+    this.llmCallLog.push({
+      id: this.generateId(),
+      userId: call.userId ?? null,
+      guestOwnerId: call.guestOwnerId ?? null,
+      projectId: call.projectId ?? null,
+      stageId: call.stageId ?? null,
+      provider: call.provider,
+      model: call.model,
+      task: call.task,
+      inputTokens: call.inputTokens ?? 0,
+      outputTokens: call.outputTokens ?? 0,
+      cacheReadTokens: call.cacheReadTokens ?? null,
+      cacheWriteTokens: call.cacheWriteTokens ?? null,
+      costUsd: call.costUsd ?? null,
+      latencyMs: call.latencyMs ?? null,
+      status: call.status,
+      errorCode: call.errorCode ?? null,
+      streamed: call.streamed ?? false,
+      byok: call.byok ?? false,
+      requestId: call.requestId ?? null,
+      createdAt: new Date(),
+    });
+  }
+
+  async listLlmCalls(filters: LlmCallListFilters): Promise<{ rows: LlmCall[]; total: number }> {
+    const filtered = this.llmCallLog.filter((row) => {
+      if (filters.userId && row.userId !== filters.userId) return false;
+      if (filters.guestOwnerId && row.guestOwnerId !== filters.guestOwnerId) return false;
+      if (filters.projectId && row.projectId !== filters.projectId) return false;
+      if (filters.stageId && row.stageId !== filters.stageId) return false;
+      if (filters.provider && row.provider !== filters.provider) return false;
+      if (filters.model && row.model !== filters.model) return false;
+      if (filters.task && row.task !== filters.task) return false;
+      if (filters.status && row.status !== filters.status) return false;
+      return true;
+    });
+    const sorted = [...filtered].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+    return { rows: sorted.slice(offset, offset + limit), total: sorted.length };
+  }
+
+  async getLlmCall(id: string): Promise<LlmCall | undefined> {
+    return this.llmCallLog.find((row) => row.id === id);
   }
 
   // Audit log - MemStorage implementation (dev fallback, in-memory only)
-  private auditEventLog: InsertAuditEvent[] = [];
+  private auditEventLog: AuditEvent[] = [];
 
   async createAuditEvent(event: InsertAuditEvent): Promise<void> {
-    this.auditEventLog.push(event);
+    this.auditEventLog.push({
+      id: this.generateId(),
+      actorType: event.actorType,
+      actorId: event.actorId ?? null,
+      action: event.action,
+      resourceType: event.resourceType,
+      resourceId: event.resourceId ?? null,
+      metadata: event.metadata ?? null,
+      requestId: event.requestId ?? null,
+      createdAt: new Date(),
+    });
+  }
+
+  async listAuditEvents(filters: AuditEventListFilters): Promise<{ rows: AuditEvent[]; total: number }> {
+    const filtered = this.auditEventLog.filter((row) => {
+      if (filters.actorType && row.actorType !== filters.actorType) return false;
+      if (filters.actorId && row.actorId !== filters.actorId) return false;
+      if (filters.action && row.action !== filters.action) return false;
+      if (filters.resourceType && row.resourceType !== filters.resourceType) return false;
+      if (filters.resourceId && row.resourceId !== filters.resourceId) return false;
+      return true;
+    });
+    const sorted = [...filtered].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit ?? 50;
+    return { rows: sorted.slice(offset, offset + limit), total: sorted.length };
+  }
+
+  async getAuditEvent(id: string): Promise<AuditEvent | undefined> {
+    return this.auditEventLog.find((row) => row.id === id);
   }
 }
 
@@ -701,10 +801,118 @@ class PostgresStorage implements IStorage {
     await this.db.insert(llmCalls).values(call);
   }
 
+  // Admin observability: list LLM calls with filters + pagination.
+  // Reads are admin-only (no actor-scoped RLS needed; admin endpoint gates access).
+  // Uses raw SQL to avoid pulling drizzle-orm's where-builder chain into this read.
+  async listLlmCalls(filters: LlmCallListFilters): Promise<{ rows: LlmCall[]; total: number }> {
+    const limit = Math.min(filters.limit ?? 50, 200);
+    const offset = filters.offset ?? 0;
+    const clauses: any[] = [];
+    if (filters.userId) clauses.push(sql`user_id = ${filters.userId}`);
+    if (filters.guestOwnerId) clauses.push(sql`guest_owner_id = ${filters.guestOwnerId}`);
+    if (filters.projectId) clauses.push(sql`project_id = ${filters.projectId}`);
+    if (filters.stageId) clauses.push(sql`stage_id = ${filters.stageId}`);
+    if (filters.provider) clauses.push(sql`provider = ${filters.provider}`);
+    if (filters.model) clauses.push(sql`model = ${filters.model}`);
+    if (filters.task) clauses.push(sql`task = ${filters.task}`);
+    if (filters.status) clauses.push(sql`status = ${filters.status}`);
+
+    const whereSql = clauses.length
+      ? sql`WHERE ${sql.join(clauses, sql` AND `)}`
+      : sql``;
+
+    const rowsResult = await this.db.execute(
+      sql`SELECT * FROM llm_calls ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+    );
+    const totalResult = await this.db.execute(
+      sql`SELECT COUNT(*)::int AS count FROM llm_calls ${whereSql}`
+    );
+    const rows = (rowsResult.rows as any[]).map(mapLlmCallRow);
+    const total = Number((totalResult.rows as any[])[0]?.count ?? 0);
+    return { rows, total };
+  }
+
+  async getLlmCall(id: string): Promise<LlmCall | undefined> {
+    const result = await this.db.execute(sql`SELECT * FROM llm_calls WHERE id = ${id} LIMIT 1`);
+    const row = (result.rows as any[])[0];
+    return row ? mapLlmCallRow(row) : undefined;
+  }
+
   // Audit log - PostgresStorage implementation
   async createAuditEvent(event: InsertAuditEvent): Promise<void> {
     await this.db.insert(auditEvents).values(event);
   }
+
+  async listAuditEvents(filters: AuditEventListFilters): Promise<{ rows: AuditEvent[]; total: number }> {
+    const limit = Math.min(filters.limit ?? 50, 200);
+    const offset = filters.offset ?? 0;
+    const clauses: any[] = [];
+    if (filters.actorType) clauses.push(sql`actor_type = ${filters.actorType}`);
+    if (filters.actorId) clauses.push(sql`actor_id = ${filters.actorId}`);
+    if (filters.action) clauses.push(sql`action = ${filters.action}`);
+    if (filters.resourceType) clauses.push(sql`resource_type = ${filters.resourceType}`);
+    if (filters.resourceId) clauses.push(sql`resource_id = ${filters.resourceId}`);
+
+    const whereSql = clauses.length
+      ? sql`WHERE ${sql.join(clauses, sql` AND `)}`
+      : sql``;
+
+    const rowsResult = await this.db.execute(
+      sql`SELECT * FROM audit_events ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+    );
+    const totalResult = await this.db.execute(
+      sql`SELECT COUNT(*)::int AS count FROM audit_events ${whereSql}`
+    );
+    const rows = (rowsResult.rows as any[]).map(mapAuditEventRow);
+    const total = Number((totalResult.rows as any[])[0]?.count ?? 0);
+    return { rows, total };
+  }
+
+  async getAuditEvent(id: string): Promise<AuditEvent | undefined> {
+    const result = await this.db.execute(sql`SELECT * FROM audit_events WHERE id = ${id} LIMIT 1`);
+    const row = (result.rows as any[])[0];
+    return row ? mapAuditEventRow(row) : undefined;
+  }
+}
+
+// Row mappers — pg returns snake_case; our types are camelCase.
+function mapLlmCallRow(row: any): LlmCall {
+  return {
+    id: row.id,
+    userId: row.user_id ?? null,
+    guestOwnerId: row.guest_owner_id ?? null,
+    projectId: row.project_id ?? null,
+    stageId: row.stage_id ?? null,
+    provider: row.provider,
+    model: row.model,
+    task: row.task,
+    inputTokens: row.input_tokens ?? 0,
+    outputTokens: row.output_tokens ?? 0,
+    cacheReadTokens: row.cache_read_tokens ?? null,
+    cacheWriteTokens: row.cache_write_tokens ?? null,
+    costUsd: row.cost_usd != null ? String(row.cost_usd) : null,
+    latencyMs: row.latency_ms ?? null,
+    status: row.status,
+    errorCode: row.error_code ?? null,
+    streamed: Boolean(row.streamed),
+    byok: Boolean(row.byok),
+    requestId: row.request_id ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
+  };
+}
+
+function mapAuditEventRow(row: any): AuditEvent {
+  return {
+    id: row.id,
+    actorType: row.actor_type,
+    actorId: row.actor_id ?? null,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id ?? null,
+    metadata: row.metadata ?? null,
+    requestId: row.request_id ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
+  };
 }
 
 // Create the storage instance with proper fallback.

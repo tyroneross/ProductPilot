@@ -929,6 +929,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Update stage progress to 100%
           await storage.updateStage(stage.id, { progress: 100 });
+
+          // Audit: record stage regeneration (fire-and-forget; never throws).
+          // Matches the other 4 audit write sites (project.create, project.delete,
+          // admin.prompt.create, admin.prompt.update).
+          void storage.createAuditEvent({
+            actorType: projectAccess.actor.kind,
+            actorId: projectAccess.actor.kind === "user"
+              ? projectAccess.actor.id
+              : projectAccess.actor.kind === "guest"
+                ? projectAccess.actor.id
+                : null,
+            action: "stage.regenerate",
+            resourceType: "stage",
+            resourceId: stage.id,
+            metadata: {
+              projectId: project.id,
+              stageNumber: stage.stageNumber,
+              detailLevel,
+            },
+          }).catch((e) => logger.error({ err: e }, "[audit] stage.regenerate failed"));
         } catch (stageError) {
           logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage");
         }
@@ -1206,6 +1226,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(INTERCEPTOR_PROMPTS);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch interceptor prompts" });
+    }
+  });
+
+  // ── Admin observability: audit_events + llm_calls ──
+  // List + detail endpoints. Read-only. Filters are optional string equalities.
+  // Pagination via `limit` (max 200, default 50) + `offset` (default 0).
+
+  const parseIntSafe = (v: unknown, fallback: number): number => {
+    const n = typeof v === "string" ? parseInt(v, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  };
+  const pickString = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+
+  app.get("/api/admin/audit-events", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const { rows, total } = await storage.listAuditEvents({
+        actorType: pickString(req.query.actorType),
+        actorId: pickString(req.query.actorId),
+        action: pickString(req.query.action),
+        resourceType: pickString(req.query.resourceType),
+        resourceId: pickString(req.query.resourceId),
+        limit: Math.min(parseIntSafe(req.query.limit, 50), 200),
+        offset: parseIntSafe(req.query.offset, 0),
+      });
+      res.json({ rows, total });
+    } catch (error) {
+      logger.error({ err: error }, "Error listing audit events");
+      res.status(500).json({ message: "Failed to list audit events" });
+    }
+  });
+
+  app.get("/api/admin/audit-events/:id", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const event = await storage.getAuditEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Not found" });
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch audit event" });
+    }
+  });
+
+  app.get("/api/admin/llm-calls", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const { rows, total } = await storage.listLlmCalls({
+        userId: pickString(req.query.userId),
+        guestOwnerId: pickString(req.query.guestOwnerId),
+        projectId: pickString(req.query.projectId),
+        stageId: pickString(req.query.stageId),
+        provider: pickString(req.query.provider),
+        model: pickString(req.query.model),
+        task: pickString(req.query.task),
+        status: pickString(req.query.status),
+        limit: Math.min(parseIntSafe(req.query.limit, 50), 200),
+        offset: parseIntSafe(req.query.offset, 0),
+      });
+      res.json({ rows, total });
+    } catch (error) {
+      logger.error({ err: error }, "Error listing LLM calls");
+      res.status(500).json({ message: "Failed to list LLM calls" });
+    }
+  });
+
+  app.get("/api/admin/llm-calls/:id", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const call = await storage.getLlmCall(req.params.id);
+      if (!call) return res.status(404).json({ message: "Not found" });
+      res.json(call);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch LLM call" });
     }
   });
 

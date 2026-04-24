@@ -1,5 +1,11 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
@@ -429,17 +435,20 @@ __export(schema_exports, {
   insertMessageSchema: () => insertMessageSchema,
   insertProjectSchema: () => insertProjectSchema,
   insertStageSchema: () => insertStageSchema,
+  legacySessions: () => legacySessions,
   llmCalls: () => llmCalls,
   messages: () => messages,
   projects: () => projects,
   stages: () => stages,
-  updateStageSchema: () => updateStageSchema
+  updateStageSchema: () => updateStageSchema,
+  userSettings: () => userSettings
 });
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, jsonb, integer, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-var adminPrompts, insertAdminPromptSchema, projects, stages, messages, llmCalls, auditEvents, insertProjectSchema, CustomPromptSchema, CustomPromptsSchema, SurveyQuestionSchema, SurveyDefinitionSchema, SurveyResponseSchema, insertStageSchema, insertMessageSchema, updateStageSchema, DEFAULT_STAGES, INTERCEPTOR_PROMPTS;
+import { uniqueIndex } from "drizzle-orm/pg-core";
+var adminPrompts, legacySessions, userSettings, insertAdminPromptSchema, projects, stages, messages, llmCalls, auditEvents, insertProjectSchema, CustomPromptSchema, CustomPromptsSchema, SurveyQuestionSchema, SurveyDefinitionSchema, SurveyResponseSchema, insertStageSchema, insertMessageSchema, updateStageSchema, DEFAULT_STAGES, INTERCEPTOR_PROMPTS;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -463,6 +472,26 @@ var init_schema = __esm({
       // GitHub username of last editor
       createdAt: timestamp("created_at").defaultNow().notNull(),
       updatedAt: timestamp("updated_at").defaultNow().notNull()
+    }, (table) => [
+      // UNIQUE target_key — seedDefaultPrompts relies on this to avoid duplicates on re-run.
+      uniqueIndex("admin_prompts_target_key_unique").on(table.targetKey)
+    ]);
+    legacySessions = pgTable("sessions", {
+      sid: varchar("sid").primaryKey(),
+      sess: jsonb("sess").notNull(),
+      expire: timestamp("expire", { precision: 6 }).notNull()
+    }, (table) => [
+      index("IDX_sessions_expire").on(table.expire)
+    ]);
+    userSettings = pgTable("user_settings", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: varchar("user_id", { length: 255 }).notNull().unique(),
+      llmProvider: text("llm_provider").default("groq"),
+      llmApiKey: text("llm_api_key"),
+      // encrypted at rest (see server/lib/secret-crypto.ts)
+      llmModel: text("llm_model").default("llama-3.3-70b-versatile"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
     });
     insertAdminPromptSchema = createInsertSchema(adminPrompts).omit({
       id: true,
@@ -522,7 +551,9 @@ var init_schema = __esm({
       // insights marked as complete
       createdAt: timestamp("created_at").defaultNow().notNull(),
       updatedAt: timestamp("updated_at").defaultNow().notNull()
-    });
+    }, (table) => [
+      index("stages_project_id_idx").on(table.projectId)
+    ]);
     messages = pgTable("messages", {
       id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
       stageId: varchar("stage_id").notNull().references(() => stages.id, { onDelete: "cascade" }),
@@ -535,7 +566,11 @@ var init_schema = __esm({
       // version bumps on regenerate; older versions are retained for history
       version: integer("version").notNull().default(1),
       createdAt: timestamp("created_at").defaultNow().notNull()
-    });
+    }, (table) => [
+      // Hot-path: message reads always filter by stage_id and order by created_at.
+      index("messages_stage_id_created_at_idx").on(table.stageId, table.createdAt),
+      index("messages_stage_kind_idx").on(table.stageId, table.kind)
+    ]);
     llmCalls = pgTable("llm_calls", {
       id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
       userId: varchar("user_id"),
@@ -810,6 +845,43 @@ function updateDbActorContext(updates) {
   if (context) {
     Object.assign(context, updates);
   }
+}
+function mapLlmCallRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id ?? null,
+    guestOwnerId: row.guest_owner_id ?? null,
+    projectId: row.project_id ?? null,
+    stageId: row.stage_id ?? null,
+    provider: row.provider,
+    model: row.model,
+    task: row.task,
+    inputTokens: row.input_tokens ?? 0,
+    outputTokens: row.output_tokens ?? 0,
+    cacheReadTokens: row.cache_read_tokens ?? null,
+    cacheWriteTokens: row.cache_write_tokens ?? null,
+    costUsd: row.cost_usd != null ? String(row.cost_usd) : null,
+    latencyMs: row.latency_ms ?? null,
+    status: row.status,
+    errorCode: row.error_code ?? null,
+    streamed: Boolean(row.streamed),
+    byok: Boolean(row.byok),
+    requestId: row.request_id ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at)
+  };
+}
+function mapAuditEventRow(row) {
+  return {
+    id: row.id,
+    actorType: row.actor_type,
+    actorId: row.actor_id ?? null,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id ?? null,
+    metadata: row.metadata ?? null,
+    requestId: row.request_id ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at)
+  };
 }
 function createStorage() {
   const hasDatabase = !!(process.env.DATABASE_URL || process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE);
@@ -1092,12 +1164,80 @@ var init_storage_hybrid = __esm({
       // LLM Telemetry - MemStorage implementation (dev fallback, in-memory only)
       llmCallLog = [];
       async createLlmCall(call) {
-        this.llmCallLog.push(call);
+        this.llmCallLog.push({
+          id: this.generateId(),
+          userId: call.userId ?? null,
+          guestOwnerId: call.guestOwnerId ?? null,
+          projectId: call.projectId ?? null,
+          stageId: call.stageId ?? null,
+          provider: call.provider,
+          model: call.model,
+          task: call.task,
+          inputTokens: call.inputTokens ?? 0,
+          outputTokens: call.outputTokens ?? 0,
+          cacheReadTokens: call.cacheReadTokens ?? null,
+          cacheWriteTokens: call.cacheWriteTokens ?? null,
+          costUsd: call.costUsd ?? null,
+          latencyMs: call.latencyMs ?? null,
+          status: call.status,
+          errorCode: call.errorCode ?? null,
+          streamed: call.streamed ?? false,
+          byok: call.byok ?? false,
+          requestId: call.requestId ?? null,
+          createdAt: /* @__PURE__ */ new Date()
+        });
+      }
+      async listLlmCalls(filters) {
+        const filtered = this.llmCallLog.filter((row) => {
+          if (filters.userId && row.userId !== filters.userId) return false;
+          if (filters.guestOwnerId && row.guestOwnerId !== filters.guestOwnerId) return false;
+          if (filters.projectId && row.projectId !== filters.projectId) return false;
+          if (filters.stageId && row.stageId !== filters.stageId) return false;
+          if (filters.provider && row.provider !== filters.provider) return false;
+          if (filters.model && row.model !== filters.model) return false;
+          if (filters.task && row.task !== filters.task) return false;
+          if (filters.status && row.status !== filters.status) return false;
+          return true;
+        });
+        const sorted = [...filtered].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const offset = filters.offset ?? 0;
+        const limit = filters.limit ?? 50;
+        return { rows: sorted.slice(offset, offset + limit), total: sorted.length };
+      }
+      async getLlmCall(id) {
+        return this.llmCallLog.find((row) => row.id === id);
       }
       // Audit log - MemStorage implementation (dev fallback, in-memory only)
       auditEventLog = [];
       async createAuditEvent(event) {
-        this.auditEventLog.push(event);
+        this.auditEventLog.push({
+          id: this.generateId(),
+          actorType: event.actorType,
+          actorId: event.actorId ?? null,
+          action: event.action,
+          resourceType: event.resourceType,
+          resourceId: event.resourceId ?? null,
+          metadata: event.metadata ?? null,
+          requestId: event.requestId ?? null,
+          createdAt: /* @__PURE__ */ new Date()
+        });
+      }
+      async listAuditEvents(filters) {
+        const filtered = this.auditEventLog.filter((row) => {
+          if (filters.actorType && row.actorType !== filters.actorType) return false;
+          if (filters.actorId && row.actorId !== filters.actorId) return false;
+          if (filters.action && row.action !== filters.action) return false;
+          if (filters.resourceType && row.resourceType !== filters.resourceType) return false;
+          if (filters.resourceId && row.resourceId !== filters.resourceId) return false;
+          return true;
+        });
+        const sorted = [...filtered].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const offset = filters.offset ?? 0;
+        const limit = filters.limit ?? 50;
+        return { rows: sorted.slice(offset, offset + limit), total: sorted.length };
+      }
+      async getAuditEvent(id) {
+        return this.auditEventLog.find((row) => row.id === id);
       }
     };
     PostgresStorage = class {
@@ -1348,9 +1488,65 @@ var init_storage_hybrid = __esm({
       async createLlmCall(call) {
         await this.db.insert(llmCalls).values(call);
       }
+      // Admin observability: list LLM calls with filters + pagination.
+      // Reads are admin-only (no actor-scoped RLS needed; admin endpoint gates access).
+      // Uses raw SQL to avoid pulling drizzle-orm's where-builder chain into this read.
+      async listLlmCalls(filters) {
+        const limit = Math.min(filters.limit ?? 50, 200);
+        const offset = filters.offset ?? 0;
+        const clauses = [];
+        if (filters.userId) clauses.push(sql2`user_id = ${filters.userId}`);
+        if (filters.guestOwnerId) clauses.push(sql2`guest_owner_id = ${filters.guestOwnerId}`);
+        if (filters.projectId) clauses.push(sql2`project_id = ${filters.projectId}`);
+        if (filters.stageId) clauses.push(sql2`stage_id = ${filters.stageId}`);
+        if (filters.provider) clauses.push(sql2`provider = ${filters.provider}`);
+        if (filters.model) clauses.push(sql2`model = ${filters.model}`);
+        if (filters.task) clauses.push(sql2`task = ${filters.task}`);
+        if (filters.status) clauses.push(sql2`status = ${filters.status}`);
+        const whereSql = clauses.length ? sql2`WHERE ${sql2.join(clauses, sql2` AND `)}` : sql2``;
+        const rowsResult = await this.db.execute(
+          sql2`SELECT * FROM llm_calls ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+        );
+        const totalResult = await this.db.execute(
+          sql2`SELECT COUNT(*)::int AS count FROM llm_calls ${whereSql}`
+        );
+        const rows = rowsResult.rows.map(mapLlmCallRow);
+        const total = Number(totalResult.rows[0]?.count ?? 0);
+        return { rows, total };
+      }
+      async getLlmCall(id) {
+        const result = await this.db.execute(sql2`SELECT * FROM llm_calls WHERE id = ${id} LIMIT 1`);
+        const row = result.rows[0];
+        return row ? mapLlmCallRow(row) : void 0;
+      }
       // Audit log - PostgresStorage implementation
       async createAuditEvent(event) {
         await this.db.insert(auditEvents).values(event);
+      }
+      async listAuditEvents(filters) {
+        const limit = Math.min(filters.limit ?? 50, 200);
+        const offset = filters.offset ?? 0;
+        const clauses = [];
+        if (filters.actorType) clauses.push(sql2`actor_type = ${filters.actorType}`);
+        if (filters.actorId) clauses.push(sql2`actor_id = ${filters.actorId}`);
+        if (filters.action) clauses.push(sql2`action = ${filters.action}`);
+        if (filters.resourceType) clauses.push(sql2`resource_type = ${filters.resourceType}`);
+        if (filters.resourceId) clauses.push(sql2`resource_id = ${filters.resourceId}`);
+        const whereSql = clauses.length ? sql2`WHERE ${sql2.join(clauses, sql2` AND `)}` : sql2``;
+        const rowsResult = await this.db.execute(
+          sql2`SELECT * FROM audit_events ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+        );
+        const totalResult = await this.db.execute(
+          sql2`SELECT COUNT(*)::int AS count FROM audit_events ${whereSql}`
+        );
+        const rows = rowsResult.rows.map(mapAuditEventRow);
+        const total = Number(totalResult.rows[0]?.count ?? 0);
+        return { rows, total };
+      }
+      async getAuditEvent(id) {
+        const result = await this.db.execute(sql2`SELECT * FROM audit_events WHERE id = ${id} LIMIT 1`);
+        const row = result.rows[0];
+        return row ? mapAuditEventRow(row) : void 0;
       }
     };
     storage = createStorage();
@@ -1414,8 +1610,8 @@ async function sendAuthEmail(payload) {
     throw new Error(`Failed to send auth email (${response.status}): ${body}`);
   }
 }
-function escapeAuthUrl(url) {
-  return escapeHtml(url);
+function escapeAuthUrl(url2) {
+  return escapeHtml(url2);
 }
 async function sendPasswordResetEmail(input) {
   const greeting = input.name ? `Hi ${input.name},` : "Hi,";
@@ -1493,7 +1689,7 @@ __export(schema_exports2, {
   user: () => user,
   verification: () => verification
 });
-import { bigint, index as index2, integer as integer2, pgTable as pgTable2, text as text2, timestamp as timestamp2, boolean as boolean2, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, index as index2, integer as integer2, pgTable as pgTable2, text as text2, timestamp as timestamp2, boolean as boolean2, uniqueIndex as uniqueIndex2 } from "drizzle-orm/pg-core";
 var user = pgTable2("user", {
   id: text2("id").primaryKey(),
   name: text2("name").notNull(),
@@ -1503,7 +1699,7 @@ var user = pgTable2("user", {
   createdAt: timestamp2("created_at").notNull().defaultNow(),
   updatedAt: timestamp2("updated_at").notNull().defaultNow()
 }, (table) => [
-  uniqueIndex("user_email_unique").on(table.email)
+  uniqueIndex2("user_email_unique").on(table.email)
 ]);
 var session = pgTable2("session", {
   id: text2("id").primaryKey(),
@@ -1515,7 +1711,7 @@ var session = pgTable2("session", {
   userAgent: text2("user_agent"),
   userId: text2("user_id").notNull().references(() => user.id, { onDelete: "cascade" })
 }, (table) => [
-  uniqueIndex("session_token_unique").on(table.token),
+  uniqueIndex2("session_token_unique").on(table.token),
   index2("session_user_id_idx").on(table.userId)
 ]);
 var account = pgTable2("account", {
@@ -1534,7 +1730,7 @@ var account = pgTable2("account", {
   updatedAt: timestamp2("updated_at").notNull().defaultNow()
 }, (table) => [
   index2("account_user_id_idx").on(table.userId),
-  uniqueIndex("account_provider_account_unique").on(table.providerId, table.accountId)
+  uniqueIndex2("account_provider_account_unique").on(table.providerId, table.accountId)
 ]);
 var verification = pgTable2("verification", {
   id: text2("id").primaryKey(),
@@ -1604,11 +1800,11 @@ var auth = betterAuth({
     autoSignIn: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
-    sendResetPassword: async ({ user: user2, url }) => {
+    sendResetPassword: async ({ user: user2, url: url2 }) => {
       await sendPasswordResetEmail({
         email: user2.email,
         name: user2.name,
-        url
+        url: url2
       });
     },
     resetPasswordTokenExpiresIn: 60 * 60
@@ -1619,11 +1815,11 @@ var auth = betterAuth({
     sendOnSignIn: false,
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
-    sendVerificationEmail: async ({ user: user2, url }) => {
+    sendVerificationEmail: async ({ user: user2, url: url2 }) => {
       await sendVerificationEmail({
         email: user2.email,
         name: user2.name,
-        url
+        url: url2
       });
     }
   },
@@ -1667,8 +1863,8 @@ var auth = betterAuth({
   } : void 0,
   plugins: [
     magicLink({
-      sendMagicLink: async ({ email, url }) => {
-        await sendMagicLinkEmail({ email, url });
+      sendMagicLink: async ({ email, url: url2 }) => {
+        await sendMagicLinkEmail({ email, url: url2 });
       },
       storeToken: "hashed",
       // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.
@@ -3215,6 +3411,18 @@ data: ${JSON.stringify(data)}
             kind: "deliverable"
           });
           await storage.updateStage(stage.id, { progress: 100 });
+          void storage.createAuditEvent({
+            actorType: projectAccess.actor.kind,
+            actorId: projectAccess.actor.kind === "user" ? projectAccess.actor.id : projectAccess.actor.kind === "guest" ? projectAccess.actor.id : null,
+            action: "stage.regenerate",
+            resourceType: "stage",
+            resourceId: stage.id,
+            metadata: {
+              projectId: project.id,
+              stageNumber: stage.stageNumber,
+              detailLevel
+            }
+          }).catch((e) => logger.error({ err: e }, "[audit] stage.regenerate failed"));
         } catch (stageError) {
           logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage");
         }
@@ -3448,6 +3656,66 @@ data: ${JSON.stringify(data)}
       res.status(500).json({ message: "Failed to fetch interceptor prompts" });
     }
   });
+  const parseIntSafe = (v, fallback) => {
+    const n = typeof v === "string" ? parseInt(v, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  };
+  const pickString = (v) => typeof v === "string" && v.trim().length > 0 ? v.trim() : void 0;
+  app2.get("/api/admin/audit-events", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const { rows, total } = await storage.listAuditEvents({
+        actorType: pickString(req.query.actorType),
+        actorId: pickString(req.query.actorId),
+        action: pickString(req.query.action),
+        resourceType: pickString(req.query.resourceType),
+        resourceId: pickString(req.query.resourceId),
+        limit: Math.min(parseIntSafe(req.query.limit, 50), 200),
+        offset: parseIntSafe(req.query.offset, 0)
+      });
+      res.json({ rows, total });
+    } catch (error) {
+      logger.error({ err: error }, "Error listing audit events");
+      res.status(500).json({ message: "Failed to list audit events" });
+    }
+  });
+  app2.get("/api/admin/audit-events/:id", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const event = await storage.getAuditEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Not found" });
+      res.json(event);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch audit event" });
+    }
+  });
+  app2.get("/api/admin/llm-calls", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const { rows, total } = await storage.listLlmCalls({
+        userId: pickString(req.query.userId),
+        guestOwnerId: pickString(req.query.guestOwnerId),
+        projectId: pickString(req.query.projectId),
+        stageId: pickString(req.query.stageId),
+        provider: pickString(req.query.provider),
+        model: pickString(req.query.model),
+        task: pickString(req.query.task),
+        status: pickString(req.query.status),
+        limit: Math.min(parseIntSafe(req.query.limit, 50), 200),
+        offset: parseIntSafe(req.query.offset, 0)
+      });
+      res.json({ rows, total });
+    } catch (error) {
+      logger.error({ err: error }, "Error listing LLM calls");
+      res.status(500).json({ message: "Failed to list LLM calls" });
+    }
+  });
+  app2.get("/api/admin/llm-calls/:id", requireAuth, isAdmin, async (req, res) => {
+    try {
+      const call = await storage.getLlmCall(req.params.id);
+      if (!call) return res.status(404).json({ message: "Not found" });
+      res.json(call);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch LLM call" });
+    }
+  });
   app2.get("/api/settings", requireAuth, async (req, res) => {
     try {
       const settings = await storage.getUserSettings(req.userId);
@@ -3612,6 +3880,11 @@ Return the JSON now.`;
 // server/migrate.ts
 init_logger();
 import { Pool as Pool2 } from "pg";
+import { drizzle as drizzle2 } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { sql as sql3 } from "drizzle-orm";
+import path2 from "node:path";
+import url from "node:url";
 function getDatabaseUrl2() {
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
     const host = process.env.PGHOST;
@@ -3626,533 +3899,71 @@ function getDatabaseUrl2() {
   }
   throw new Error("Database connection not configured. Please ensure PostgreSQL is provisioned.");
 }
+function resolveMigrationsFolder() {
+  try {
+    const here = url.fileURLToPath(import.meta.url);
+    let dir = path2.dirname(here);
+    for (let i = 0; i < 6; i += 1) {
+      const candidate = path2.join(dir, "migrations", "meta", "_journal.json");
+      try {
+        const fs2 = __require("node:fs");
+        if (fs2.existsSync(candidate)) {
+          return path2.join(dir, "migrations");
+        }
+      } catch {
+      }
+      const parent = path2.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+  }
+  return path2.resolve(process.cwd(), "migrations");
+}
+async function stampPreExistingMigrations(pool2) {
+  await pool2.query(`CREATE SCHEMA IF NOT EXISTS drizzle`);
+  await pool2.query(`
+    CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at bigint
+    )
+  `);
+  const { rows: countRows } = await pool2.query(
+    `SELECT COUNT(*)::text AS count FROM drizzle.__drizzle_migrations`
+  );
+  const existingRows = Number(countRows[0]?.count ?? "0");
+  const { rows: probeRows } = await pool2.query(
+    `SELECT to_regclass('public.audit_events')::text AS to_regclass`
+  );
+  const hasAuditEvents = Boolean(probeRows[0]?.to_regclass);
+  if (existingRows === 0 && hasAuditEvents) {
+    const now = Date.now();
+    await pool2.query(
+      `INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+       VALUES ($1, $2), ($3, $4)`,
+      [
+        "0000_happy_thunderball",
+        now - 1e3,
+        "0001_consolidate_from_runtime",
+        now
+      ]
+    );
+    logger.info(
+      "Detected pre-existing schema. Stamped 0000 + 0001 as applied; migrator will resume from 0002."
+    );
+  }
+}
 async function runMigrations() {
   const dbUrl2 = getDatabaseUrl2();
   const connString2 = !dbUrl2.includes("sslmode=") ? dbUrl2 + (dbUrl2.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl2;
   const pool2 = new Pool2({ connectionString: connString2 });
   try {
     logger.info("Running database migrations");
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "projects" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "user_id" varchar,
-        "guest_owner_id" varchar,
-        "name" text NOT NULL,
-        "description" text NOT NULL,
-        "ai_model" text DEFAULT 'claude-sonnet' NOT NULL,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "stages" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "project_id" varchar NOT NULL,
-        "stage_number" integer NOT NULL,
-        "title" text NOT NULL,
-        "description" text NOT NULL,
-        "progress" integer DEFAULT 0 NOT NULL,
-        "is_unlocked" boolean DEFAULT true NOT NULL,
-        "system_prompt" text NOT NULL,
-        "ai_model" text,
-        "outputs" jsonb,
-        "key_insights" jsonb,
-        "completed_insights" jsonb,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "messages" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "stage_id" varchar NOT NULL,
-        "role" text NOT NULL,
-        "content" text NOT NULL,
-        "created_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "users" (
-        "id" text PRIMARY KEY NOT NULL,
-        "email" text,
-        "first_name" text,
-        "last_name" text,
-        "profile_image_url" text,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "sessions" (
-        "sid" varchar NOT NULL PRIMARY KEY,
-        "sess" json NOT NULL,
-        "expire" timestamp(6) NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "user" (
-        "id" text PRIMARY KEY NOT NULL,
-        "name" text NOT NULL,
-        "email" text NOT NULL,
-        "email_verified" boolean DEFAULT false NOT NULL,
-        "image" text,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "session" (
-        "id" text PRIMARY KEY NOT NULL,
-        "expires_at" timestamp NOT NULL,
-        "token" text NOT NULL,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL,
-        "ip_address" text,
-        "user_agent" text,
-        "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "account" (
-        "id" text PRIMARY KEY NOT NULL,
-        "account_id" text NOT NULL,
-        "provider_id" text NOT NULL,
-        "user_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
-        "access_token" text,
-        "refresh_token" text,
-        "id_token" text,
-        "access_token_expires_at" timestamp,
-        "refresh_token_expires_at" timestamp,
-        "scope" text,
-        "password" text,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "verification" (
-        "id" text PRIMARY KEY NOT NULL,
-        "identifier" text NOT NULL,
-        "value" text NOT NULL,
-        "expires_at" timestamp NOT NULL,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "rateLimit" (
-        "key" text PRIMARY KEY NOT NULL,
-        "count" integer NOT NULL,
-        "last_request" bigint NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "user_email_unique" ON "user" ("email")
-    `);
-    await pool2.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "session_token_unique" ON "session" ("token")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "session_user_id_idx" ON "session" ("user_id")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "account_user_id_idx" ON "account" ("user_id")
-    `);
-    await pool2.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "account_provider_account_unique" ON "account" ("provider_id", "account_id")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier")
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "admin_prompts" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "scope" text NOT NULL,
-        "target_key" text NOT NULL,
-        "label" text NOT NULL,
-        "description" text,
-        "content" text NOT NULL,
-        "is_default" boolean DEFAULT false NOT NULL,
-        "stage_number" integer,
-        "updated_by" varchar,
-        "created_at" timestamp DEFAULT now() NOT NULL,
-        "updated_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      DO $$ 
-      BEGIN
-        -- Check if old schema exists (has 'key' column but not 'scope')
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'admin_prompts' AND column_name = 'key')
-           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'admin_prompts' AND column_name = 'scope') THEN
-          -- Drop old table and recreate with new schema
-          DROP TABLE "admin_prompts";
-          CREATE TABLE "admin_prompts" (
-            "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-            "scope" text NOT NULL,
-            "target_key" text NOT NULL,
-            "label" text NOT NULL,
-            "description" text,
-            "content" text NOT NULL,
-            "is_default" boolean DEFAULT false NOT NULL,
-            "stage_number" integer,
-            "updated_by" varchar,
-            "created_at" timestamp DEFAULT now() NOT NULL,
-            "updated_at" timestamp DEFAULT now() NOT NULL
-          );
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$ 
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints 
-          WHERE constraint_name = 'stages_project_id_projects_id_fk'
-        ) THEN
-          ALTER TABLE "stages" ADD CONSTRAINT "stages_project_id_projects_id_fk" 
-          FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$ 
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints 
-          WHERE constraint_name = 'messages_stage_id_stages_id_fk'
-        ) THEN
-          ALTER TABLE "messages" ADD CONSTRAINT "messages_stage_id_stages_id_fk" 
-          FOREIGN KEY ("stage_id") REFERENCES "public"."stages"("id") ON DELETE cascade ON UPDATE no action;
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$ 
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'user_id') THEN
-          ALTER TABLE "projects" ADD COLUMN "user_id" varchar;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'guest_owner_id') THEN
-          ALTER TABLE "projects" ADD COLUMN "guest_owner_id" varchar;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'mode') THEN
-          ALTER TABLE "projects" ADD COLUMN "mode" text DEFAULT 'survey' NOT NULL;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_phase') THEN
-          ALTER TABLE "projects" ADD COLUMN "survey_phase" text DEFAULT 'discovery';
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_definition') THEN
-          ALTER TABLE "projects" ADD COLUMN "survey_definition" jsonb;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'survey_responses') THEN
-          ALTER TABLE "projects" ADD COLUMN "survey_responses" jsonb;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'custom_prompts') THEN
-          ALTER TABLE "projects" ADD COLUMN "custom_prompts" jsonb;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'intake_answers') THEN
-          ALTER TABLE "projects" ADD COLUMN "intake_answers" jsonb;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'minimum_details') THEN
-          ALTER TABLE "projects" ADD COLUMN "minimum_details" jsonb;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'app_style') THEN
-          ALTER TABLE "projects" ADD COLUMN "app_style" jsonb;
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE constraint_name = 'admin_prompts_target_key_unique' AND table_name = 'admin_prompts'
-        ) THEN
-          -- Deduplicate any existing rows before enforcing UNIQUE
-          DELETE FROM "admin_prompts" a USING "admin_prompts" b
-          WHERE a."created_at" > b."created_at" AND a."target_key" = b."target_key";
-          ALTER TABLE "admin_prompts"
-          ADD CONSTRAINT "admin_prompts_target_key_unique" UNIQUE ("target_key");
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "projects_user_id_idx" ON "projects" ("user_id")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "projects_guest_owner_id_idx" ON "projects" ("guest_owner_id")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "messages_stage_id_created_at_idx" ON "messages" ("stage_id", "created_at")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "stages_project_id_idx" ON "stages" ("project_id")
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE constraint_name = 'projects_user_id_user_id_fk' AND table_name = 'projects'
-        ) THEN
-          -- Clear stale userIds before enforcing the FK to avoid migration failure.
-          UPDATE "projects"
-          SET "user_id" = NULL
-          WHERE "user_id" IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "projects"."user_id");
-
-          ALTER TABLE "projects"
-          ADD CONSTRAINT "projects_user_id_user_id_fk"
-          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE SET NULL;
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "llm_calls" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "user_id" varchar,
-        "guest_owner_id" varchar,
-        "project_id" varchar,
-        "stage_id" varchar,
-        "provider" text NOT NULL,
-        "model" text NOT NULL,
-        "task" text NOT NULL,
-        "input_tokens" integer NOT NULL DEFAULT 0,
-        "output_tokens" integer NOT NULL DEFAULT 0,
-        "cache_read_tokens" integer,
-        "cache_write_tokens" integer,
-        "cost_usd" numeric(12, 6),
-        "latency_ms" integer,
-        "status" text NOT NULL,
-        "error_code" text,
-        "streamed" boolean NOT NULL DEFAULT false,
-        "byok" boolean NOT NULL DEFAULT false,
-        "request_id" varchar,
-        "created_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "llm_calls_user_id_created_at_idx" ON "llm_calls" ("user_id", "created_at")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "llm_calls_project_id_idx" ON "llm_calls" ("project_id")
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='kind') THEN
-          ALTER TABLE "messages" ADD COLUMN "kind" text NOT NULL DEFAULT 'chat';
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='version') THEN
-          ALTER TABLE "messages" ADD COLUMN "version" integer NOT NULL DEFAULT 1;
-        END IF;
-      END $$;
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "messages_stage_kind_idx" ON "messages" ("stage_id", "kind")
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "audit_events" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "actor_type" text NOT NULL,
-        "actor_id" varchar,
-        "action" text NOT NULL,
-        "resource_type" text NOT NULL,
-        "resource_id" varchar,
-        "metadata" jsonb,
-        "request_id" varchar,
-        "created_at" timestamp DEFAULT now() NOT NULL
-      )
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "audit_events_actor_id_created_at_idx" ON "audit_events" ("actor_id", "created_at")
-    `);
-    await pool2.query(`
-      CREATE INDEX IF NOT EXISTS "audit_events_resource_idx" ON "audit_events" ("resource_type", "resource_id")
-    `);
-    await pool2.query(`
-      CREATE TABLE IF NOT EXISTS "user_settings" (
-        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-        "user_id" varchar(255) NOT NULL UNIQUE,
-        "llm_provider" text DEFAULT 'groq',
-        "llm_api_key" text,
-        "llm_model" text DEFAULT 'llama-3.3-70b-versatile',
-        "created_at" timestamp DEFAULT now(),
-        "updated_at" timestamp DEFAULT now()
-      )
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE constraint_name = 'user_settings_user_id_user_id_fk' AND table_name = 'user_settings'
-        ) THEN
-          DELETE FROM "user_settings"
-          WHERE "user_id" IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = "user_settings"."user_id");
-
-          ALTER TABLE "user_settings"
-          ADD CONSTRAINT "user_settings_user_id_user_id_fk"
-          FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;
-        END IF;
-      END $$
-    `);
-    await pool2.query(`
-      DO $$
-      DECLARE
-        tbl TEXT;
-      BEGIN
-        FOR tbl IN
-          SELECT tablename
-          FROM pg_tables
-          WHERE schemaname = 'public'
-            AND tablename NOT IN ('user', 'session', 'account', 'verification', 'rateLimit')
-        LOOP
-          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
-        END LOOP;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        ALTER TABLE IF EXISTS "user" DISABLE ROW LEVEL SECURITY;
-        ALTER TABLE IF EXISTS "session" DISABLE ROW LEVEL SECURITY;
-        ALTER TABLE IF EXISTS "account" DISABLE ROW LEVEL SECURITY;
-        ALTER TABLE IF EXISTS "verification" DISABLE ROW LEVEL SECURITY;
-        ALTER TABLE IF EXISTS "rateLimit" DISABLE ROW LEVEL SECURITY;
-      END $$;
-    `);
-    await pool2.query(`
-      DO $$
-      BEGIN
-        DROP POLICY IF EXISTS projects_user_isolation ON projects;
-        DROP POLICY IF EXISTS user_settings_isolation ON user_settings;
-        DROP POLICY IF EXISTS projects_actor_isolation ON projects;
-        DROP POLICY IF EXISTS stages_actor_isolation ON stages;
-        DROP POLICY IF EXISTS messages_actor_isolation ON messages;
-        DROP POLICY IF EXISTS user_settings_actor_isolation ON user_settings;
-
-        ALTER TABLE "projects" ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE "projects" FORCE ROW LEVEL SECURITY;
-        ALTER TABLE "stages" ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE "stages" FORCE ROW LEVEL SECURITY;
-        ALTER TABLE "messages" ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE "messages" FORCE ROW LEVEL SECURITY;
-        ALTER TABLE "user_settings" ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE "user_settings" FORCE ROW LEVEL SECURITY;
-
-        CREATE POLICY projects_actor_isolation ON projects
-          USING (
-            (
-              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-            )
-            OR (
-              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-            )
-          )
-          WITH CHECK (
-            (
-              NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-              AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-            )
-            OR (
-              NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-              AND guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-            )
-          );
-
-        CREATE POLICY stages_actor_isolation ON stages
-          USING (
-            EXISTS (
-              SELECT 1
-              FROM projects p
-              WHERE p.id = stages.project_id
-                AND (
-                  (
-                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-                  )
-                  OR (
-                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-                  )
-                )
-            )
-          )
-          WITH CHECK (
-            EXISTS (
-              SELECT 1
-              FROM projects p
-              WHERE p.id = stages.project_id
-                AND (
-                  (
-                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-                  )
-                  OR (
-                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-                  )
-                )
-            )
-          );
-
-        CREATE POLICY messages_actor_isolation ON messages
-          USING (
-            EXISTS (
-              SELECT 1
-              FROM stages s
-              JOIN projects p ON p.id = s.project_id
-              WHERE s.id = messages.stage_id
-                AND (
-                  (
-                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-                  )
-                  OR (
-                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-                  )
-                )
-            )
-          )
-          WITH CHECK (
-            EXISTS (
-              SELECT 1
-              FROM stages s
-              JOIN projects p ON p.id = s.project_id
-              WHERE s.id = messages.stage_id
-                AND (
-                  (
-                    NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-                    AND p.user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-                  )
-                  OR (
-                    NULLIF(current_setting('app.current_guest_owner_id', true), '') IS NOT NULL
-                    AND p.guest_owner_id::text = NULLIF(current_setting('app.current_guest_owner_id', true), '')
-                  )
-                )
-            )
-          );
-
-        CREATE POLICY user_settings_actor_isolation ON user_settings
-          USING (
-            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-          )
-          WITH CHECK (
-            NULLIF(current_setting('app.current_user_id', true), '') IS NOT NULL
-            AND user_id::text = NULLIF(current_setting('app.current_user_id', true), '')
-          );
-      END $$;
-    `);
+    await stampPreExistingMigrations(pool2);
+    const db2 = drizzle2(pool2);
+    const migrationsFolder = resolveMigrationsFolder();
+    await migrate(db2, { migrationsFolder });
     logger.info("Database migrations completed successfully");
     return true;
   } catch (error) {

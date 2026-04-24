@@ -14,6 +14,8 @@ const DocumentsPage = lazy(() => import("@/pages/documents"));
 const DocumentViewPage = lazy(() => import("@/pages/document-view"));
 const SessionSurveyPage = lazy(() => import("@/pages/session-survey"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminAuditPage = lazy(() => import("@/pages/admin-audit"));
+const AdminLlmPage = lazy(() => import("@/pages/admin-llm"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
@@ -42,6 +44,8 @@ function Router() {
       <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/admin/audit" component={AdminAuditPage} />
+      <Route path="/admin/llm" component={AdminLlmPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/settings" component={SettingsPage} />
