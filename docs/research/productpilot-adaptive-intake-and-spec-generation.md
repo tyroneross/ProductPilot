@@ -1,0 +1,1 @@
+/Users/tyroneross/dev/research/topics/product-dev/productpilot.adaptive-intake-and-spec-generation.md
