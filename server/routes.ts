@@ -1460,6 +1460,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Coding-agent handoff export (Phase 5) ──────────────────────────────
+  // GET /api/projects/:projectId/handoff.md
+  //
+  // Returns the alpha-completion artifact: a Markdown handoff a coding agent
+  // (Claude Code, Cursor, Codex) consumes directly.
+  //
+  // Gating ladder (each returns 409 with a distinct code so the client can
+  // surface a useful error):
+  //   1. Auth        — loadOwnedProject (401 unauth, 403 cross-tenant).
+  //   2. Mode        — intake_mode === 'adaptive' (409 intake_mode_not_adaptive).
+  //   3. Weights     — productState.tradeoffWeights set (409 tradeoff_weights_required).
+  //   4. PII         — no non-waivable lint issues (409 pii_handling_note_missing).
+  //   5. Lint blocks — no unwaived blockers (409 unwaived_blocker_present + issue list).
+  //
+  // Audit row written on every request — success or failure.
+  // Content-Type: text/markdown; charset=utf-8.
+  // Body content: scrubbed via scrubSecretsDeep + secret-shaped regex defense.
+  app.get("/api/projects/:projectId/handoff.md", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const { hydrateProductState, finalize, weightsAreSet } = await import(
+        "./services/intake-controller"
+      );
+      const { lintSpec } = await import("./services/spec-linter");
+      const { generateHandoff } = await import("./services/agent-handoff");
+      const { scrubSecretsDeep } = await import("./lib/secret-crypto");
+
+      const productState = hydrateProductState(project.productState);
+
+      // Gate 3: weights must be allocated. Mirrors the intake/finalize gate.
+      if (!weightsAreSet(productState.tradeoffWeights)) {
+        void storage.createAuditEvent({
+          actorType: actor.kind,
+          actorId: actor.id,
+          action: "handoff.export",
+          resourceType: "project",
+          resourceId: project.id,
+          metadata: { outcome: "blocked", reason: "tradeoff_weights_required" },
+        }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
+        return res.status(409).json({
+          message:
+            "Tradeoff weights are required before export. Allocate the 100-point distribution across the six axes plus an unacceptable_tradeoff.",
+          code: "tradeoff_weights_required",
+        });
+      }
+
+      // Build the spec the same way intake/finalize does.
+      const built = finalize({
+        projectId: project.id,
+        productName: project.name,
+        productDescription: project.description,
+        productState,
+        existingSpec: null,
+      });
+      const spec = built.spec;
+
+      // Run the linter (deterministic + LLM tier when key present).
+      const llmConfig = await getLLMConfig(req);
+      const lint = await lintSpec({
+        spec,
+        productState,
+        llmConfig,
+        context: {
+          userId: actor.kind === "user" ? actor.id : null,
+          guestOwnerId: actor.kind === "guest" ? actor.id : null,
+          projectId: project.id,
+        },
+      });
+
+      // Load waivers from working memory.
+      const waiverBag =
+        (productState.workingMemory.waivers as Record<string, unknown> | undefined) ?? {};
+      const isWaived = (issueId: string) =>
+        Object.prototype.hasOwnProperty.call(waiverBag, issueId);
+
+      // Gate 4: any non-waivable issue is unconditionally blocking. The PII
+      // handling-note rule sets waivable=false, so any issue with waivable=false
+      // is server-policy-enforced regardless of severity.
+      const nonWaivable = lint.issues.filter((i) => i.waivable === false);
+      if (nonWaivable.length > 0) {
+        const issueIds = nonWaivable.map((i) => i.id);
+        const waiverIds = Object.keys(waiverBag);
+        void storage.createAuditEvent({
+          actorType: actor.kind,
+          actorId: actor.id,
+          action: "handoff.export",
+          resourceType: "project",
+          resourceId: project.id,
+          metadata: {
+            outcome: "blocked",
+            reason: "pii_handling_note_missing",
+            nonWaivableCount: nonWaivable.length,
+            waiverIds,
+          },
+        }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
+        return res.status(409).json({
+          message:
+            "Export blocked: one or more non-waivable issues remain. PII DataPoints without handlingNote are non-waivable by policy.",
+          code: "pii_handling_note_missing",
+          issues: nonWaivable.map((i) => ({
+            id: i.id,
+            rule: i.rule,
+            message: i.message,
+            refs: i.refs,
+          })),
+        });
+      }
+
+      // Gate 5: any unwaived blocker fails export.
+      const unwaivedBlockers = lint.issues.filter(
+        (i) => i.severity === "block" && !isWaived(i.id),
+      );
+      if (unwaivedBlockers.length > 0) {
+        const waiverIds = Object.keys(waiverBag);
+        void storage.createAuditEvent({
+          actorType: actor.kind,
+          actorId: actor.id,
+          action: "handoff.export",
+          resourceType: "project",
+          resourceId: project.id,
+          metadata: {
+            outcome: "blocked",
+            reason: "unwaived_blocker_present",
+            unwaivedBlockerCount: unwaivedBlockers.length,
+            blockerIds: unwaivedBlockers.map((i) => i.id),
+            waiverIds,
+          },
+        }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
+        return res.status(409).json({
+          message: `Export blocked: ${unwaivedBlockers.length} unwaived blocker${unwaivedBlockers.length === 1 ? "" : "s"} remain.`,
+          code: "unwaived_blocker_present",
+          issues: unwaivedBlockers.map((i) => ({
+            id: i.id,
+            rule: i.rule,
+            message: i.message,
+            refs: i.refs,
+          })),
+        });
+      }
+
+      // All gates clear. Scrub once at the boundary as defense in depth, then render.
+      const safeSpec = scrubSecretsDeep(spec) as typeof spec;
+      const safeProductState = scrubSecretsDeep(productState) as typeof productState;
+      const handoffMarkdown = generateHandoff(safeSpec, safeProductState);
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "handoff.export",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: {
+          outcome: "success",
+          markdownChars: handoffMarkdown.length,
+          platformTarget: spec.platformTarget,
+          waiverIds: Object.keys(waiverBag),
+        },
+      }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
+
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.status(200).send(handoffMarkdown);
+    } catch (error) {
+      logger.error({ err: error }, "[handoff.md] error");
+      res.status(500).json({ message: "Failed to generate handoff" });
+    }
+  });
+
   // Export functionality
   app.get("/api/projects/:projectId/export", async (req: any, res) => {
     try {

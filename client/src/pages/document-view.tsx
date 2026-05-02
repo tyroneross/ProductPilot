@@ -61,6 +61,8 @@ export default function DocumentViewPage() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [handoffCopied, setHandoffCopied] = useState(false);
+  const [isCopyingHandoff, setIsCopyingHandoff] = useState(false);
   const tablistRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
@@ -228,6 +230,64 @@ export default function DocumentViewPage() {
     }
   };
 
+  // Phase 5 — Copy the agent-handoff.md content to the clipboard. Distinct
+  // from handleCopy (which copies the currently-rendered stage) and handleExport
+  // (which downloads a multi-stage zipless markdown). This one fetches the
+  // server-rendered handoff endpoint, which gates on lint cleanliness + PII +
+  // weights. Any 409 surface as an inline toast describing the gate.
+  const isHandoffPlatform = !!project?.intakeMode && project.intakeMode === "adaptive";
+  const handoffDisabled =
+    !projectId || !isHandoffPlatform || publishBlocked || isCopyingHandoff;
+
+  const handleCopyHandoff = async () => {
+    if (!projectId || handoffDisabled) return;
+    setIsCopyingHandoff(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/handoff.md`, {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        let serverMessage: string | undefined;
+        let code: string | undefined;
+        try {
+          const body = await res.json();
+          serverMessage = body?.message;
+          code = body?.code;
+        } catch {
+          // server returned non-JSON; fall through with status text
+        }
+        const description =
+          serverMessage ??
+          (code === "intake_mode_not_adaptive"
+            ? "This project is not in adaptive intake mode."
+            : `Handoff request failed (${res.status}).`);
+        toast({
+          title: "Handoff blocked",
+          description,
+          variant: "destructive",
+        });
+        return;
+      }
+      const markdown = await res.text();
+      await navigator.clipboard.writeText(markdown);
+      setHandoffCopied(true);
+      setTimeout(() => setHandoffCopied(false), 2000);
+      toast({
+        title: "Copied for Claude Code",
+        description: "Paste the handoff into Claude Code, Cursor, or Codex.",
+      });
+    } catch (err) {
+      toast({
+        title: "Copy failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCopyingHandoff(false);
+    }
+  };
+
   const handleRegenerate = async () => {
     if (!stage || !project) return;
 
@@ -370,6 +430,31 @@ export default function DocumentViewPage() {
               {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
               <span>{copied ? "Copied" : "Copy"}</span>
             </ActionButton>
+            {isHandoffPlatform && (
+              <ActionButton
+                onClick={handleCopyHandoff}
+                disabled={handoffDisabled}
+                data-testid="button-copy-handoff"
+                aria-label={
+                  publishBlocked
+                    ? `Handoff blocked — resolve or waive ${unwaivedBlockers.length} lint blocker${unwaivedBlockers.length === 1 ? "" : "s"}`
+                    : isCopyingHandoff
+                      ? "Preparing handoff…"
+                      : "Copy for Claude Code"
+                }
+              >
+                {handoffCopied ? <Check style={{ width: 13, height: 13 }} /> : <Code style={{ width: 13, height: 13 }} />}
+                <span>
+                  {isCopyingHandoff
+                    ? "Copying…"
+                    : handoffCopied
+                      ? "Copied"
+                      : publishBlocked
+                        ? "Handoff blocked"
+                        : "Copy for Claude Code"}
+                </span>
+              </ActionButton>
+            )}
             <ActionButton
               onClick={handleExport}
               disabled={isExporting || publishBlocked}
