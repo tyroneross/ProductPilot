@@ -608,6 +608,25 @@ async function evalAdaptive(): Promise<void> {
         // In real UX the user might challenge an assumption; the eval treats infer as terminal.
         break;
       }
+      if (action.action === "allocate_tradeoffs") {
+        // Phase 4 — terminal allocation step. The eval cannot collect interactive
+        // weight allocation, so we simulate a balanced default that satisfies
+        // sum===100 and pick "security" as the unacceptable axis.
+        console.log(`  [adaptive-eval] ALLOCATE_TRADEOFFS (${action.reason})`);
+        productState = {
+          ...productState,
+          tradeoffWeights: {
+            speed_to_alpha: 30,
+            scalability: 15,
+            ux_polish: 15,
+            maintainability: 20,
+            cost: 10,
+            security: 10,
+            unacceptable_tradeoff: "security",
+          },
+        };
+        break;
+      }
       // ASK → simulate the user answering with the next pre-baked discovery line, or a chip.
       const nextSimulated = simulatedAnswers.shift() ?? action.question.chips[0] ?? "OK";
       questionsAsked++;

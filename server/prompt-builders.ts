@@ -1,4 +1,13 @@
-import type { Message, Project, Spec, Stage } from "@shared/schema";
+import type {
+  Message,
+  Project,
+  ProductState,
+  Spec,
+  Stage,
+  TradeoffAxis,
+  TradeoffWeights,
+} from "@shared/schema";
+import { TRADEOFF_AXES } from "@shared/schema";
 import { briefPrompt, prdPrompt, uxPrompt, functionalPrompt, handoffPrompt } from "@shared/prompts";
 
 type ActiveCustomPrompt = {
@@ -369,6 +378,13 @@ export function buildDocumentGenerationBlocks(args: {
   stage: Stage;
   projectContext: string;
   dynamicContext: string;
+  /**
+   * Phase 4 — Architecture stage augmentation. When stageKind === "functional",
+   * pass the user's tradeoffWeights AND stanceBecauseClauses so the prompt can
+   * cite both. The renderer accepts undefined — Phase 1/2/3 stages call without
+   * it. When weights are present but stage !== "functional", they are ignored.
+   */
+  productState?: ProductState | null;
 }): SystemBlock[] {
   const moduleByKind = {
     brief: briefPrompt,
@@ -395,13 +411,77 @@ export function buildDocumentGenerationBlocks(args: {
 
   // Per-call dynamic context. Sits AFTER the cache marker — varies on each
   // regeneration so we don't want it cached.
+  let dynamicText = args.dynamicContext;
+  if (args.stageKind === "functional" && args.productState) {
+    dynamicText = `${dynamicText}\n\n${renderArchitectureContext(args.productState)}`;
+  }
   const dynamicBlock: SystemBlock = {
     type: "text",
-    text: args.dynamicContext,
+    text: dynamicText,
   };
 
   return [stageInstructionBlock, projectContextBlock, dynamicBlock];
 }
+
+/**
+ * Phase 4 — render the Architecture-stage augmentation block.
+ *
+ * Outputs a single text block the prompt cites when generating ADRs. Two halves:
+ *
+ *   <TRADEOFF_WEIGHTS>          — numeric priority signal
+ *     speed_to_alpha=35
+ *     scalability=15
+ *     ...
+ *     unacceptable_tradeoff=security
+ *
+ *   <STANCE_BECAUSE_CLAUSES>    — qualitative philosophy signal
+ *     [stance:s-1] (privacy_data) "we won't store user audio" because "this is healthcare-adjacent and trust is the moat"
+ *     ...
+ *
+ * The Architecture stage prompt's CITATION FORMAT requires every ADR's cites[]
+ * to reference at least one axis or stance id. The linter rule
+ * `adr_missing_weight_or_stance_citation` (Phase 4) enforces this.
+ *
+ * Exported separately so tests can assert the rendered shape without booting
+ * the full block builder.
+ */
+export function renderArchitectureContext(state: ProductState): string {
+  const lines: string[] = [];
+  lines.push("<TRADEOFF_WEIGHTS>");
+  if (state.tradeoffWeights) {
+    for (const axis of TRADEOFF_AXES) {
+      lines.push(`  ${axis}=${state.tradeoffWeights[axis]}`);
+    }
+    lines.push(`  unacceptable_tradeoff=${state.tradeoffWeights.unacceptable_tradeoff}`);
+  } else {
+    lines.push("  (not allocated)");
+  }
+  lines.push("</TRADEOFF_WEIGHTS>");
+
+  lines.push("");
+  lines.push("<STANCE_BECAUSE_CLAUSES>");
+  const stance = state.stanceBecauseClauses ?? [];
+  if (stance.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const c of stance) {
+      const because = (c.because ?? "").trim() || "(empty)";
+      lines.push(
+        `  [stance:${c.id}] (${c.category}) "${c.stance}" because "${because}"`,
+      );
+    }
+  }
+  lines.push("</STANCE_BECAUSE_CLAUSES>");
+
+  lines.push("");
+  lines.push(
+    "ARCHITECTURE GUIDANCE: every ADR cites[] entry must name a TRADEOFF_WEIGHTS axis (e.g. \"speed_to_alpha\", \"unacceptable_tradeoff:<axis>\") OR a STANCE_BECAUSE_CLAUSES id (e.g. \"stance:s-1\"). Decisions inconsistent with unacceptable_tradeoff must be surfaced as Risks with mitigation.",
+  );
+  return lines.join("\n");
+}
+
+// Type re-exports so callers don't double-import from @shared/schema.
+export type { TradeoffAxis, TradeoffWeights };
 
 export function buildMinimumDetailsDocumentPrompt(args: {
   stage: Stage;

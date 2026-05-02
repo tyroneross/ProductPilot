@@ -54,9 +54,30 @@ export interface SafeDefault {
   challenge_prompt: string;
 }
 
+export const TRADEOFF_AXES = [
+  "speed_to_alpha",
+  "scalability",
+  "ux_polish",
+  "maintainability",
+  "cost",
+  "security",
+] as const;
+export type TradeoffAxis = typeof TRADEOFF_AXES[number];
+
+export interface TradeoffWeights {
+  speed_to_alpha: number;
+  scalability: number;
+  ux_polish: number;
+  maintainability: number;
+  cost: number;
+  security: number;
+  unacceptable_tradeoff: TradeoffAxis;
+}
+
 export type IntakeAction =
   | { action: "ask"; question: IntakeQuestion; method: IntakeMethod; scoring: BlockingScore[] }
   | { action: "infer"; defaults: SafeDefault[]; scoring: BlockingScore[] }
+  | { action: "allocate_tradeoffs"; axes: readonly TradeoffAxis[]; reason: string }
   | { action: "done"; reason: string };
 
 // ---------------------------------------------------------------------------
@@ -71,6 +92,8 @@ export interface AdaptiveIntakeProps {
   onComplete?: (finalAction: { action: "done"; reason: string }) => void;
   /** Called when the user clicks Challenge on an inferred default — caller can route to a custom-answer flow. */
   onChallengeAssumption?: (assumption: SafeDefault) => void;
+  /** Called after a successful tradeoff-weight finalize. Caller routes to Brief view. */
+  onFinalize?: (result: { spec: unknown; renderedMarkdown: string }) => void;
 }
 
 // Default fetcher uses fetch with credentials so the auth cookie flows.
@@ -97,6 +120,7 @@ export function AdaptiveIntake({
   fetcher = defaultFetcher,
   onComplete,
   onChallengeAssumption,
+  onFinalize,
 }: AdaptiveIntakeProps) {
   const [action, setAction] = useState<IntakeAction | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -186,6 +210,30 @@ export function AdaptiveIntake({
           {action.reason}
         </p>
       </div>
+    );
+  }
+
+  if (action.action === "allocate_tradeoffs") {
+    return (
+      <TradeoffAllocator
+        axes={action.axes}
+        reason={action.reason}
+        onSubmit={async (weights) => {
+          setError(null);
+          try {
+            const result = (await fetcher(
+              "POST",
+              `/api/projects/${projectId}/intake/finalize`,
+              { tradeoffWeights: weights },
+            )) as { spec: unknown; renderedMarkdown: string };
+            onFinalize?.(result);
+            // Re-load so the next call returns "done" (weights now persisted).
+            await loadNextStep();
+          } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Could not save tradeoff weights");
+          }
+        }}
+      />
     );
   }
 
@@ -328,6 +376,183 @@ function AssumptionRow({ assumption, onChallenge }: { assumption: SafeDefault; o
   );
 }
 
+/**
+ * TradeoffAllocator — Phase 4 terminal step.
+ *
+ * Six numeric inputs (sliders + numeric mirror) plus one radio for the
+ * unacceptable_tradeoff axis. Submit is muted/inactive until sum===100 (per
+ * CLAUDE.md "action button states" rule). Live total + per-axis totals visible.
+ *
+ * Default starting allocation distributes 100/6 ≈ floor + remainder so the
+ * displayed initial total is exactly 100 and the user is never starting from
+ * an invalid sum.
+ */
+function TradeoffAllocator({
+  axes,
+  reason,
+  onSubmit,
+}: {
+  axes: readonly TradeoffAxis[];
+  reason: string;
+  onSubmit: (weights: TradeoffWeights) => Promise<void> | void;
+}) {
+  // Even split: floor(100/6)=16, remainder distributed onto first axis → sums to 100.
+  const initialAllocation = (() => {
+    const base = Math.floor(100 / axes.length);
+    const remainder = 100 - base * axes.length;
+    const out: Record<string, number> = {};
+    axes.forEach((axis, i) => {
+      out[axis] = base + (i === 0 ? remainder : 0);
+    });
+    return out;
+  })();
+
+  const [values, setValues] = useState<Record<string, number>>(initialAllocation);
+  const [unacceptable, setUnacceptable] = useState<TradeoffAxis>(axes[0]);
+  const [submitting, setSubmitting] = useState(false);
+
+  const total = axes.reduce((sum, a) => sum + (values[a] ?? 0), 0);
+  const valid = total === 100;
+
+  function setAxis(axis: TradeoffAxis, raw: string) {
+    // Keep entries integer in [0, 100]; reject negative and non-numeric.
+    const n = Math.max(0, Math.min(100, Math.floor(Number(raw) || 0)));
+    setValues((prev) => ({ ...prev, [axis]: n }));
+  }
+
+  async function submit() {
+    if (!valid) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        speed_to_alpha: values.speed_to_alpha,
+        scalability: values.scalability,
+        ux_polish: values.ux_polish,
+        maintainability: values.maintainability,
+        cost: values.cost,
+        security: values.security,
+        unacceptable_tradeoff: unacceptable,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const labelByAxis: Record<TradeoffAxis, string> = {
+    speed_to_alpha: "Speed to alpha",
+    scalability: "Scalability",
+    ux_polish: "UX polish",
+    maintainability: "Maintainability",
+    cost: "Cost",
+    security: "Security",
+  };
+
+  return (
+    <div data-testid="adaptive-intake-allocator" style={containerStyle}>
+      <p style={{ color: "#f5f0eb", fontSize: "14px", fontWeight: 500, marginBottom: "6px" }}>
+        Allocate 100 points across the six tradeoffs
+      </p>
+      <p style={{ color: "#a89a8c", fontSize: "12px", marginBottom: "14px" }}>
+        {reason}
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        {axes.map((axis) => (
+          <div
+            key={axis}
+            data-testid={`adaptive-intake-allocator-row-${axis}`}
+            style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          >
+            <label
+              htmlFor={`tradeoff-${axis}`}
+              style={{ flex: "0 0 130px", color: "#f5f0eb", fontSize: "13px" }}
+            >
+              {labelByAxis[axis]}
+            </label>
+            <input
+              type="range"
+              id={`tradeoff-${axis}`}
+              data-testid={`adaptive-intake-allocator-slider-${axis}`}
+              min={0}
+              max={100}
+              step={1}
+              value={values[axis] ?? 0}
+              onChange={(e) => setAxis(axis, e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <input
+              type="number"
+              data-testid={`adaptive-intake-allocator-input-${axis}`}
+              min={0}
+              max={100}
+              step={1}
+              value={values[axis] ?? 0}
+              onChange={(e) => setAxis(axis, e.target.value)}
+              style={{
+                ...numericInputStyle,
+                width: "56px",
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div
+        data-testid="adaptive-intake-allocator-total"
+        style={{
+          marginTop: "14px",
+          padding: "8px 10px",
+          borderRadius: "8px",
+          background: valid ? "rgba(155,208,111,0.08)" : "rgba(240,160,110,0.1)",
+          color: valid ? "#9bd06f" : "#f0a06e",
+          fontSize: "12px",
+          fontWeight: 600,
+        }}
+      >
+        Total: {total} / 100 {valid ? "✓" : "(must equal 100)"}
+      </div>
+
+      <div style={{ marginTop: "16px" }}>
+        <p style={{ color: "#f5f0eb", fontSize: "13px", fontWeight: 500, marginBottom: "8px" }}>
+          Unacceptable tradeoff (the one axis you refuse to compromise)
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {axes.map((axis) => {
+            const selected = unacceptable === axis;
+            return (
+              <button
+                key={axis}
+                type="button"
+                data-testid={`adaptive-intake-allocator-unacceptable-${axis}`}
+                onClick={() => setUnacceptable(axis)}
+                aria-pressed={selected}
+                style={chipStyle(selected)}
+              >
+                {labelByAxis[axis]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+        <button
+          type="button"
+          data-testid="adaptive-intake-allocator-submit"
+          onClick={submit}
+          disabled={!valid || submitting}
+          style={{
+            ...primaryBtnStyle,
+            opacity: !valid || submitting ? 0.4 : 1,
+            cursor: !valid || submitting ? "not-allowed" : "pointer",
+          }}
+        >
+          {submitting ? "Saving…" : "Finalize intake"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProgressBadge({ step, remaining, method }: { step: number; remaining: number; method: IntakeMethod }) {
   const total = step + Math.max(0, remaining - 1);
   return (
@@ -387,6 +612,18 @@ const primaryBtnStyle: React.CSSProperties = {
   border: "none",
   borderRadius: "8px",
   cursor: "pointer",
+};
+
+const numericInputStyle: React.CSSProperties = {
+  height: "28px",
+  padding: "0 8px",
+  background: "#110f0d",
+  border: "1px solid rgba(200,180,160,0.18)",
+  borderRadius: "6px",
+  color: "#f5f0eb",
+  fontFamily: "inherit",
+  fontSize: "12px",
+  textAlign: "right",
 };
 
 const secondaryBtnStyle: React.CSSProperties = {

@@ -1229,6 +1229,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/projects/:projectId/intake/finalize
+  //
+  // Phase 4: terminal step accepts an OPTIONAL tradeoffWeights body — the 100-point
+  // allocation across the six axes plus an unacceptable_tradeoff choice. Validation:
+  //   - When productState already has weights set (sum===100, schema-valid), body
+  //     may omit them. We use the stored weights.
+  //   - When the project does NOT already have weights AND body omits them → 400.
+  //   - When body weights fail Zod (sum!==100, missing axis, bad enum) → 400.
+  //   - Successful body is persisted to productState BEFORE finalize runs, and
+  //     audit_events captures the weights JSON (security gate: weights are
+  //     non-PII metadata; safe to log).
   app.post("/api/projects/:projectId/intake/finalize", async (req: any, res) => {
     try {
       const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
@@ -1236,8 +1246,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { project, actor } = projectAccess;
       if (!requireAdaptiveMode(project, res)) return;
 
-      const { hydrateProductState, finalize } = await import("./services/intake-controller");
-      const productState = hydrateProductState(project.productState);
+      const {
+        hydrateProductState,
+        finalize,
+        applyTradeoffWeights,
+        weightsAreSet,
+      } = await import("./services/intake-controller");
+      let productState = hydrateProductState(project.productState);
+
+      const bodyWeights = req.body?.tradeoffWeights;
+      let weightsApplied = false;
+      if (bodyWeights !== undefined) {
+        try {
+          const result = applyTradeoffWeights({ state: productState, weights: bodyWeights });
+          productState = result.productState;
+          await storage.updateProject(project.id, { productState });
+          weightsApplied = true;
+        } catch (err) {
+          if (err instanceof z.ZodError) {
+            return res
+              .status(400)
+              .json({ message: "Invalid tradeoff weights", errors: err.issues });
+          }
+          throw err;
+        }
+      } else if (!weightsAreSet(productState.tradeoffWeights)) {
+        return res.status(400).json({
+          message:
+            "Tradeoff weights are required to finalize. Provide a tradeoffWeights body summing to 100 across the six axes plus an unacceptable_tradeoff.",
+          code: "tradeoff_weights_required",
+        });
+      }
 
       const { spec, renderedMarkdown } = finalize({
         projectId: project.id,
@@ -1253,10 +1292,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: "intake.finalize",
         resourceType: "project",
         resourceId: project.id,
-        metadata: { specId: spec.id, markdownChars: renderedMarkdown.length },
+        metadata: {
+          specId: spec.id,
+          markdownChars: renderedMarkdown.length,
+          weightsApplied,
+          tradeoffWeights: productState.tradeoffWeights ?? null,
+        },
       }).catch((e) => logger.error({ err: e }, "[audit] intake.finalize failed"));
 
-      res.json({ spec, renderedMarkdown });
+      res.json({ spec, renderedMarkdown, productState });
     } catch (error) {
       logger.error({ err: error }, "[intake/finalize] error");
       res.status(500).json({ message: "Failed to finalize intake" });

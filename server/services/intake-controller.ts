@@ -25,8 +25,12 @@
 import {
   ProductStateSchema,
   SpecSchema,
+  TradeoffWeightsSchema,
+  TRADEOFF_AXES,
   type ProductState,
   type Spec,
+  type TradeoffAxis,
+  type TradeoffWeights,
 } from "@shared/schema";
 import {
   blockingScorerPrompt,
@@ -49,6 +53,7 @@ export type IntakeMethod = "jtbd" | "qfd" | "pugh";
 export type IntakeAction =
   | { action: "ask"; question: IntakeQuestion; method: IntakeMethod; scoring: BlockingScore[] }
   | { action: "infer"; defaults: SafeDefault[]; scoring: BlockingScore[] }
+  | { action: "allocate_tradeoffs"; axes: readonly TradeoffAxis[]; reason: string }
   | { action: "done"; reason: string };
 
 export interface IntakeQuestion {
@@ -424,6 +429,35 @@ function clampInt(n: unknown, min: number, max: number, fallback: number): numbe
 }
 
 /**
+ * Phase 4 — true iff TradeoffWeights are populated AND sum to exactly 100.
+ * Defensive: hydrated state may carry a stale half-filled blob from an earlier
+ * schema, so we re-validate via TradeoffWeightsSchema rather than trusting the type.
+ */
+export function weightsAreSet(weights: TradeoffWeights | undefined | null): boolean {
+  if (!weights) return false;
+  const parsed = TradeoffWeightsSchema.safeParse(weights);
+  return parsed.success;
+}
+
+/**
+ * Phase 4 — apply a validated tradeoff-weight allocation to productState.
+ * Pure: returns a NEW productState; caller persists. Throws ZodError on invalid
+ * input so the route layer can return 400 with field-level detail.
+ */
+export function applyTradeoffWeights(args: {
+  state: ProductState;
+  weights: unknown;
+}): { productState: ProductState } {
+  const validated = TradeoffWeightsSchema.parse(args.weights);
+  const next: ProductState = ProductStateSchema.parse({
+    ...args.state,
+    tradeoffWeights: validated,
+    workingMemory: { ...(args.state.workingMemory ?? {}) },
+  });
+  return { productState: next };
+}
+
+/**
  * Hydrate a project's productState into a fully-typed ProductState (filling defaults).
  * jsonb columns are nullable and Phase 1 may have left them empty.
  */
@@ -486,12 +520,33 @@ export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
   const { productState, spec, history } = input;
   const opts: LLMOptions = { llmConfig: input.llmConfig, context: input.context };
 
+  // Phase 4 — terminal allocation gate. Whenever the controller would otherwise
+  // emit "done" (structural gaps gone OR cap reached), require the user to allocate
+  // the 100-point tradeoff weights first. weightsAreSet() checks both shape and
+  // sum===100 so a stale half-filled blob never lets us skip the step.
+  const weightsSet = weightsAreSet(productState.tradeoffWeights);
+
   if (history.length >= MAX_INTAKE_STEPS) {
+    if (!weightsSet) {
+      return {
+        action: "allocate_tradeoffs",
+        axes: TRADEOFF_AXES,
+        reason: `Reached MAX_INTAKE_STEPS=${MAX_INTAKE_STEPS}; collect tradeoff allocation before finalizing.`,
+      };
+    }
     return { action: "done", reason: `Reached MAX_INTAKE_STEPS=${MAX_INTAKE_STEPS}` };
   }
 
   const candidates = deriveCandidateUnknowns({ productState, spec });
   if (candidates.length === 0) {
+    if (!weightsSet) {
+      return {
+        action: "allocate_tradeoffs",
+        axes: TRADEOFF_AXES,
+        reason:
+          "No structural gaps remain — collect 100-point tradeoff allocation before finalizing.",
+      };
+    }
     return {
       action: "done",
       reason: history.length >= MEDIAN_TARGET

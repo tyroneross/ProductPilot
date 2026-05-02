@@ -38,6 +38,7 @@ import {
   type LintIssue,
   type ProductState,
   type PlatformTarget,
+  TRADEOFF_AXES,
 } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
@@ -400,6 +401,51 @@ function deterministicCheck(input: LintInput): LintIssue[] {
         severity: "block",
         waivable: true,
         message: `ADR ${adr.id} ('${truncate(adr.title, 60)}') is low-reversibility with empty cites[]; cite the Needs/Features it justifies.`,
+        refs: [{ kind: "adr", id: adr.id }],
+      }));
+    }
+  }
+
+  // Phase 4 rule — every ADR (regardless of reversibility) must cite at least
+  // one tradeoff weight axis OR one stance "because" clause id. The Architecture
+  // stage prompt requires this CITATION FORMAT; the linter is the deterministic
+  // gate. Empty cites[] also fails this rule (already flagged above for
+  // low-reversibility, but extends to medium/high reversibility too).
+  //
+  // Citation matchers:
+  //   - axis: any of TRADEOFF_AXES anywhere in the cite string, or
+  //     "unacceptable_tradeoff" or "unacceptable_tradeoff:<axis>"
+  //   - stance: literal "stance:" prefix, OR an exact id present in
+  //     productState.stanceBecauseClauses[*].id
+  const stanceIds = new Set<string>();
+  for (const s of productState?.stanceBecauseClauses ?? []) stanceIds.add(s.id);
+  const axisPattern = new RegExp(
+    `(${[...TRADEOFF_AXES, "unacceptable_tradeoff"].join("|")})`,
+    "i",
+  );
+  for (const adr of spec.adrs) {
+    if (adr.cites.length === 0) {
+      push(makeIssue({
+        rule: "adr_missing_weight_or_stance_citation",
+        severity: "block",
+        waivable: true,
+        message:
+          `ADR ${adr.id} ('${truncate(adr.title, 60)}') has empty cites[] — every ADR must cite at least one tradeoff axis (e.g. "speed_to_alpha") OR a stance "because" id (e.g. "stance:s-1").`,
+        refs: [{ kind: "adr", id: adr.id }],
+      }));
+      continue;
+    }
+    const hasAxis = adr.cites.some((c) => axisPattern.test(c));
+    const hasStance = adr.cites.some(
+      (c) => c.startsWith("stance:") || stanceIds.has(c),
+    );
+    if (!hasAxis && !hasStance) {
+      push(makeIssue({
+        rule: "adr_missing_weight_or_stance_citation",
+        severity: "block",
+        waivable: true,
+        message:
+          `ADR ${adr.id} ('${truncate(adr.title, 60)}') cites[] does not reference any tradeoff axis or stance "because" clause; cite at least one.`,
         refs: [{ kind: "adr", id: adr.id }],
       }));
     }

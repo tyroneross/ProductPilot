@@ -129,7 +129,7 @@ describe("deterministicMethodRoute", () => {
 
   it("returns 'qfd' when features exist and tradeoff weights are populated (Rule 3)", () => {
     const stateWithWeights = ProductStateSchema.parse({
-      tradeoffWeights: { speed_to_alpha: 30, scalability: 20, ux_polish: 10, maintainability: 20, cost: 10, security: 10 },
+      tradeoffWeights: { speed_to_alpha: 30, scalability: 20, ux_polish: 10, maintainability: 20, cost: 10, security: 10, unacceptable_tradeoff: "security" },
     });
     const method = deterministicMethodRoute({
       productState: stateWithWeights,
@@ -204,7 +204,7 @@ describe("nextStep — golden flows", () => {
 
   it("QFD: full spec with weights populated → ASK with method=qfd", async () => {
     const stateWithWeights = ProductStateSchema.parse({
-      tradeoffWeights: { speed_to_alpha: 30, scalability: 20, ux_polish: 10, maintainability: 20, cost: 10, security: 10 },
+      tradeoffWeights: { speed_to_alpha: 30, scalability: 20, ux_polish: 10, maintainability: 20, cost: 10, security: 10, unacceptable_tradeoff: "security" },
     });
     // fullSpec has personas + features — the only candidate the deriver flags is non_goals (it
     // has 1) — wait, fullSpec includes a non-goal. Force a candidate by passing a spec without
@@ -238,13 +238,38 @@ describe("nextStep — golden flows", () => {
     expect(action.question.chips).toHaveLength(4);
   });
 
-  it("DONE: empty candidates list when spec is fully populated and stance is set", async () => {
+  it("ALLOCATE_TRADEOFFS: empty candidates list, stance set, but tradeoffWeights still missing (Phase 4 gate)", async () => {
     const richState = ProductStateSchema.parse({
       stanceBecauseClauses: [
         { id: "s1", category: "privacy_data", stance: "We do not store user audio", because: "trust is the moat" },
         { id: "s2", category: "complexity", stance: "Single-pane UI", because: "users are not power users" },
         { id: "s3", category: "cost", stance: "Free tier first 30 days", because: "low ARPU early" },
       ],
+    });
+    const action = await nextStep({
+      productState: richState,
+      spec: fullSpec(),
+      history: [{ step: 1, method: "jtbd", question: "trigger?", answer: "answered" }],
+    });
+    expect(action.action).toBe("allocate_tradeoffs");
+  });
+
+  it("DONE: empty candidates, stance set, AND tradeoffWeights populated (Phase 4 fully complete)", async () => {
+    const richState = ProductStateSchema.parse({
+      stanceBecauseClauses: [
+        { id: "s1", category: "privacy_data", stance: "We do not store user audio", because: "trust is the moat" },
+        { id: "s2", category: "complexity", stance: "Single-pane UI", because: "users are not power users" },
+        { id: "s3", category: "cost", stance: "Free tier first 30 days", because: "low ARPU early" },
+      ],
+      tradeoffWeights: {
+        speed_to_alpha: 30,
+        scalability: 20,
+        ux_polish: 10,
+        maintainability: 20,
+        cost: 10,
+        security: 10,
+        unacceptable_tradeoff: "security",
+      },
     });
     const action = await nextStep({
       productState: richState,

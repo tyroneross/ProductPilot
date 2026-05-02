@@ -490,14 +490,53 @@ export const PivotLogEntrySchema = z.object({
   affects: z.array(z.string()).default([]), // ids of needs/features the pivot touches
 });
 
-export const TradeoffWeightsSchema = z.object({
-  speed_to_alpha: z.number().min(0).max(100).default(0),
-  scalability: z.number().min(0).max(100).default(0),
-  ux_polish: z.number().min(0).max(100).default(0),
-  maintainability: z.number().min(0).max(100).default(0),
-  cost: z.number().min(0).max(100).default(0),
-  security: z.number().min(0).max(100).default(0),
-});
+// The six tradeoff axes a Phase 4 allocation distributes 100 points across.
+// Exported so UI, route handlers, and linter tests share one canonical list.
+export const TRADEOFF_AXES = [
+  "speed_to_alpha",
+  "scalability",
+  "ux_polish",
+  "maintainability",
+  "cost",
+  "security",
+] as const;
+export type TradeoffAxis = typeof TRADEOFF_AXES[number];
+
+// Phase 4 — 100-point allocation across the six axes plus one "unacceptable
+// tradeoff" choice. The sum===100 invariant is enforced server-side via the
+// .refine block below; UI also enforces it on submit. `unacceptable_tradeoff`
+// is required so the architecture stage can cite both the priority weights AND
+// the axis the user explicitly refuses to compromise on.
+//
+// Backwards-compat note: existing rows persisted in Phase 1 with all-zero
+// weights and no `unacceptable_tradeoff` field continue to validate as long as
+// the row is consumed via the OPTIONAL parent ProductState.tradeoffWeights —
+// when present, the refine fires; when absent (undefined), no refine runs.
+export const TradeoffWeightsSchema = z
+  .object({
+    speed_to_alpha: z.number().int().min(0).max(100),
+    scalability: z.number().int().min(0).max(100),
+    ux_polish: z.number().int().min(0).max(100),
+    maintainability: z.number().int().min(0).max(100),
+    cost: z.number().int().min(0).max(100),
+    security: z.number().int().min(0).max(100),
+    unacceptable_tradeoff: z.enum(TRADEOFF_AXES),
+  })
+  .refine(
+    (w) =>
+      w.speed_to_alpha +
+        w.scalability +
+        w.ux_polish +
+        w.maintainability +
+        w.cost +
+        w.security ===
+      100,
+    {
+      message:
+        "Tradeoff weights must sum to exactly 100 across the six axes.",
+      path: ["__sum"],
+    },
+  );
 
 // ProductState — per-project working memory used by the intake controller and
 // every doc-generation prompt. Stored on projects.product_state (jsonb).

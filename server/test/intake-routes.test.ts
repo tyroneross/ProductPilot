@@ -269,7 +269,22 @@ describe("POST /api/projects/:projectId/intake/finalize", () => {
       updatedAt: new Date(),
     };
 
-    const res = await post("/api/projects/p4/intake/finalize", {}, { "x-test-user": "ownerA" });
+    // Phase 4: finalize now requires tradeoffWeights — supply a valid allocation.
+    const res = await post(
+      "/api/projects/p4/intake/finalize",
+      {
+        tradeoffWeights: {
+          speed_to_alpha: 30,
+          scalability: 20,
+          ux_polish: 10,
+          maintainability: 20,
+          cost: 10,
+          security: 10,
+          unacceptable_tradeoff: "security",
+        },
+      },
+      { "x-test-user": "ownerA" },
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.spec).toBeDefined();
