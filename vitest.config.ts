@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
+import react from "@vitejs/plugin-react";
 
 /**
  * Vitest scaffold landed in Phase 1 of the adaptive-intake plan.
@@ -17,9 +18,18 @@ import path from "path";
  * to wire that env var into local dev.
  */
 export default defineConfig({
+  // @vitejs/plugin-react handles the JSX transform for *.test.tsx component tests.
+  // tsconfig has `jsx: preserve` (Vite's responsibility); without this plugin Vitest's
+  // esbuild leaves JSX raw and tests fail with "React is not defined".
+  plugins: [react()],
   test: {
-    include: ["server/test/**/*.test.ts"],
+    include: ["server/test/**/*.test.ts", "server/test/**/*.test.tsx"],
+    // Default to node — most server tests don't need a DOM.
+    // *.test.tsx files (Phase 2 component tests) flip to jsdom via environmentMatchGlobs.
     environment: "node",
+    environmentMatchGlobs: [
+      ["server/test/**/*.test.tsx", "jsdom"],
+    ],
     globals: false,
     testTimeout: 15000,
   },

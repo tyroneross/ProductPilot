@@ -1079,6 +1079,190 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Adaptive intake (Phase 2) ─────────────────────────────────────────
+  // Three endpoints:
+  //   POST /api/projects/:projectId/intake/next      — next question or "infer"/"done"
+  //   POST /api/projects/:projectId/intake/answer    — persist a user answer
+  //   POST /api/projects/:projectId/intake/finalize  — render Stage 1 Brief from productState
+  //
+  // Gating:
+  //   - All three require an authenticated user OR a guest session (loadOwnedProject).
+  //   - All three require project.intakeMode === "adaptive" — else respond 409 (conflict).
+  //   - All three write to audit_events.
+  //
+  // Security:
+  //   - Project ownership enforced via loadOwnedProject (RLS already in effect via
+  //     runWithDbActorContext middleware at the top of this file).
+  //   - intake-controller.ts strips secret-shaped strings before any provider call.
+
+  function requireAdaptiveMode(project: Project, res: any): boolean {
+    if (project.intakeMode !== "adaptive") {
+      res.status(409).json({
+        message: `Adaptive intake is not enabled for this project (intake_mode='${project.intakeMode}')`,
+        code: "intake_mode_not_adaptive",
+      });
+      return false;
+    }
+    return true;
+  }
+
+  // POST /api/projects/:projectId/intake/next
+  app.post("/api/projects/:projectId/intake/next", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const { hydrateProductState, hydrateSpec, nextStep } = await import("./services/intake-controller");
+
+      const productState = hydrateProductState(project.productState);
+      const spec = hydrateSpec(null, `spec-${project.id}`, project.name, project.description);
+      // Phase 2 reads intake_answers from DB (intake_questions table). Phase 3 will
+      // join in the latest spec_artifacts payload. For now, derive history from intake_questions.
+      const intakeQs = await storage.getIntakeQuestionsByProject(project.id);
+      const history = intakeQs.map((row) => ({
+        step: row.step,
+        method: row.method,
+        question: row.questionText,
+        answer: row.answerText,
+        metadata: row.metadata,
+      }));
+
+      const llmConfig = await getLLMConfig(req);
+      const action = await nextStep({
+        productState,
+        spec,
+        history,
+        llmConfig,
+        context: {
+          userId: actor.kind === "user" ? actor.id : null,
+          guestOwnerId: actor.kind === "guest" ? actor.id : null,
+          projectId: project.id,
+        },
+      });
+
+      // Audit row — every "next" call is a side-effecting LLM call.
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "intake.next",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { action: action.action, historyLength: history.length },
+      }).catch((e) => logger.error({ err: e }, "[audit] intake.next failed"));
+
+      res.json(action);
+    } catch (error) {
+      logger.error({ err: error }, "[intake/next] error");
+      res.status(500).json({ message: "Failed to compute next intake step" });
+    }
+  });
+
+  // POST /api/projects/:projectId/intake/answer
+  app.post("/api/projects/:projectId/intake/answer", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const body = z.object({
+        questionText: z.string().min(1).max(2000),
+        answer: z.string().min(1).max(8000),
+        method: z.enum(["jtbd", "qfd", "pugh"]).nullable().optional(),
+        questionId: z.string().nullable().optional(),
+        metadata: z.record(z.string(), z.any()).optional(),
+      }).parse(req.body);
+
+      const existing = await storage.getIntakeQuestionsByProject(project.id);
+      const step = existing.length + 1;
+
+      // Persist the question + answer atomically — one row per turn.
+      const row = await storage.createIntakeQuestion({
+        projectId: project.id,
+        step,
+        method: body.method ?? null,
+        questionText: body.questionText,
+        answerText: body.answer,
+        metadata: body.metadata ?? null,
+        answeredAt: new Date(),
+      });
+
+      // Update productState in the project row.
+      const { hydrateProductState, ingestAnswer } = await import("./services/intake-controller");
+      const currentState = hydrateProductState(project.productState);
+      const { productState } = ingestAnswer({
+        state: currentState,
+        answer: {
+          projectId: project.id,
+          step,
+          questionText: body.questionText,
+          answer: body.answer,
+          method: body.method ?? null,
+          metadata: body.metadata,
+        },
+      });
+
+      const updated = await storage.updateProject(project.id, { productState });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "intake.answer",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { step, method: body.method ?? null, intakeQuestionId: row.id },
+      }).catch((e) => logger.error({ err: e }, "[audit] intake.answer failed"));
+
+      res.json({
+        productState: updated?.productState ?? productState,
+        intakeQuestion: row,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid intake answer", errors: error.issues });
+      }
+      logger.error({ err: error }, "[intake/answer] error");
+      res.status(500).json({ message: "Failed to ingest intake answer" });
+    }
+  });
+
+  // POST /api/projects/:projectId/intake/finalize
+  app.post("/api/projects/:projectId/intake/finalize", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const { hydrateProductState, finalize } = await import("./services/intake-controller");
+      const productState = hydrateProductState(project.productState);
+
+      const { spec, renderedMarkdown } = finalize({
+        projectId: project.id,
+        productName: project.name,
+        productDescription: project.description,
+        productState,
+        existingSpec: null,
+      });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "intake.finalize",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { specId: spec.id, markdownChars: renderedMarkdown.length },
+      }).catch((e) => logger.error({ err: e }, "[audit] intake.finalize failed"));
+
+      res.json({ spec, renderedMarkdown });
+    } catch (error) {
+      logger.error({ err: error }, "[intake/finalize] error");
+      res.status(500).json({ message: "Failed to finalize intake" });
+    }
+  });
+
   // Export functionality
   app.get("/api/projects/:projectId/export", async (req: any, res) => {
     try {

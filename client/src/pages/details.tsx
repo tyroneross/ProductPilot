@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import Nav from "@/components/nav";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import AdaptiveIntake from "@/components/adaptive-intake";
+import type { Project } from "@shared/schema";
 
 const STYLES = [
   { id: "minimal", name: "Minimal", gradient: "linear-gradient(145deg, #f8f8f6 0%, #e8e6e2 100%)" },
@@ -43,6 +46,20 @@ type ClarifyQuestion = { id: string; question: string; chips: string[] };
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  // Phase 2 — adaptive-intake mount.
+  // When the URL has ?projectId=...&adaptive=1, the user has already created a project
+  // and we route them through AdaptiveIntake instead of the new-project entry form.
+  // The component is gated on project.intakeMode === "adaptive" — older projects with
+  // 'survey'/'minimum' modes never see it.
+  const queryParamsForAdaptive =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const adaptiveProjectId = queryParamsForAdaptive?.get("projectId") ?? null;
+  const adaptiveFlag = queryParamsForAdaptive?.get("adaptive") === "1";
+  const { data: adaptiveProject } = useQuery<Project | null>({
+    queryKey: ["/api/projects", adaptiveProjectId],
+    enabled: Boolean(adaptiveFlag && adaptiveProjectId),
+  });
 
   const [productIdea, setProductIdea] = useState("");
   const [selectedStyle, setSelectedStyle] = useState<StyleId>("minimal");
@@ -254,6 +271,37 @@ export default function DetailsPage() {
       setIsGenerating(false);
     }
   };
+
+  // Adaptive-intake early branch — render only when the URL says so AND the project's
+  // intake_mode is adaptive. If the project is not yet loaded, fall through to the
+  // normal new-project entry; the user can re-arrive on this page once it loads.
+  if (adaptiveFlag && adaptiveProjectId && adaptiveProject?.intakeMode === "adaptive") {
+    return (
+      <div className="min-h-screen" style={{ background: "#110f0d", paddingBottom: "100px" }}>
+        <Nav />
+        <div className="mx-auto px-6" style={{ maxWidth: "672px" }}>
+          <div style={{ paddingTop: "48px", paddingBottom: "16px" }}>
+            <h2 className="font-bold text-[#f5f0eb] mb-2" style={{ fontSize: "22px", letterSpacing: "-0.02em" }}>
+              {adaptiveProject.name}
+            </h2>
+            <p className="text-[#a89a8c]" style={{ fontSize: "13px", lineHeight: "1.5" }}>
+              Asking the highest-leverage questions to fill in the brief.
+            </p>
+          </div>
+          <AdaptiveIntake
+            projectId={adaptiveProjectId}
+            onComplete={() => setLocation(`/documents/${adaptiveProjectId}`)}
+            onChallengeAssumption={(a) => {
+              toast({
+                title: "Challenged assumption",
+                description: `${a.topic} — let's revisit this when we render the brief.`,
+              });
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen" style={{ background: "#110f0d", paddingBottom: "100px" }}>

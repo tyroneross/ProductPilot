@@ -379,7 +379,311 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[eval] Fatal error:", err);
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// --measure-cache mode (Phase 1 entry-criterion discharge)
+// ---------------------------------------------------------------------------
+//
+// Phase 1 measured cacheability structurally (~87% of the system prompt is
+// cacheable). This mode runs the actual Anthropic call twice against the same
+// stable prefix and reports input-token / cache-read / cache-write counts.
+//
+// Plan §"Phase 1 Checks": "Re-run stage generation shows ≥40% reduced input
+// tokens (cache hit)." A reduction <40% on the second-pass call indicates the
+// cache marker is placed wrong (e.g. before tenant-scoped context, or stale).
+//
+// Output: server/test/baselines/2026-05-02-cache.csv
+// Failure mode: throws if reduction <40% so CI / local runs surface the issue.
+//
+// Skips when ANTHROPIC_API_KEY is absent (Groq does not implement Anthropic-
+// shaped prompt caching). The script writes a sentinel CSV row so the report
+// can cite the deferral.
+// ---------------------------------------------------------------------------
+async function measureCache(): Promise<void> {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const cachePath = join(__dirname, "baselines/2026-05-02-cache.csv");
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn(
+      "[cache] ANTHROPIC_API_KEY not set — cannot measure Anthropic prompt cache. " +
+      "Skipping with sentinel CSV row.",
+    );
+    const sentinel = [
+      "# Phase 1 cache-hit live measurement — 2026-05-02",
+      "# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.",
+      "fixture_id,pass,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reduction_pct",
+      "n/a,n/a,0,0,0,0,deferred",
+    ].join("\n") + "\n";
+    writeFileSync(cachePath, sentinel, "utf-8");
+    console.log(`[cache] Sentinel written to: ${cachePath}`);
+    return;
+  }
+
+  // Lazy import — avoids loading prompt-builders at top-level for the default eval path.
+  const { buildDocumentGenerationBlocks, buildProjectContext } = await import(
+    "../prompt-builders.js"
+  );
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  // Single fixture — we are measuring the cache shape, not generating documents.
+  const fixture = SAMPLE_PRODUCTS[0];
+  console.log(`[cache] Using fixture: ${fixture.id} (${fixture.label})`);
+
+  // Build a stable Spec prompt — Brief stage. The block layout is what's under test:
+  //   [0] stage instruction (stable per stage)
+  //   [1] project context with cache_control marker
+  //   [2] dynamic block (no cache)
+  // Two passes with the same arguments → second pass should hit the cache prefix
+  // and show cache_read_tokens > 0 and a corresponding drop in input_tokens.
+  const projectStub = makeProjectStub(fixture, {});
+  const projectContext = buildProjectContext(projectStub);
+  const stage = makeStageStub(DEFAULT_STAGES[0]);
+  const blocks = buildDocumentGenerationBlocks({
+    stageKind: "brief",
+    stage,
+    projectContext,
+    dynamicContext: `Survey responses: ${JSON.stringify(fixture.simulatedSurveyResponses)}`,
+  });
+
+  const userMessages = [{ role: "user" as const, content: "Emit the Spec JSON for the Stage 1 Brief." }];
+
+  const passes: Array<{
+    pass: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+  }> = [];
+
+  for (let i = 0; i < 2; i++) {
+    const label = i === 0 ? "first" : "second";
+    console.log(`[cache] Pass ${label}...`);
+    // Call Anthropic SDK directly — we need in-process access to usage including
+    // cache_read_input_tokens / cache_creation_input_tokens. The helper records
+    // these to llm_calls but does not return them.
+    const probe = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      temperature: 0.3,
+      system: blocks,
+      messages: [{ role: "user", content: userMessages[0].content }],
+    });
+    passes.push({
+      pass: label,
+      input_tokens: probe.usage.input_tokens,
+      output_tokens: probe.usage.output_tokens,
+      cache_read_tokens: (probe.usage as any).cache_read_input_tokens ?? 0,
+      cache_write_tokens: (probe.usage as any).cache_creation_input_tokens ?? 0,
+    });
+    console.log(
+      `[cache] Pass ${label}: input=${probe.usage.input_tokens} ` +
+      `output=${probe.usage.output_tokens} ` +
+      `cache_read=${(probe.usage as any).cache_read_input_tokens ?? 0} ` +
+      `cache_write=${(probe.usage as any).cache_creation_input_tokens ?? 0}`,
+    );
+  }
+
+  // Reduction = (1 - secondNonCachedInput / firstNonCachedInput) but Anthropic
+  // accounts for cached input as cache_read_input_tokens, NOT as input_tokens.
+  // So: first call's "fresh input" = input_tokens (no cache hit yet, cache_write).
+  //     second call's "fresh input" = input_tokens (cache_read sits separately).
+  // Reduction in *billable fresh input* = (first.input - second.input) / first.input.
+  const first = passes[0];
+  const second = passes[1];
+  const reductionPct =
+    first.input_tokens > 0
+      ? ((first.input_tokens - second.input_tokens) / first.input_tokens) * 100
+      : 0;
+  const cacheHit = second.cache_read_tokens > 0;
+
+  const csvLines = [
+    "# Phase 1 cache-hit live measurement — 2026-05-02",
+    "# Two consecutive Anthropic calls with the same system blocks; second should hit cache.",
+    "# reduction_pct = (first.input_tokens - second.input_tokens) / first.input_tokens × 100",
+    "fixture_id,pass,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reduction_pct",
+    `${fixture.id},${first.pass},${first.input_tokens},${first.output_tokens},${first.cache_read_tokens},${first.cache_write_tokens},`,
+    `${fixture.id},${second.pass},${second.input_tokens},${second.output_tokens},${second.cache_read_tokens},${second.cache_write_tokens},${reductionPct.toFixed(2)}`,
+  ];
+  const csv = csvLines.join("\n") + "\n";
+  writeFileSync(cachePath, csv, "utf-8");
+  console.log(`\n[cache] Cache CSV written to: ${cachePath}`);
+  console.log(`[cache] Reduction in billed input tokens: ${reductionPct.toFixed(2)}%`);
+  console.log(`[cache] Second-pass cache_read_tokens: ${second.cache_read_tokens}`);
+
+  if (!cacheHit) {
+    console.error(
+      "[cache] ❌ Second pass produced no cache_read_tokens. Cache placement may be wrong.",
+    );
+    process.exit(2);
+  }
+  if (reductionPct < 40) {
+    console.error(
+      `[cache] ❌ Reduction ${reductionPct.toFixed(2)}% < 40% target. ` +
+      "Phase 1 cache placement needs rework before Phase 2 ships.",
+    );
+    process.exit(3);
+  }
+  console.log("[cache] ✅ Cache reduction crosses 40% target.");
+}
+
+// ---------------------------------------------------------------------------
+// --mode=adaptive (Phase 2 entry-criterion discharge)
+// ---------------------------------------------------------------------------
+//
+// Routes each fixture through the IntakeController instead of Path A. Records
+// per-fixture questions_asked, infer_count, and time-to-finalize. Writes the
+// comparison CSV to server/test/baselines/2026-05-02-adaptive.csv.
+//
+// Pass criterion (plan §Phase 2): median questions_asked across 5 fixtures ≤ 7.
+//
+// Skips the LLM path when ANTHROPIC_API_KEY is absent (Groq does not match the
+// shapes of our adaptive sub-prompts well; routing to Groq would degrade signal).
+// In skip mode we still write a sentinel row so the report can cite the deferral.
+// ---------------------------------------------------------------------------
+async function evalAdaptive(): Promise<void> {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const adaptivePath = join(__dirname, "baselines/2026-05-02-adaptive.csv");
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn(
+      "[adaptive-eval] ANTHROPIC_API_KEY not set — IntakeController sub-prompts run on Haiku-tier; " +
+      "skipping live run with sentinel CSV row.",
+    );
+    const sentinel = [
+      "# Phase 2 adaptive intake eval — 2026-05-02",
+      "# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.",
+      "# When run live the script routes each fixture through IntakeController.nextStep+ingestAnswer until done.",
+      "fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result",
+      ...SAMPLE_PRODUCTS.map((p) => `${p.id},${p.archetype},0,0,0,0.000000,deferred`),
+    ].join("\n") + "\n";
+    writeFileSync(adaptivePath, sentinel, "utf-8");
+    console.log(`[adaptive-eval] Sentinel written to: ${adaptivePath}`);
+    return;
+  }
+
+  // Lazy imports — keep top-level eval path lean.
+  const {
+    nextStep,
+    ingestAnswer,
+    finalize,
+    hydrateProductState,
+    hydrateSpec,
+  } = await import("../services/intake-controller.js");
+
+  console.log("[adaptive-eval] Starting Phase 2 adaptive intake eval...");
+  const rows: Array<{
+    fixture_id: string;
+    archetype: string;
+    questions_asked: number;
+    infer_count: number;
+    time_to_finalize_ms: number;
+    total_cost_usd: string;
+    result: string;
+  }> = [];
+
+  for (const fixture of SAMPLE_PRODUCTS) {
+    console.log(`\n[adaptive-eval] Fixture: ${fixture.id} (${fixture.label})`);
+    const startedAt = Date.now();
+    const projectId = `eval-${fixture.id}`;
+
+    let productState = hydrateProductState(null);
+    const spec = hydrateSpec(null, `spec-${projectId}`, fixture.label, fixture.initialIdea);
+    let history: Array<{ step: number; method?: string | null; question: string; answer: string | null }> = [];
+    let questionsAsked = 0;
+    let inferCount = 0;
+    let result = "ok";
+    const simulatedAnswers = [...fixture.simulatedDiscoveryAnswers];
+
+    // Walk up to 9 nextStep iterations (matches MAX_INTAKE_STEPS in the controller).
+    for (let i = 0; i < 9; i++) {
+      const action = await nextStep({ productState, spec, history });
+      if (action.action === "done") {
+        console.log(`  [adaptive-eval] DONE after ${questionsAsked} questions (${action.reason})`);
+        break;
+      }
+      if (action.action === "infer") {
+        inferCount += action.defaults.length;
+        console.log(`  [adaptive-eval] INFER: ${action.defaults.length} defaults`);
+        // After an infer step, the controller has nothing left to ask.
+        // In real UX the user might challenge an assumption; the eval treats infer as terminal.
+        break;
+      }
+      // ASK → simulate the user answering with the next pre-baked discovery line, or a chip.
+      const nextSimulated = simulatedAnswers.shift() ?? action.question.chips[0] ?? "OK";
+      questionsAsked++;
+      console.log(`  [adaptive-eval] ASK ${questionsAsked} (${action.method}): ${action.question.text.slice(0, 60)}...`);
+      console.log(`    [adaptive-eval] simulated answer: ${nextSimulated.slice(0, 50)}...`);
+      const ingest = ingestAnswer({
+        state: productState,
+        answer: {
+          projectId,
+          step: questionsAsked,
+          questionText: action.question.text,
+          answer: nextSimulated,
+          method: action.method,
+        },
+      });
+      productState = ingest.productState;
+      history = [...history, { step: questionsAsked, method: action.method, question: action.question.text, answer: nextSimulated }];
+    }
+
+    // Finalize → render brief.
+    try {
+      const final = finalize({ projectId, productName: fixture.label, productDescription: fixture.initialIdea, productState });
+      if (!final.spec || !final.renderedMarkdown) result = "fail-finalize";
+    } catch {
+      result = "fail-finalize";
+    }
+
+    const elapsed = Date.now() - startedAt;
+    rows.push({
+      fixture_id: fixture.id,
+      archetype: fixture.archetype,
+      questions_asked: questionsAsked,
+      infer_count: inferCount,
+      time_to_finalize_ms: elapsed,
+      total_cost_usd: "0.000000", // cost recorded server-side via llm_calls; not summed here
+      result,
+    });
+    console.log(`  [adaptive-eval] Done: ${fixture.id} — ${questionsAsked} questions, ${inferCount} inferred, ${elapsed}ms`);
+  }
+
+  const csv = [
+    "# Phase 2 adaptive intake eval — 2026-05-02",
+    "# Median questions_asked across 5 fixtures must be ≤ 7 for Phase 2 to ship.",
+    "fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result",
+    ...rows.map((r) =>
+      [r.fixture_id, r.archetype, r.questions_asked, r.infer_count, r.time_to_finalize_ms, r.total_cost_usd, r.result].join(","),
+    ),
+  ].join("\n") + "\n";
+  writeFileSync(adaptivePath, csv, "utf-8");
+  console.log(`\n[adaptive-eval] CSV written to: ${adaptivePath}`);
+
+  // Median + pass/fail summary.
+  const sorted = [...rows.map((r) => r.questions_asked)].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  console.log(`[adaptive-eval] Median questions_asked = ${median} (target ≤ 7)`);
+  if (median > 7) {
+    console.error("[adaptive-eval] ❌ Median exceeds 7 — Phase 2 needs another iteration before ship.");
+    process.exit(4);
+  }
+  console.log("[adaptive-eval] ✅ Median crosses ≤ 7 target.");
+}
+
+const argv = process.argv.slice(2);
+if (argv.includes("--measure-cache")) {
+  measureCache().catch((err) => {
+    console.error("[cache] Fatal error:", err);
+    process.exit(1);
+  });
+} else if (argv.includes("--mode=adaptive")) {
+  evalAdaptive().catch((err) => {
+    console.error("[adaptive-eval] Fatal error:", err);
+    process.exit(1);
+  });
+} else {
+  main().catch((err) => {
+    console.error("[eval] Fatal error:", err);
+    process.exit(1);
+  });
+}

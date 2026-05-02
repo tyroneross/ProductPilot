@@ -1,0 +1,9 @@
+# Phase 2 adaptive intake eval — 2026-05-02
+# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.
+# When run live the script routes each fixture through IntakeController.nextStep+ingestAnswer until done.
+fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result
+pp-01,clear-b2b-saas,0,0,0,0.000000,deferred
+pp-02,fuzzy-consumer,0,0,0,0.000000,deferred
+pp-03,internal-workflow,0,0,0,0.000000,deferred
+pp-04,ai-automation,0,0,0,0.000000,deferred
+pp-05,data-heavy-dashboard,0,0,0,0.000000,deferred

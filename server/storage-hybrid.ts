@@ -1,8 +1,12 @@
-import type { Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage, InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent, AuditEvent, LlmCall } from "@shared/schema";
+import type {
+  Project, Stage, Message, InsertProject, InsertProjectWithOwner, InsertStage,
+  InsertMessage, AdminPrompt, InsertAdminPrompt, InsertLlmCall, InsertAuditEvent,
+  AuditEvent, LlmCall, IntakeQuestion, InsertIntakeQuestion,
+} from "@shared/schema";
 import { AsyncLocalStorage } from "async_hooks";
 import { logger } from "./lib/logger";
 import { decryptSecret, encryptSecret } from "./lib/secret-crypto";
-import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, DEFAULT_STAGES } from "@shared/schema";
+import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, intakeQuestions, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
 import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
 import { db } from "./db";
@@ -53,6 +57,11 @@ interface IStorage {
   createAuditEvent(event: InsertAuditEvent): Promise<void>;
   listAuditEvents(filters: AuditEventListFilters): Promise<{ rows: AuditEvent[]; total: number }>;
   getAuditEvent(id: string): Promise<AuditEvent | undefined>;
+
+  // Intake questions (Phase 2 — adaptive intake)
+  createIntakeQuestion(row: InsertIntakeQuestion): Promise<IntakeQuestion>;
+  updateIntakeQuestionAnswer(id: string, answerText: string): Promise<IntakeQuestion | undefined>;
+  getIntakeQuestionsByProject(projectId: string): Promise<IntakeQuestion[]>;
 }
 
 // Filter shape for admin observability pages. All fields optional.
@@ -482,6 +491,39 @@ class MemStorage implements IStorage {
   async getAuditEvent(id: string): Promise<AuditEvent | undefined> {
     return this.auditEventLog.find((row) => row.id === id);
   }
+
+  // Intake questions — MemStorage implementation (dev fallback, in-memory)
+  private intakeQuestionLog: IntakeQuestion[] = [];
+
+  async createIntakeQuestion(row: InsertIntakeQuestion): Promise<IntakeQuestion> {
+    const stamp: IntakeQuestion = {
+      id: this.generateId(),
+      projectId: row.projectId,
+      step: row.step,
+      method: row.method ?? null,
+      questionText: row.questionText,
+      answerText: row.answerText ?? null,
+      metadata: row.metadata ?? null,
+      createdAt: new Date(),
+      answeredAt: row.answeredAt ?? null,
+    };
+    this.intakeQuestionLog.push(stamp);
+    return stamp;
+  }
+
+  async updateIntakeQuestionAnswer(id: string, answerText: string): Promise<IntakeQuestion | undefined> {
+    const row = this.intakeQuestionLog.find((r) => r.id === id);
+    if (!row) return undefined;
+    row.answerText = answerText;
+    row.answeredAt = new Date();
+    return row;
+  }
+
+  async getIntakeQuestionsByProject(projectId: string): Promise<IntakeQuestion[]> {
+    return this.intakeQuestionLog
+      .filter((row) => row.projectId === projectId)
+      .sort((a, b) => a.step - b.step);
+  }
 }
 
 // PostgreSQL storage using Drizzle
@@ -876,6 +918,33 @@ class PostgresStorage implements IStorage {
     const result = await this.db.execute(sql`SELECT * FROM audit_events WHERE id = ${id} LIMIT 1`);
     const row = (result.rows as any[])[0];
     return row ? mapAuditEventRow(row) : undefined;
+  }
+
+  // Intake questions — Phase 2. RLS on intake_questions inherits from projects via
+  // the policy in migration 0003; withActor() sets the GUCs that policy reads.
+  async createIntakeQuestion(row: InsertIntakeQuestion): Promise<IntakeQuestion> {
+    const [inserted] = await this.withActor((tx: typeof this.db) =>
+      tx.insert(intakeQuestions).values(row).returning(),
+    );
+    return inserted as IntakeQuestion;
+  }
+
+  async updateIntakeQuestionAnswer(id: string, answerText: string): Promise<IntakeQuestion | undefined> {
+    const [updated] = await this.withActor((tx: typeof this.db) =>
+      tx.update(intakeQuestions)
+        .set({ answerText, answeredAt: new Date() })
+        .where(eq(intakeQuestions.id, id))
+        .returning(),
+    );
+    return updated as IntakeQuestion | undefined;
+  }
+
+  async getIntakeQuestionsByProject(projectId: string): Promise<IntakeQuestion[]> {
+    return await this.withActor((tx: typeof this.db) =>
+      tx.select().from(intakeQuestions)
+        .where(eq(intakeQuestions.projectId, projectId))
+        .orderBy(asc(intakeQuestions.step)),
+    );
   }
 }
 

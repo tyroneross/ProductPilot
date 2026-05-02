@@ -1,0 +1,4 @@
+# Phase 1 cache-hit live measurement — 2026-05-02
+# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.
+fixture_id,pass,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reduction_pct
+n/a,n/a,0,0,0,0,deferred
