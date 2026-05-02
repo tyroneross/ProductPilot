@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import Nav from "@/components/nav";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -82,6 +82,41 @@ export default function DocumentViewPage() {
   });
 
   const documentContent = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
+
+  // ── Spec linter (Phase 3) ────────────────────────────────────────────
+  // Only runs for adaptive-mode projects; otherwise we skip to keep noise
+  // out of legacy survey/minimum projects which the linter doesn't validate.
+  type LintIssue = {
+    id: string;
+    rule: string;
+    severity: "block" | "warn" | "info";
+    waivable: boolean;
+    message: string;
+    refs: Array<{ kind: string; id: string }>;
+  };
+  type LintResult = {
+    issues: LintIssue[];
+    blockerCount: number;
+    nonWaivableCount: number;
+    llmRan: boolean;
+  };
+
+  const lintEnabled = !!projectId && project?.intakeMode === "adaptive";
+  const { data: lintResult } = useQuery<LintResult>({
+    queryKey: ["/api/projects", projectId, "spec/lint"],
+    queryFn: async () => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/spec/lint`, {});
+      return res.json();
+    },
+    enabled: lintEnabled,
+  });
+
+  const projectWaivers = ((project?.productState as { workingMemory?: { waivers?: Record<string, unknown> } } | null | undefined)?.workingMemory?.waivers) ?? {};
+  const isWaived = (issueId: string) => Object.prototype.hasOwnProperty.call(projectWaivers, issueId);
+  const unwaivedBlockers = (lintResult?.issues ?? []).filter(
+    (i) => i.severity === "block" && !isWaived(i.id),
+  );
+  const publishBlocked = unwaivedBlockers.length > 0;
 
   // Build ordered list of docs with their stage data
   const orderedDocs = DOC_TYPES.map((dt) => ({
@@ -337,12 +372,12 @@ export default function DocumentViewPage() {
             </ActionButton>
             <ActionButton
               onClick={handleExport}
-              disabled={isExporting}
+              disabled={isExporting || publishBlocked}
               data-testid="button-export-all"
-              aria-label="Export all documents"
+              aria-label={publishBlocked ? `Export blocked — resolve or waive ${unwaivedBlockers.length} lint blocker${unwaivedBlockers.length === 1 ? "" : "s"}` : "Export all documents"}
             >
               <Download style={{ width: 13, height: 13 }} />
-              <span>{isExporting ? "Exporting…" : "Export All"}</span>
+              <span>{isExporting ? "Exporting…" : publishBlocked ? "Export blocked" : "Export All"}</span>
             </ActionButton>
             <ActionButton
               onClick={() => setShowRegenerateDialog(true)}
@@ -440,6 +475,80 @@ export default function DocumentViewPage() {
           padding: "32px 24px 80px",
         }}
       >
+        {/* Spec linter panel — adaptive-mode only. Surfaces unwaived blockers, warnings, info */}
+        {lintEnabled && lintResult && lintResult.issues.length > 0 && (
+          <div
+            data-testid="lint-panel"
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: `1px solid ${publishBlocked ? "rgba(220,90,80,0.35)" : "rgba(200,180,160,0.12)"}`,
+              padding: "16px 20px",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: publishBlocked ? "#dc5a50" : "#f5f0eb",
+                marginBottom: 8,
+              }}
+            >
+              {publishBlocked ? (
+                <ShieldAlert style={{ width: 14, height: 14 }} />
+              ) : (
+                <Info style={{ width: 14, height: 14 }} />
+              )}
+              <span>
+                {publishBlocked
+                  ? `Publish blocked: ${unwaivedBlockers.length} ${unwaivedBlockers.length === 1 ? "issue" : "issues"} require attention or waiver`
+                  : `Spec lint: ${lintResult.issues.length} ${lintResult.issues.length === 1 ? "note" : "notes"}`}
+              </span>
+            </div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+              {lintResult.issues.map((issue) => {
+                const waived = isWaived(issue.id);
+                const sevColor =
+                  issue.severity === "block" ? "#dc5a50" :
+                  issue.severity === "warn" ? "#f0b65e" : "#a89a8c";
+                const Icon =
+                  issue.severity === "block" ? ShieldAlert :
+                  issue.severity === "warn" ? AlertTriangle : Info;
+                return (
+                  <li
+                    key={issue.id}
+                    data-testid={`lint-issue-${issue.rule}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      color: "#c8b4a0",
+                      opacity: waived ? 0.5 : 1,
+                    }}
+                  >
+                    <Icon style={{ width: 12, height: 12, color: sevColor, flexShrink: 0, marginTop: 3 }} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ color: sevColor, fontWeight: 500, marginRight: 6 }}>
+                        [{issue.severity}{!issue.waivable ? " · non-waivable" : ""}]
+                      </span>
+                      <span>{issue.message}</span>
+                      {waived && (
+                        <span style={{ color: "#6b5d52", marginLeft: 6, fontStyle: "italic" }}>· waived</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
         {isRegenerating ? (
           <div
             style={{

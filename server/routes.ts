@@ -1263,6 +1263,159 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Spec linter (Phase 3) ─────────────────────────────────────────────
+  // Two endpoints:
+  //   POST /api/projects/:projectId/spec/lint    — run deterministic + Haiku-tier checks
+  //   POST /api/projects/:projectId/spec/waive   — record a written waiver for a blocker
+  //
+  // Gating mirrors the intake routes: ownership via loadOwnedProject + adaptive-mode gate.
+  // Audit row written on every request. PII handling-note rule is non-waivable (server-side).
+
+  // POST /api/projects/:projectId/spec/lint
+  app.post("/api/projects/:projectId/spec/lint", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const { hydrateProductState, hydrateSpec, finalize } = await import("./services/intake-controller");
+      const { lintSpec } = await import("./services/spec-linter");
+
+      // Optional inline override — caller may post a Spec to lint a draft that
+      // is not yet persisted. When omitted, we hydrate from productState the
+      // same way intake/finalize does.
+      const productState = hydrateProductState(project.productState);
+      let spec;
+      const inlineSpec = req.body?.spec;
+      if (inlineSpec && typeof inlineSpec === "object") {
+        spec = hydrateSpec(inlineSpec, `spec-${project.id}`, project.name, project.description);
+      } else {
+        const built = finalize({
+          projectId: project.id,
+          productName: project.name,
+          productDescription: project.description,
+          productState,
+          existingSpec: null,
+        });
+        spec = built.spec;
+      }
+
+      const llmConfig = await getLLMConfig(req);
+      const result = await lintSpec({
+        spec,
+        productState,
+        llmConfig,
+        context: {
+          userId: actor.kind === "user" ? actor.id : null,
+          guestOwnerId: actor.kind === "guest" ? actor.id : null,
+          projectId: project.id,
+        },
+      });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "spec.lint",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: {
+          issueCount: result.issues.length,
+          blockerCount: result.blockerCount,
+          nonWaivableCount: result.nonWaivableCount,
+          llmRan: result.llmRan,
+        },
+      }).catch((e) => logger.error({ err: e }, "[audit] spec.lint failed"));
+
+      res.json(result);
+    } catch (error) {
+      logger.error({ err: error }, "[spec/lint] error");
+      res.status(500).json({ message: "Failed to lint spec" });
+    }
+  });
+
+  // POST /api/projects/:projectId/spec/waive
+  // Body: { issueId: string, rule: string, reason: string, refs?: Array<{kind, id}> }
+  app.post("/api/projects/:projectId/spec/waive", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const body = z.object({
+        issueId: z.string().min(1).max(200),
+        rule: z.string().min(1).max(200),
+        reason: z.string().min(1).max(2000),
+        refs: z.array(z.object({
+          kind: z.string().max(40),
+          id: z.string().max(200),
+        })).optional(),
+      }).parse(req.body);
+
+      // Server-side enforcement of the non-waivable PII rule. The UI should
+      // never attempt this, but a manual API call must be rejected anyway.
+      if (body.rule === "pii_handling_note_missing") {
+        return res.status(409).json({
+          message: "This rule is non-waivable: PII handling notes are required by policy.",
+          code: "rule_non_waivable",
+          rule: body.rule,
+        });
+      }
+
+      const { sanitizeWaiverReason } = await import("./services/spec-linter");
+      const cleanReason = sanitizeWaiverReason(body.reason);
+      if (cleanReason.length === 0) {
+        return res.status(400).json({ message: "Waiver reason is empty after sanitization." });
+      }
+
+      // Persist to productState.workingMemory.waivers — keyed by issueId. The
+      // working-memory bag already round-trips through ProductStateSchema, so no
+      // schema change required.
+      const { hydrateProductState } = await import("./services/intake-controller");
+      const currentState = hydrateProductState(project.productState);
+      const waivers = (currentState.workingMemory.waivers as Record<string, unknown> | undefined) ?? {};
+      waivers[body.issueId] = {
+        issueId: body.issueId,
+        rule: body.rule,
+        reason: cleanReason,
+        refs: body.refs ?? [],
+        actorId: actor.id,
+        actorKind: actor.kind,
+        waivedAt: new Date().toISOString(),
+      };
+      const nextState = {
+        ...currentState,
+        workingMemory: { ...currentState.workingMemory, waivers },
+      };
+      await storage.updateProject(project.id, { productState: nextState });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "spec.waive",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: {
+          issueId: body.issueId,
+          rule: body.rule,
+          reasonChars: cleanReason.length,
+        },
+      }).catch((e) => logger.error({ err: e }, "[audit] spec.waive failed"));
+
+      res.json({
+        ok: true,
+        waiver: waivers[body.issueId],
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid waiver payload", errors: error.issues });
+      }
+      logger.error({ err: error }, "[spec/waive] error");
+      res.status(500).json({ message: "Failed to record waiver" });
+    }
+  });
+
   // Export functionality
   app.get("/api/projects/:projectId/export", async (req: any, res) => {
     try {

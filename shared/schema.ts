@@ -432,6 +432,15 @@ export const TestSchema = z.object({
   needIds: z.array(IdSchema).default([]),
   featureIds: z.array(IdSchema).default([]),
   kind: z.enum(["acceptance", "smoke", "unit", "manual"]).default("acceptance"),
+  // Free-form framework name. Phase 3 linter pattern-matches per platformTarget:
+  //   web|vite-spa  → /vitest|jest|playwright/i
+  //   ios|macos     → /xctest|swift testing/i
+  //   claude-plugin → /plugin-builder|manifest-validator|skill-validator|hook-validator|command-validator/i
+  // Empty string → linter blocker (waivable).
+  testFramework: z.string().default(""),
+  // Optional validator references — used primarily by claude-plugin platform target where each
+  // command/skill/hook artifact must point at a validator (manifest-validator, skill-validator, etc.).
+  validatorRefs: z.array(z.string()).default([]),
 });
 
 export const ADRSchema = z.object({
@@ -517,12 +526,31 @@ export const NonGoalSchema = z.object({
   because: z.string().default(""),
 });
 
+// PlatformTarget — declared per-spec so the Phase 3 linter can apply
+// platform-appropriate test-framework rules. Default 'web' for backward
+// compatibility with specs authored before the field landed.
+//   web           → server-rendered or full-stack web (Vitest/Jest/Playwright).
+//   vite-spa      → static-served single-page app (Vitest preferred, Playwright OK).
+//   ios           → Apple iOS native (XCTest or Swift Testing).
+//   macos         → Apple macOS native (XCTest or Swift Testing).
+//   claude-plugin → Claude Code plugin (plugin-builder validators reference manifest/skill/hook/command schemas).
+export const PlatformTargetSchema = z.enum([
+  "web",
+  "vite-spa",
+  "ios",
+  "macos",
+  "claude-plugin",
+]);
+
 // Spec — the source-of-truth structured document. Doc generation emits this
 // first, the renderer produces stage-specific Markdown second.
 export const SpecSchema = z.object({
   id: IdSchema,
   productName: z.string(),
   productDescription: z.string(),
+  // Phase 3 (cross-platform) — drives platform-specific lint rules. Defaults
+  // to 'web' so specs created before the field existed continue to validate.
+  platformTarget: PlatformTargetSchema.default("web"),
   personas: z.array(PersonaSchema).default([]),
   scenarios: z.array(ScenarioSchema).default([]),
   needs: z.array(NeedSchema).default([]),
@@ -590,6 +618,7 @@ export type PivotLogEntry = z.infer<typeof PivotLogEntrySchema>;
 export type TradeoffWeights = z.infer<typeof TradeoffWeightsSchema>;
 export type ProductState = z.infer<typeof ProductStateSchema>;
 export type NonGoal = z.infer<typeof NonGoalSchema>;
+export type PlatformTarget = z.infer<typeof PlatformTargetSchema>;
 export type Spec = z.infer<typeof SpecSchema>;
 export type LintIssue = z.infer<typeof LintIssueSchema>;
 export type TraceMatrix = z.infer<typeof TraceMatrixSchema>;

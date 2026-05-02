@@ -23,4 +23,8 @@ export { default as jtbdMethodPrompt } from "./methods/jtbd";
 export { default as qfdMethodPrompt } from "./methods/qfd";
 export { default as pughMethodPrompt } from "./methods/pugh";
 
+// Phase 3 — spec linter LLM-tier prompt (deterministic checks live in
+// server/services/spec-linter.ts; this prompt covers the two fuzzy categories).
+export { default as specReviewPrompt } from "./lint/spec-review";
+
 export type { PromptModule } from "./types";
