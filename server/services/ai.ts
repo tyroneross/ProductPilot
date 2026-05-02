@@ -19,7 +19,7 @@ const GROQ_MODELS = {
 
 // Prices per 1M tokens in USD. Update this table when providers change pricing.
 // Last verified: 2026-04-22
-const MODEL_COST_RATES: Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }> = {
+export const MODEL_COST_RATES: Record<string, { input: number; output: number; cacheRead?: number; cacheWrite?: number }> = {
   // Anthropic
   "claude-opus-4-7":            { input: 5.00,  output: 25.00, cacheRead: 0.50,  cacheWrite: 6.25  },
   "claude-sonnet-4-5":          { input: 3.00,  output: 15.00, cacheRead: 0.30,  cacheWrite: 3.75  },
@@ -51,6 +51,68 @@ function computeCostUsd(
 export interface AIMessage {
   role: "system" | "user" | "assistant";
   content: string;
+}
+
+/**
+ * Anthropic-compatible system block. Caller (server/prompt-builders.ts) places
+ * a cache_control marker on the LAST stable block (project context, after
+ * tenant scoping). Anything after the marker is per-call dynamic content and
+ * is not cached.
+ */
+export interface SystemBlock {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
+}
+
+/**
+ * Pure helper for the structured-output retry path. Extracted so unit tests
+ * can exercise the loop without spinning up a real Anthropic client.
+ *
+ * Behavior:
+ *   1. Invoke caller(blocks). If the response parses, return it.
+ *   2. On parse failure: append a stricter schema-reminder block and retry
+ *      ONCE. If that also fails, throw — never silently return {}.
+ *
+ * The reminder block's text matches what generateStructuredOutputWithBlocks
+ * uses. Keeping it in one place so changing the wording updates both paths.
+ */
+export const STRUCTURED_RETRY_REMINDER: SystemBlock = {
+  type: "text",
+  text: "Your previous response was not valid JSON. Reply with ONLY a valid JSON object matching the SpecSchema. No markdown fences. No commentary. The first character of your response MUST be `{`.",
+};
+
+export async function runStructuredWithRetry(
+  blocks: SystemBlock[],
+  caller: (b: SystemBlock[]) => Promise<{ content: string }>,
+  parser: (text: string) => any,
+): Promise<{ json: any; raw: string; retried: boolean }> {
+  const first = await caller(blocks);
+  try {
+    return { json: parser(first.content), raw: first.content, retried: false };
+  } catch {
+    const second = await caller([...blocks, STRUCTURED_RETRY_REMINDER]);
+    // Throw on second-pass failure rather than masking with empty object.
+    return { json: parser(second.content), raw: second.content, retried: true };
+  }
+}
+
+/**
+ * Module-level JSON extractor — exposed so the retry helper and unit tests
+ * can call the same parsing logic the AIService uses internally.
+ */
+export function extractJSONFromText(text: string): any {
+  try { return JSON.parse(text); } catch {}
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch) {
+    try { return JSON.parse(fenceMatch[1]); } catch {}
+  }
+  const braceStart = text.indexOf("{");
+  const braceEnd = text.lastIndexOf("}");
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    try { return JSON.parse(text.slice(braceStart, braceEnd + 1)); } catch {}
+  }
+  throw new Error("Could not extract JSON from response");
 }
 
 export interface AIResponse {
@@ -536,6 +598,107 @@ export class AIService {
         streamed: false,
         byok: Boolean(apiKey && apiKey !== process.env.ANTHROPIC_API_KEY),
         context,
+      });
+    }
+  }
+
+  /**
+   * Phase 1 — structured output via Anthropic with explicit system blocks.
+   *
+   * The caller passes a SystemBlock[] that places `cache_control: ephemeral`
+   * on whichever block ends the cacheable prefix. The retry path: on invalid
+   * JSON we re-issue the call with a stricter schema reminder appended to
+   * the dynamic block, and fall back to extractJSON's loose parsing if the
+   * second pass also fails. Only one retry — repeated failures should surface
+   * to the caller, not silently mask bad output.
+   *
+   * Returns the parsed JSON value (any) on success or throws on terminal failure.
+   */
+  async generateStructuredOutputWithBlocks(args: {
+    systemBlocks: SystemBlock[];
+    userMessages: AIMessage[];
+    model?: string;
+    apiKey?: string;
+    task?: LLMTask;
+    context?: LLMCallContext;
+    maxTokens?: number;
+  }): Promise<{ json: any; raw: string; retried: boolean }> {
+    const startedAt = Date.now();
+    const model = this.normalizeModel(args.model || "claude-sonnet-4-5");
+    const key = args.apiKey || process.env.ANTHROPIC_API_KEY;
+    if (!key) throw new Error("No Anthropic API key configured");
+
+    const anthropic = new Anthropic({ apiKey: key });
+    const conversationMessages = args.userMessages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+    const callOnce = async (blocks: SystemBlock[]) => {
+      const resp = await anthropic.messages.create({
+        model,
+        max_tokens: args.maxTokens ?? 4096,
+        temperature: 0.3,
+        system: blocks,
+        messages: conversationMessages,
+      });
+      const firstBlock = resp.content?.[0];
+      const content = firstBlock && firstBlock.type === "text" ? firstBlock.text : "{}";
+      return { resp, content };
+    };
+
+    let retried = false;
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalCacheRead = 0;
+    let totalCacheWrite = 0;
+    let errorCode: string | null = null;
+
+    try {
+      let { resp, content } = await callOnce(args.systemBlocks);
+      totalInput += resp.usage.input_tokens;
+      totalOutput += resp.usage.output_tokens;
+      // Anthropic returns cache token counts on usage when caching is active.
+      // The TS SDK exposes them as `cache_creation_input_tokens` / `cache_read_input_tokens`.
+      totalCacheRead += (resp.usage as any).cache_read_input_tokens ?? 0;
+      totalCacheWrite += (resp.usage as any).cache_creation_input_tokens ?? 0;
+
+      try {
+        return { json: this.extractJSON(content), raw: content, retried };
+      } catch {
+        // Retry once with a sharper schema reminder appended to the dynamic block.
+        retried = true;
+        const remindered: SystemBlock[] = [
+          ...args.systemBlocks,
+          {
+            type: "text",
+            text: "Your previous response was not valid JSON. Reply with ONLY a valid JSON object matching the SpecSchema. No markdown fences. No commentary. The first character of your response MUST be `{`.",
+          },
+        ];
+        const second = await callOnce(remindered);
+        totalInput += second.resp.usage.input_tokens;
+        totalOutput += second.resp.usage.output_tokens;
+        totalCacheRead += (second.resp.usage as any).cache_read_input_tokens ?? 0;
+        totalCacheWrite += (second.resp.usage as any).cache_creation_input_tokens ?? 0;
+        return { json: this.extractJSON(second.content), raw: second.content, retried };
+      }
+    } catch (err) {
+      errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
+      throw err;
+    } finally {
+      void this.recordLlmCall({
+        provider: "anthropic",
+        model,
+        task: args.task ?? "complex",
+        inputTokens: totalInput,
+        outputTokens: totalOutput,
+        cacheReadTokens: totalCacheRead || null,
+        cacheWriteTokens: totalCacheWrite || null,
+        latencyMs: Date.now() - startedAt,
+        status: errorCode ? "error" : "ok",
+        errorCode,
+        streamed: false,
+        byok: Boolean(args.apiKey && args.apiKey !== process.env.ANTHROPIC_API_KEY),
+        context: args.context,
       });
     }
   }

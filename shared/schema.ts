@@ -73,12 +73,59 @@ export const projects = pgTable("projects", {
   intakeAnswers: jsonb("intake_answers"), // Answers from 8-question intake flow
   minimumDetails: jsonb("minimum_details"), // Problem statement, goals, objects, actions, v1 definition
   appStyle: jsonb("app_style"), // Selected UI/UX style for the product
+  // Adaptive intake (Phase 1, migration 0003).
+  // productState — per-project working memory (tradeoff weights, pivot log, stance "because" clauses, ...).
+  // traceMatrix — Need → Feature → Test/ADR backreferences populated by Phase 3 linter.
+  // intakeMode — gate for adaptive vs legacy survey/minimum flows. New rows default to 'adaptive'.
+  productState: jsonb("product_state"),
+  traceMatrix: jsonb("trace_matrix"),
+  intakeMode: text("intake_mode").notNull().default("adaptive"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   index("projects_user_id_idx").on(table.userId),
   index("projects_guest_owner_id_idx").on(table.guestOwnerId),
 ]);
+
+// Per-question intake log. One row per question asked by IntakeController (Phase 2).
+// `metadata` carries method (JTBD/QFD/Pugh), confidence, and any inferred-vs-asked flag.
+// Admin telemetry views must redact answer_text the same way `messages` already are.
+export const intakeQuestions = pgTable("intake_questions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  step: integer("step").notNull(),
+  method: text("method"), // 'jtbd' | 'qfd' | 'pugh' | null for free-form
+  questionText: text("question_text").notNull(),
+  answerText: text("answer_text"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  answeredAt: timestamp("answered_at"),
+}, (table) => [
+  index("intake_questions_project_id_step_idx").on(table.projectId, table.step),
+]);
+
+// Stage-rendered Spec object + its Markdown view. `kind` matches doc stages
+// ('brief' | 'prd' | 'ux' | 'functional' | 'handoff'). Linter (Phase 3) reads payload;
+// UI reads renderedMarkdown for compatibility with today's read path.
+export const specArtifacts = pgTable("spec_artifacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  stageId: varchar("stage_id").references(() => stages.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  version: integer("version").notNull().default(1),
+  payload: jsonb("payload").notNull(),
+  renderedMarkdown: text("rendered_markdown"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("spec_artifacts_project_id_kind_idx").on(table.projectId, table.kind),
+  index("spec_artifacts_project_id_version_idx").on(table.projectId, table.version),
+]);
+
+export type IntakeQuestion = typeof intakeQuestions.$inferSelect;
+export type InsertIntakeQuestion = typeof intakeQuestions.$inferInsert;
+export type SpecArtifact = typeof specArtifacts.$inferSelect;
+export type InsertSpecArtifact = typeof specArtifacts.$inferInsert;
 
 export const stages = pgTable("stages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -280,3 +327,269 @@ export const DEFAULT_STAGES = DEFAULT_STAGE_TEMPLATES;
 // Interceptor prompts - behavior modifiers that override or enhance AI responses
 // These are separate from stage prompts as they modify runtime behavior
 export const INTERCEPTOR_PROMPTS = DEFAULT_INTERCEPTOR_PROMPTS;
+
+// ───────────────────────────────────────────────────────────────────────
+// Adaptive intake / structured spec — Zod schemas (Phase 1)
+//
+// These are the typed shapes that flow through intake, doc generation,
+// the spec linter (Phase 3), and the coding-agent handoff export (Phase 5).
+// They live alongside DB types so client + server share one source of truth.
+//
+// Conventions:
+//   - Every entity carries a stable string `id`. Cross-references (e.g. Test.needIds)
+//     use these ids so the trace matrix is computable without LLM help.
+//   - PII handling is non-waivable (Phase 3 enforces): DataPoint.pii=true with no
+//     handlingNote → linter blocker.
+//   - "because" clauses on stance entries and non-goals are required by the
+//     PRD-Builder methodology and become Phase 3 linter rules.
+// ───────────────────────────────────────────────────────────────────────
+
+const IdSchema = z.string().min(1);
+const Priority = z.enum(["P0", "P1", "P2", "P3"]).optional();
+const Severity = z.enum(["block", "warn", "info"]);
+const Reversibility = z.enum(["high", "medium", "low"]);
+
+export const NeedSchema = z.object({
+  id: IdSchema,
+  title: z.string(),
+  description: z.string().optional(),
+  priority: Priority,
+  source: z.string().optional(), // intake question id or "inferred"
+});
+
+export const FeatureSchema = z.object({
+  id: IdSchema,
+  title: z.string(),
+  description: z.string().optional(),
+  priority: Priority,
+  needIds: z.array(IdSchema).default([]),
+  acceptanceCriteria: z.array(z.string()).default([]),
+});
+
+export const PersonaSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  trigger: z.string().optional(),
+  exclusions: z.array(z.string()).default([]), // "Who they are NOT"
+  jobs: z.array(z.string()).default([]),
+});
+
+export const ScenarioSchema = z.object({
+  id: IdSchema,
+  personaId: IdSchema.optional(),
+  context: z.string(),
+  goal: z.string(),
+  successSignal: z.string().optional(),
+});
+
+export const ScreenSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  purpose: z.string(),
+  primaryAction: z.string().optional(),
+  states: z.array(z.string()).default([]),
+});
+
+export const UXFlowSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  steps: z.array(z.string()).default([]),
+  screenIds: z.array(IdSchema).default([]),
+});
+
+export const DataPointSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  type: z.string(), // free-form: "string", "uuid", "decimal(12,2)", etc.
+  description: z.string().optional(),
+  pii: z.boolean().default(false),
+  // Required when pii=true. Linter (Phase 3) treats missing handlingNote as a
+  // non-waivable block. Schema does NOT enforce here; we want the linter to
+  // be the surface that explains the policy.
+  handlingNote: z.string().optional(),
+});
+
+export const IntegrationSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  purpose: z.string(),
+  authMode: z.string().optional(),
+});
+
+export const APIContractSchema = z.object({
+  id: IdSchema,
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+  path: z.string(),
+  description: z.string().optional(),
+  requestSchema: z.string().optional(),
+  responseSchema: z.string().optional(),
+  featureIds: z.array(IdSchema).default([]),
+});
+
+export const TestSchema = z.object({
+  id: IdSchema,
+  description: z.string(),
+  needIds: z.array(IdSchema).default([]),
+  featureIds: z.array(IdSchema).default([]),
+  kind: z.enum(["acceptance", "smoke", "unit", "manual"]).default("acceptance"),
+});
+
+export const ADRSchema = z.object({
+  id: IdSchema,
+  title: z.string(),
+  context: z.string(),
+  decision: z.string(),
+  consequences: z.string().optional(),
+  reversibility: Reversibility,
+  // Cites tradeoff weights and stance "because" clauses (Phase 4).
+  cites: z.array(z.string()).default([]),
+});
+
+export const AssumptionSchema = z.object({
+  id: IdSchema,
+  text: z.string(),
+  confidence: z.enum(["high", "medium", "low"]).default("medium"),
+});
+
+export const RiskSchema = z.object({
+  id: IdSchema,
+  text: z.string(),
+  likelihood: z.enum(["high", "medium", "low"]).default("medium"),
+  impact: z.enum(["high", "medium", "low"]).default("medium"),
+  mitigation: z.string().optional(),
+});
+
+// Stance "because" clause from PRD-Builder Q3.
+// Captures the qualitative judgment that complements numeric tradeoffWeights.
+// Both feed Phase 4 architecture prompt; weights drive priority, "because" drives philosophy.
+export const StanceBecauseClauseSchema = z.object({
+  id: IdSchema,
+  category: z.enum(["privacy_data", "complexity", "cost", "category"]),
+  stance: z.string(), // "we will not store any user audio on our servers"
+  because: z.string(), // "because this is healthcare-adjacent and trust is the moat"
+});
+
+// pivotLog — strategic-decision history that survives messages.version regenerations.
+// Phase 2 writes here when the user answers a Q3-style question that contradicts
+// an earlier answer; Phase 3 linter flags inconsistencies between latest stance
+// and earlier features.
+export const PivotLogEntrySchema = z.object({
+  id: IdSchema,
+  at: z.string(), // ISO date
+  summary: z.string(),
+  reason: z.string().optional(),
+  affects: z.array(z.string()).default([]), // ids of needs/features the pivot touches
+});
+
+export const TradeoffWeightsSchema = z.object({
+  speed_to_alpha: z.number().min(0).max(100).default(0),
+  scalability: z.number().min(0).max(100).default(0),
+  ux_polish: z.number().min(0).max(100).default(0),
+  maintainability: z.number().min(0).max(100).default(0),
+  cost: z.number().min(0).max(100).default(0),
+  security: z.number().min(0).max(100).default(0),
+});
+
+// ProductState — per-project working memory used by the intake controller and
+// every doc-generation prompt. Stored on projects.product_state (jsonb).
+//
+// Phase 1 lays out the shape but only persists fields the renderer needs;
+// Phase 2 fills in tradeoffWeights, methodLog, etc.
+export const ProductStateSchema = z.object({
+  version: z.number().int().default(1),
+  // PRD-Builder additions (cross-cutting requirements section of the plan).
+  stanceBecauseClauses: z.array(StanceBecauseClauseSchema).default([]),
+  pivotLog: z.array(PivotLogEntrySchema).default([]),
+  // Tradeoff weights — Phase 4 collects these explicitly. NULL on existing rows
+  // is fine; default is all-zero which is a safe "uncalibrated" state.
+  tradeoffWeights: TradeoffWeightsSchema.optional(),
+  // Free-form working memory the controller writes during intake. Phase 2 owns
+  // the schema. Marked passthrough so Phase 1 can hydrate from existing
+  // intakeAnswers/minimumDetails without losing keys we don't yet model.
+  workingMemory: z.record(z.string(), z.any()).default({}),
+});
+
+export const NonGoalSchema = z.object({
+  id: IdSchema,
+  text: z.string(),
+  // Required by PRD-Builder: every non-goal carries a "because" clause.
+  // Phase 3 linter blocks empty `because` (waivable with reason).
+  because: z.string().default(""),
+});
+
+// Spec — the source-of-truth structured document. Doc generation emits this
+// first, the renderer produces stage-specific Markdown second.
+export const SpecSchema = z.object({
+  id: IdSchema,
+  productName: z.string(),
+  productDescription: z.string(),
+  personas: z.array(PersonaSchema).default([]),
+  scenarios: z.array(ScenarioSchema).default([]),
+  needs: z.array(NeedSchema).default([]),
+  features: z.array(FeatureSchema).default([]),
+  uxFlows: z.array(UXFlowSchema).default([]),
+  screens: z.array(ScreenSchema).default([]),
+  dataPoints: z.array(DataPointSchema).default([]),
+  integrations: z.array(IntegrationSchema).default([]),
+  apiContracts: z.array(APIContractSchema).default([]),
+  tests: z.array(TestSchema).default([]),
+  adrs: z.array(ADRSchema).default([]),
+  assumptions: z.array(AssumptionSchema).default([]),
+  risks: z.array(RiskSchema).default([]),
+  nonGoals: z.array(NonGoalSchema).default([]),
+});
+
+// LintIssue — Phase 3 emits a list of these from spec-linter.ts. Severity ladder:
+// `block` halts export, `warn` is a soft nudge, `info` is observational.
+export const LintIssueSchema = z.object({
+  id: IdSchema,
+  rule: z.string(),
+  severity: Severity,
+  // Non-waivable blockers (PII without handlingNote) set this to false.
+  waivable: z.boolean().default(true),
+  message: z.string(),
+  // Pointers back into the Spec graph.
+  refs: z.array(z.object({
+    kind: z.enum([
+      "need", "feature", "persona", "scenario", "uxflow", "screen",
+      "datapoint", "integration", "api", "test", "adr", "assumption",
+      "risk", "non_goal", "stance",
+    ]),
+    id: IdSchema,
+  })).default([]),
+});
+
+// TraceMatrix — derived index. Phase 3 computes & writes to projects.trace_matrix.
+// Stored materialized so the linter and handoff export don't recompute on every read.
+export const TraceMatrixSchema = z.object({
+  // need_id → feature_ids
+  needToFeatures: z.record(z.string(), z.array(IdSchema)).default({}),
+  // need_id → test_ids
+  needToTests: z.record(z.string(), z.array(IdSchema)).default({}),
+  // feature_id → api_ids
+  featureToApis: z.record(z.string(), z.array(IdSchema)).default({}),
+  // adr_id → need_ids/feature_ids it justifies
+  adrToTargets: z.record(z.string(), z.array(IdSchema)).default({}),
+});
+
+export type Need = z.infer<typeof NeedSchema>;
+export type Feature = z.infer<typeof FeatureSchema>;
+export type Persona = z.infer<typeof PersonaSchema>;
+export type Scenario = z.infer<typeof ScenarioSchema>;
+export type Screen = z.infer<typeof ScreenSchema>;
+export type UXFlow = z.infer<typeof UXFlowSchema>;
+export type DataPoint = z.infer<typeof DataPointSchema>;
+export type Integration = z.infer<typeof IntegrationSchema>;
+export type APIContract = z.infer<typeof APIContractSchema>;
+export type Test = z.infer<typeof TestSchema>;
+export type ADR = z.infer<typeof ADRSchema>;
+export type Assumption = z.infer<typeof AssumptionSchema>;
+export type Risk = z.infer<typeof RiskSchema>;
+export type StanceBecauseClause = z.infer<typeof StanceBecauseClauseSchema>;
+export type PivotLogEntry = z.infer<typeof PivotLogEntrySchema>;
+export type TradeoffWeights = z.infer<typeof TradeoffWeightsSchema>;
+export type ProductState = z.infer<typeof ProductStateSchema>;
+export type NonGoal = z.infer<typeof NonGoalSchema>;
+export type Spec = z.infer<typeof SpecSchema>;
+export type LintIssue = z.infer<typeof LintIssueSchema>;
+export type TraceMatrix = z.infer<typeof TraceMatrixSchema>;

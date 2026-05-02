@@ -1,0 +1,9 @@
+# Phase 0 eval baseline — 2026-05-02
+# traceability_gaps_manual: manual review field — Phase 3 fills this in
+# lint_issues_simulated: Phase 3 linter output — placeholder 0 for now
+idea_id,archetype,questions_asked,time_to_brief_ms,total_cost_usd,doc_word_count,traceability_gaps_manual,lint_issues_simulated
+pp-01,clear-b2b-saas,11,23671,0.007807,4276,0,0
+pp-02,fuzzy-consumer,10,24576,0.008072,4758,0,0
+pp-03,internal-workflow,11,22969,0.007635,4555,0,0
+pp-04,ai-automation,10,24435,0.007869,4465,0,0
+pp-05,data-heavy-dashboard,11,19091,0.006485,3326,0,0

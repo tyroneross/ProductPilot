@@ -124,6 +124,10 @@ class MemStorage implements IStorage {
       intakeAnswers: insertProject.intakeAnswers || null,
       minimumDetails: insertProject.minimumDetails || null,
       appStyle: insertProject.appStyle || null,
+      // Phase 1 (migration 0003): adaptive intake state.
+      productState: null,
+      traceMatrix: null,
+      intakeMode: "adaptive",
       createdAt: new Date(),
       updatedAt: new Date(),
     };

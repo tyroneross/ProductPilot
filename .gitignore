@@ -20,3 +20,6 @@ meta.json
 AGENTS.md
 .build-loop/
 .build-loop/
+
+# Eval harness — non-baseline runs
+server/test/eval-runs/

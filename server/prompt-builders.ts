@@ -1,4 +1,5 @@
-import type { Message, Project, Stage } from "@shared/schema";
+import type { Message, Project, Spec, Stage } from "@shared/schema";
+import { briefPrompt, prdPrompt, uxPrompt, functionalPrompt, handoffPrompt } from "@shared/prompts";
 
 type ActiveCustomPrompt = {
   id: string;
@@ -6,6 +7,23 @@ type ActiveCustomPrompt = {
   prompt: string;
   category: string;
   isActive: boolean;
+};
+
+/**
+ * Anthropic system-prompt blocks. The Anthropic SDK accepts `system` as either
+ * a string OR an array of `{type: "text", text, cache_control?}` blocks. We use
+ * the array form so we can place a `cache_control: {type: "ephemeral"}` marker
+ * AFTER the stable, tenant-scoped project context. Anything BEFORE the marker
+ * is part of the cached prefix; anything AFTER is fresh on each call.
+ *
+ * Plan §"Security considerations": breakpoints must sit after buildProjectContext
+ * (already tenant-scoped via RLS) — never before. This type makes that placement
+ * explicit at the call site instead of buried inside the SDK call.
+ */
+export type SystemBlock = {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
 };
 
 const STAGE_SECTION_GUIDANCE: Record<number, string[]> = {
@@ -317,6 +335,72 @@ ${requiredSections.map((section) => `- ${section}`).join("\n")}
 Acceptance criteria:
 - The document should read like it belongs to this specific product.
 - A builder should be able to use it immediately without needing a second translation pass.`;
+}
+
+/**
+ * Phase 1 — block-based variant of buildDocumentGenerationPrompt.
+ *
+ * Returns a SystemBlock[] arranged so the Anthropic prompt cache can hit on
+ * the stable prefix:
+ *
+ *   [0] stage instructions (per-stage prompt module text — STABLE per stage)
+ *   [1] project context — tenant-scoped — cache_control: ephemeral marker HERE
+ *   [2] survey + custom-prompt context (varies per generation; never cached)
+ *
+ * The marker is placed at the END of the project-context block, which means
+ * blocks 0 and 1 get cached together. Survey/custom prompts (which can vary on
+ * regeneration with different inputs) are kept out of the cache prefix so a
+ * change there doesn't bust the cache for the stable prefix.
+ *
+ * Acceptable per Anthropic's docs: cache_control on a content block marks the
+ * cache breakpoint at the *end* of that block. Subsequent blocks are not cached.
+ *
+ * Inputs:
+ *   - stageKind: which prompt module to use as the stage instruction block.
+ *   - projectContext: output of buildProjectContext(). Already tenant-scoped.
+ *   - dynamicContext: per-call data the Spec generator needs (survey responses,
+ *     custom prompts). Lives AFTER the cache marker.
+ *
+ * The caller (server/routes.ts) passes these blocks to aiService.generateStructuredOutput
+ * (extended in this phase to accept `system` as either a string OR a SystemBlock[]).
+ */
+export function buildDocumentGenerationBlocks(args: {
+  stageKind: "brief" | "prd" | "ux" | "functional" | "handoff";
+  stage: Stage;
+  projectContext: string;
+  dynamicContext: string;
+}): SystemBlock[] {
+  const moduleByKind = {
+    brief: briefPrompt,
+    prd: prdPrompt,
+    ux: uxPrompt,
+    functional: functionalPrompt,
+    handoff: handoffPrompt,
+  } as const;
+  const module = moduleByKind[args.stageKind];
+
+  const stageInstructionBlock: SystemBlock = {
+    type: "text",
+    text: `${module.content}\n\nStage metadata:\n- Title: ${args.stage.title}\n- Stage number: ${args.stage.stageNumber}`,
+  };
+
+  // Tenant-scoped — must come BEFORE the cache marker so the cache prefix
+  // remains stable across re-generations of the same project. The marker sits
+  // on this block (cache_control at end of block = breakpoint at end of block).
+  const projectContextBlock: SystemBlock = {
+    type: "text",
+    text: `<PROJECT_CONTEXT>${args.projectContext}\n\nUse this context to ground every Spec entry. Do not invent specifics that aren't supported here.</PROJECT_CONTEXT>`,
+    cache_control: { type: "ephemeral" },
+  };
+
+  // Per-call dynamic context. Sits AFTER the cache marker — varies on each
+  // regeneration so we don't want it cached.
+  const dynamicBlock: SystemBlock = {
+    type: "text",
+    text: args.dynamicContext,
+  };
+
+  return [stageInstructionBlock, projectContextBlock, dynamicBlock];
 }
 
 export function buildMinimumDetailsDocumentPrompt(args: {
