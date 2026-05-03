@@ -631,6 +631,10 @@ async function evalAdaptive(): Promise<void> {
       questionsAsked++;
       console.log(`  [adaptive-eval] ASK ${questionsAsked} (${action.method}): ${action.question.text.slice(0, 60)}...`);
       console.log(`    [adaptive-eval] simulated answer: ${nextSimulated.slice(0, 50)}...`);
+      // Pass extracts_into + the top scoring topic so ingestAnswer can promote
+      // the answer into the right spec slice. Without this, deriveCandidateUnknowns
+      // re-emits the same gaps every turn and the loop hits MAX_INTAKE_STEPS.
+      const topScoringTopic = action.scoring?.[0]?.topic ?? null;
       const ingest = ingestAnswer({
         state: productState,
         answer: {
@@ -639,6 +643,10 @@ async function evalAdaptive(): Promise<void> {
           questionText: action.question.text,
           answer: nextSimulated,
           method: action.method,
+          metadata: {
+            extracts_into: action.question.extracts_into,
+            topic: topScoringTopic,
+          },
         },
       });
       productState = ingest.productState;

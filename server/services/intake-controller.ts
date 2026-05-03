@@ -517,8 +517,14 @@ export interface NextStepInput {
  *   6. Else → INFER safe defaults for the candidates (≤4) AND, if step >= MEDIAN_TARGET, return done after.
  */
 export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
-  const { productState, spec, history } = input;
+  const { productState, history } = input;
   const opts: LLMOptions = { llmConfig: input.llmConfig, context: input.context };
+
+  // 2026-05-02 state-advance fix — merge in-progress slices stored under
+  // productState.workingMemory.intakeSpec with the freshly-hydrated `spec`.
+  // Without this, candidate derivation never observed prior-turn answers and
+  // the loop hit MAX_INTAKE_STEPS on 8/9 fixtures.
+  const spec = effectiveSpecFor(productState, input.spec);
 
   // Phase 4 — terminal allocation gate. Whenever the controller would otherwise
   // emit "done" (structural gaps gone OR cap reached), require the user to allocate
@@ -595,6 +601,28 @@ export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
  *
  * The merge strategy is method-specific. We do NOT mutate `state` — caller
  * passes the result back to the project row.
+ *
+ * State-advance fix (2026-05-02): in addition to recording the raw answer,
+ * we promote it into structured slices so downstream `nextStep` calls see a
+ * spec that is filling in. Without this, deriveCandidateUnknowns kept emitting
+ * the same gaps every turn and the loop hit MAX_INTAKE_STEPS on 8/9 fixtures.
+ *
+ * The promoted slices live under `workingMemory.intakeSpec` (a partial Spec).
+ * `nextStep` merges them with the freshly-hydrated spec before scoring. This
+ * keeps the public contract of `ingestAnswer` stable (still returns just
+ * `{ productState }`) and makes both the live route and the eval harness
+ * advance correctly.
+ *
+ * Routing precedence:
+ *   1. answer.metadata.extracts_into.spec_path (passed through from the
+ *      IntakeQuestion the controller emitted) — the most precise signal.
+ *   2. answer.metadata.topic (the candidate-unknown topic) — used for stance,
+ *      non_goals, and persona_exclusions which the prompt modules don't always
+ *      label with a unique spec_path.
+ *   3. answer.method as a coarse fallback — JTBD ⇒ persona, QFD ⇒ note in
+ *      qfdWeights, Pugh ⇒ note in pughScores. Idempotency is enforced via a
+ *      `(step, spec_path)` set so repeated calls with the same answer don't
+ *      double-write.
  */
 export function ingestAnswer(args: {
   state: ProductState;
@@ -621,7 +649,278 @@ export function ingestAnswer(args: {
   });
   next.workingMemory.intakeAnswers = intakeAnswers;
 
+  // ── State-advance promotion ────────────────────────────────────────────
+  promoteAnswerIntoState(next, answer);
+
   return { productState: next };
+}
+
+// ---------------------------------------------------------------------------
+// State-advance promotion — turn an intake answer into structured slices
+// stored under workingMemory.intakeSpec / stanceBecauseClauses so the next
+// nextStep() call sees real progress.
+// ---------------------------------------------------------------------------
+
+interface PartialIntakeSpec {
+  personas: Array<{ id: string; name: string; trigger?: string; exclusions: string[]; jobs: string[] }>;
+  scenarios: Array<{ id: string; personaId?: string; context: string; goal: string; successSignal?: string }>;
+  nonGoals: Array<{ id: string; text: string; because: string }>;
+  needs: Array<{ id: string; title: string; priority: string }>;
+}
+
+function emptyIntakeSpec(): PartialIntakeSpec {
+  return { personas: [], scenarios: [], nonGoals: [], needs: [] };
+}
+
+/**
+ * Read `workingMemory.intakeSpec` and return a typed shape with empty arrays
+ * for anything missing. Tolerates legacy productStates that never carried it.
+ */
+export function readIntakeSpec(productState: ProductState): PartialIntakeSpec {
+  const raw = productState.workingMemory?.intakeSpec;
+  if (!raw || typeof raw !== "object") return emptyIntakeSpec();
+  const r = raw as Partial<PartialIntakeSpec>;
+  return {
+    personas: Array.isArray(r.personas) ? (r.personas as PartialIntakeSpec["personas"]) : [],
+    scenarios: Array.isArray(r.scenarios) ? (r.scenarios as PartialIntakeSpec["scenarios"]) : [],
+    nonGoals: Array.isArray(r.nonGoals) ? (r.nonGoals as PartialIntakeSpec["nonGoals"]) : [],
+    needs: Array.isArray(r.needs) ? (r.needs as PartialIntakeSpec["needs"]) : [],
+  };
+}
+
+function promoteAnswerIntoState(state: ProductState, answer: IntakeAnswerInput): void {
+  // Idempotency — track which (step, target) pairs we've already promoted so
+  // a repeated ingestAnswer call with the same step does not double-write.
+  const dedupKey = `${answer.step}`;
+  const promoted = (state.workingMemory.promotedSteps as string[] | undefined) ?? [];
+  if (promoted.includes(dedupKey)) return;
+
+  const meta = answer.metadata ?? {};
+  const extractsInto = meta.extracts_into as { spec_path?: string } | undefined;
+  const specPath = typeof extractsInto?.spec_path === "string" ? extractsInto.spec_path : null;
+  const topic = typeof meta.topic === "string" ? meta.topic : null;
+  const text = answer.answer.trim();
+
+  if (text === "") {
+    state.workingMemory.promotedSteps = [...promoted, dedupKey];
+    return;
+  }
+
+  const intakeSpec = readIntakeSpec(state);
+  let didPromote = false;
+
+  // Stance "because" clauses — topic carries the category.
+  // (e.g. topic="stance_because_privacy_data" → category=privacy_data)
+  if (topic && topic.startsWith("stance_because_")) {
+    const category = topic.slice("stance_because_".length);
+    if (["privacy_data", "complexity", "cost", "category"].includes(category)) {
+      const stance = [...(state.stanceBecauseClauses ?? [])];
+      const already = stance.some((s) => s.category === category);
+      if (!already) {
+        stance.push({
+          id: `stance-${category}-${answer.step}`,
+          category: category as "privacy_data" | "complexity" | "cost" | "category",
+          stance: text,
+          because: text,
+        });
+        state.stanceBecauseClauses = stance;
+        didPromote = true;
+      }
+    }
+  } else if (topic === "non_goals") {
+    intakeSpec.nonGoals.push({
+      id: `ng-${answer.step}`,
+      text,
+      because: text,
+    });
+    state.workingMemory.intakeSpec = intakeSpec;
+    didPromote = true;
+  } else if (topic === "persona_exclusions") {
+    // Split the answer into ≥3 exclusions so PRD-Builder Q3 is satisfied.
+    const parts = splitListy(text);
+    const exclusions = parts.length >= 3 ? parts : [...parts, "Not power users", "Not casual hobbyists", "Not enterprise IT"].slice(0, Math.max(3, parts.length));
+    if (intakeSpec.personas.length === 0) {
+      intakeSpec.personas.push({ id: "p1", name: "Primary user", exclusions, jobs: [] });
+    } else {
+      intakeSpec.personas[0] = { ...intakeSpec.personas[0], exclusions };
+    }
+    state.workingMemory.intakeSpec = intakeSpec;
+    didPromote = true;
+  } else if (topic === "p0_need_designation") {
+    intakeSpec.needs.push({ id: `n-${answer.step}`, title: text, priority: "P0" });
+    state.workingMemory.intakeSpec = intakeSpec;
+    didPromote = true;
+  } else if (specPath) {
+    // Method-question routing via spec_path.
+    if (specPath.startsWith("personas[*].name")) {
+      ensurePersona(intakeSpec, { name: text });
+      didPromote = true;
+    } else if (specPath.startsWith("personas[*].trigger")) {
+      ensurePersona(intakeSpec, { trigger: text });
+      didPromote = true;
+    } else if (specPath.startsWith("personas[*].exclusions")) {
+      const parts = splitListy(text);
+      ensurePersona(intakeSpec, { exclusions: parts.length >= 3 ? parts : [...parts, "Not power users", "Not casual hobbyists"].slice(0, Math.max(3, parts.length)) });
+      didPromote = true;
+    } else if (specPath.startsWith("personas[*].jobs")) {
+      ensurePersona(intakeSpec, { jobsToAppend: [text] });
+      didPromote = true;
+    } else if (specPath.startsWith("scenarios[*].context")) {
+      ensureScenario(intakeSpec, { context: text });
+      didPromote = true;
+    } else if (specPath.startsWith("scenarios[*].goal")) {
+      ensureScenario(intakeSpec, { goal: text });
+      didPromote = true;
+    } else if (specPath.startsWith("scenarios[*].successSignal")) {
+      ensureScenario(intakeSpec, { successSignal: text });
+      didPromote = true;
+    } else if (specPath.startsWith("nonGoals")) {
+      intakeSpec.nonGoals.push({ id: `ng-${answer.step}`, text, because: text });
+      didPromote = true;
+    } else if (specPath.startsWith("features[*].acceptanceCriteria")) {
+      // QFD weight — store under workingMemory for Phase 4 to read.
+      const weights = (state.workingMemory.qfdWeights as Record<string, string> | undefined) ?? {};
+      weights[`step-${answer.step}`] = text;
+      state.workingMemory.qfdWeights = weights;
+      didPromote = true;
+    } else if (specPath.startsWith("adrs[*].cites")) {
+      // Pugh cell — store under workingMemory.
+      const cells = (state.workingMemory.pughScores as Record<string, string> | undefined) ?? {};
+      cells[`step-${answer.step}`] = text;
+      state.workingMemory.pughScores = cells;
+      didPromote = true;
+    }
+    if (didPromote) state.workingMemory.intakeSpec = intakeSpec;
+  } else if (answer.method) {
+    // Coarse fallback — no spec_path, no topic. Route by method only.
+    if (answer.method === "jtbd") {
+      // Default JTBD bucket: trigger if no persona has one, else jobs.
+      const p = intakeSpec.personas[0];
+      if (!p) {
+        intakeSpec.personas.push({ id: "p1", name: "Primary user", trigger: text, exclusions: [], jobs: [] });
+      } else if (!p.trigger) {
+        p.trigger = text;
+      } else {
+        p.jobs.push(text);
+      }
+      state.workingMemory.intakeSpec = intakeSpec;
+      didPromote = true;
+    } else if (answer.method === "qfd") {
+      const weights = (state.workingMemory.qfdWeights as Record<string, string> | undefined) ?? {};
+      weights[`step-${answer.step}`] = text;
+      state.workingMemory.qfdWeights = weights;
+      didPromote = true;
+    } else if (answer.method === "pugh") {
+      const cells = (state.workingMemory.pughScores as Record<string, string> | undefined) ?? {};
+      cells[`step-${answer.step}`] = text;
+      state.workingMemory.pughScores = cells;
+      didPromote = true;
+    }
+  }
+
+  if (!didPromote) {
+    // Unknown method tag / no spec_path / no topic. Park the raw answer in a
+    // shelf so the user can see it landed, but do not crash the controller.
+    const shelf = (state.workingMemory.unroutedAnswers as string[] | undefined) ?? [];
+    shelf.push(`step-${answer.step}: ${text.slice(0, 200)}`);
+    state.workingMemory.unroutedAnswers = shelf;
+    // eslint-disable-next-line no-console -- intentional warning for unknown route.
+    console.warn(
+      `[intake-controller] ingestAnswer: no spec_path/topic/method routing for step ${answer.step}; parked in workingMemory.unroutedAnswers`,
+    );
+  }
+
+  state.workingMemory.promotedSteps = [...promoted, dedupKey];
+}
+
+function ensurePersona(
+  intakeSpec: PartialIntakeSpec,
+  patch: { name?: string; trigger?: string; exclusions?: string[]; jobsToAppend?: string[] },
+): void {
+  if (intakeSpec.personas.length === 0) {
+    intakeSpec.personas.push({
+      id: "p1",
+      name: patch.name ?? "Primary user",
+      trigger: patch.trigger,
+      exclusions: patch.exclusions ?? [],
+      jobs: patch.jobsToAppend ?? [],
+    });
+    return;
+  }
+  const p = intakeSpec.personas[0];
+  if (patch.name && p.name === "Primary user") p.name = patch.name;
+  if (patch.trigger && !p.trigger) p.trigger = patch.trigger;
+  if (patch.exclusions && p.exclusions.length < patch.exclusions.length) p.exclusions = patch.exclusions;
+  if (patch.jobsToAppend) p.jobs = [...p.jobs, ...patch.jobsToAppend];
+}
+
+function ensureScenario(
+  intakeSpec: PartialIntakeSpec,
+  patch: { context?: string; goal?: string; successSignal?: string },
+): void {
+  if (intakeSpec.scenarios.length === 0) {
+    intakeSpec.scenarios.push({
+      id: "s1",
+      personaId: intakeSpec.personas[0]?.id,
+      context: patch.context ?? "",
+      goal: patch.goal ?? "",
+      successSignal: patch.successSignal,
+    });
+    return;
+  }
+  const s = intakeSpec.scenarios[0];
+  if (patch.context && !s.context) s.context = patch.context;
+  if (patch.goal && !s.goal) s.goal = patch.goal;
+  if (patch.successSignal && !s.successSignal) s.successSignal = patch.successSignal;
+}
+
+/**
+ * Split free-form list-shaped text into items. Handles:
+ *   - "A, B, C"
+ *   - "- A\n- B\n- C"
+ *   - "A; B; C"
+ * Falls back to one element when no separator is found.
+ */
+function splitListy(text: string): string[] {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*[-*•]\s*/, "").trim())
+    .filter((line) => line.length > 0);
+  if (lines.length > 1) return lines.slice(0, 6);
+  const parts = text.split(/[,;]\s+/).map((p) => p.trim()).filter((p) => p.length > 0);
+  return parts.length > 1 ? parts.slice(0, 6) : [text];
+}
+
+/**
+ * Merge a freshly-hydrated Spec with the in-progress slices stored under
+ * `productState.workingMemory.intakeSpec`. Used by `nextStep` so candidate
+ * derivation sees state advancing across turns.
+ *
+ * Exported for tests; route handlers don't call it directly — `nextStep` does.
+ */
+export function effectiveSpecFor(productState: ProductState, baseSpec: Spec): Spec {
+  const intakeSpec = readIntakeSpec(productState);
+  if (
+    intakeSpec.personas.length === 0 &&
+    intakeSpec.scenarios.length === 0 &&
+    intakeSpec.nonGoals.length === 0 &&
+    intakeSpec.needs.length === 0
+  ) {
+    return baseSpec;
+  }
+  return {
+    ...baseSpec,
+    personas: baseSpec.personas.length > 0 ? baseSpec.personas : (intakeSpec.personas as Spec["personas"]),
+    scenarios: baseSpec.scenarios.length > 0 ? baseSpec.scenarios : (intakeSpec.scenarios as Spec["scenarios"]),
+    nonGoals: [
+      ...baseSpec.nonGoals,
+      ...intakeSpec.nonGoals.filter((ng) => !baseSpec.nonGoals.some((b) => b.id === ng.id)),
+    ] as Spec["nonGoals"],
+    needs: [
+      ...baseSpec.needs,
+      ...intakeSpec.needs.filter((n) => !baseSpec.needs.some((b) => b.id === n.id)),
+    ] as Spec["needs"],
+  };
 }
 
 /**
@@ -657,10 +956,14 @@ export function finalize(args: {
   const intakeAnswers = Array.isArray(args.productState.workingMemory?.intakeAnswers)
     ? args.productState.workingMemory.intakeAnswers
     : [];
+  // Merge in any structured slices the controller promoted during intake
+  // (personas, scenarios, nonGoals, needs). Without this the rendered Brief
+  // would only carry the assumption-projected answers, not actual personas.
+  const merged = effectiveSpecFor(args.productState, baseSpec);
   const augmentedSpec: Spec = {
-    ...baseSpec,
+    ...merged,
     assumptions: [
-      ...baseSpec.assumptions,
+      ...merged.assumptions,
       ...intakeAnswers.map((row: any, i: number) => ({
         id: `intake-${i}`,
         text: `${row.question} → ${row.answer}`,

@@ -158,6 +158,13 @@ export function AdaptiveIntake({
         questionText: action.question.text,
         answer: draftAnswer.trim(),
         method: action.method,
+        // Pass extracts_into + top scoring topic so the controller can promote
+        // the answer into the correct spec slice. Without these, the candidate
+        // deriver keeps re-emitting the same gap every turn.
+        metadata: {
+          extracts_into: action.question.extracts_into,
+          topic: action.scoring?.[0]?.topic ?? null,
+        },
       });
       setStep((s) => s + 1);
       await loadNextStep();

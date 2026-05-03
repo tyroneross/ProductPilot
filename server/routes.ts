@@ -1206,13 +1206,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updated = await storage.updateProject(project.id, { productState });
 
+      // Audit metadata includes the promoted spec_path / topic so the timeline
+      // shows which slice of the spec each turn advanced. Non-PII, safe to log.
+      const promotedSpecPath = (body.metadata as any)?.extracts_into?.spec_path ?? null;
+      const promotedTopic = (body.metadata as any)?.topic ?? null;
       void storage.createAuditEvent({
         actorType: actor.kind,
         actorId: actor.id,
         action: "intake.answer",
         resourceType: "project",
         resourceId: project.id,
-        metadata: { step, method: body.method ?? null, intakeQuestionId: row.id },
+        metadata: {
+          step,
+          method: body.method ?? null,
+          intakeQuestionId: row.id,
+          promotedSpecPath,
+          promotedTopic,
+        },
       }).catch((e) => logger.error({ err: e }, "[audit] intake.answer failed"));
 
       res.json({
