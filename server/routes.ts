@@ -1208,8 +1208,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Audit metadata includes the promoted spec_path / topic so the timeline
       // shows which slice of the spec each turn advanced. Non-PII, safe to log.
+      // 2026-05-02 slot-dedupe: also capture the JTBD slot id when the method
+      // is jtbd, so the audit trail can surface the controller-side dedup
+      // ledger in retro analysis.
       const promotedSpecPath = (body.metadata as any)?.extracts_into?.spec_path ?? null;
       const promotedTopic = (body.metadata as any)?.topic ?? null;
+      const { jtbdSlotForCandidate } = await import("./services/intake-controller");
+      const jtbdSlot = body.method === "jtbd"
+        ? jtbdSlotForCandidate({ topic: promotedTopic, specPath: promotedSpecPath })
+        : null;
       void storage.createAuditEvent({
         actorType: actor.kind,
         actorId: actor.id,
@@ -1222,6 +1229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           intakeQuestionId: row.id,
           promotedSpecPath,
           promotedTopic,
+          jtbdSlot,
         },
       }).catch((e) => logger.error({ err: e }, "[audit] intake.answer failed"));
 

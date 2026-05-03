@@ -120,6 +120,111 @@ const MEDIAN_TARGET = 5;
 const BLOCKING_THRESHOLD = 6;
 
 // ---------------------------------------------------------------------------
+// JTBD slot enumeration + topic/spec_path → slot mapping.
+//
+// Why this lives in the controller (not the prompt):
+//   The 8B Groq model that runs the JTBD prompt is unstable across archetypes
+//   in deciding "did I already ask about persona vs trigger vs exclusions?".
+//   Yesterday's prompt-only attempt landed no-op at the adaptive median (still
+//   7) because the model picked the same slot twice on pp-09 / pp-07 and
+//   because asking about a slot the fixture's discovery script had no answer
+//   for regressed pp-02 / pp-04.
+//
+// The durable fix is to record asked JTBD slots in the controller's working
+// memory and prune JTBD candidates whose slot is already taken before scoring.
+// Other methods (qfd, pugh) keep their existing dedup behavior — this is
+// intentionally JTBD-specific because those methods consume different state
+// (qfdWeights / pughScores) where re-asking is structurally bounded.
+// ---------------------------------------------------------------------------
+
+export type JtbdSlot =
+  | "persona"
+  | "trigger"
+  | "exclusions"
+  | "outcome"
+  | "jobs"
+  | "non_goals"
+  | "priority";
+
+const ALL_JTBD_SLOTS: readonly JtbdSlot[] = [
+  "persona",
+  "trigger",
+  "exclusions",
+  "outcome",
+  "jobs",
+  "non_goals",
+  "priority",
+] as const;
+
+/**
+ * Map a candidate-unknown topic + optional spec_path to the JTBD slot it would
+ * fill. Returns null when the input does NOT map to any JTBD slot — those
+ * candidates pass through dedup unchanged (other methods own them).
+ *
+ * Topic is the strongest signal (it's stable across archetypes); spec_path is
+ * a secondary signal used only when topic is missing or generic.
+ */
+export function jtbdSlotForCandidate(input: {
+  topic?: string | null;
+  specPath?: string | null;
+}): JtbdSlot | null {
+  const topic = input.topic ?? null;
+  const specPath = input.specPath ?? null;
+
+  // Topic-first mapping — these are the candidate-unknown topics
+  // deriveCandidateUnknowns emits that flow into a JTBD-method ASK.
+  if (topic) {
+    if (topic === "primary_persona_and_trigger") return "persona";
+    if (topic === "missing_persona_trigger") return "trigger";
+    if (topic === "persona_exclusions") return "exclusions";
+    if (topic === "measurable_outcome") return "outcome";
+    if (topic === "non_goals") return "non_goals";
+    if (topic === "p0_need_designation") return "priority";
+    // stance_because_* and pending_architecture_decisions:* are NOT JTBD slots
+    // — stance is its own gate (multi-category) and ADRs route to Pugh.
+  }
+
+  // Spec-path fallback — questions whose topic was generic or missing but
+  // whose extracts_into.spec_path tells us exactly which slot the answer fills.
+  if (specPath) {
+    if (specPath.startsWith("personas[*].name")) return "persona";
+    if (specPath.startsWith("personas[*].trigger")) return "trigger";
+    if (specPath.startsWith("personas[*].exclusions")) return "exclusions";
+    if (specPath.startsWith("personas[*].jobs")) return "jobs";
+    if (specPath.startsWith("scenarios[*].goal")) return "outcome";
+    if (specPath.startsWith("scenarios[*].successSignal")) return "outcome";
+    if (specPath.startsWith("scenarios[*].context")) return "outcome";
+    if (specPath.startsWith("nonGoals")) return "non_goals";
+  }
+
+  return null;
+}
+
+/**
+ * Topics deriveCandidateUnknowns emits that are NOT JTBD slots and must NOT
+ * trigger an "unmapped JTBD topic" warning. The JTBD method may still be the
+ * routed asker (when no deterministic rule fires) but these topics are owned
+ * by stance / ADR concerns, not the persona/trigger/outcome trio.
+ */
+function isKnownNonJtbdTopic(topic: string): boolean {
+  if (topic.startsWith("stance_because_")) return true;
+  if (topic.startsWith("pending_architecture_decisions:")) return true;
+  return false;
+}
+
+/**
+ * Read the asked-JTBD-slot ledger from productState. Tolerates legacy states
+ * that never wrote it.
+ */
+export function readAskedJtbdSlots(productState: ProductState): JtbdSlot[] {
+  const raw = productState.workingMemory?.askedJtbdSlots;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((s): s is JtbdSlot =>
+    typeof s === "string" && (ALL_JTBD_SLOTS as readonly string[]).includes(s),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Candidate-unknown derivation (deterministic — does NOT call the LLM).
 // ---------------------------------------------------------------------------
 
@@ -543,7 +648,17 @@ export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
     return { action: "done", reason: `Reached MAX_INTAKE_STEPS=${MAX_INTAKE_STEPS}` };
   }
 
-  const candidates = deriveCandidateUnknowns({ productState, spec });
+  const rawCandidates = deriveCandidateUnknowns({ productState, spec });
+  // Slot-dedup: drop candidates whose JTBD slot was already asked. Non-JTBD
+  // candidates (those whose topic does not map to a slot) pass through unchanged.
+  const askedSlots = readAskedJtbdSlots(productState);
+  const candidates = askedSlots.length === 0
+    ? rawCandidates
+    : rawCandidates.filter((c) => {
+        const slot = jtbdSlotForCandidate({ topic: c.topic });
+        if (!slot) return true; // Non-JTBD candidate — keep.
+        return !askedSlots.includes(slot);
+      });
   if (candidates.length === 0) {
     if (!weightsSet) {
       return {
@@ -700,6 +815,39 @@ function promoteAnswerIntoState(state: ProductState, answer: IntakeAnswerInput):
   const specPath = typeof extractsInto?.spec_path === "string" ? extractsInto.spec_path : null;
   const topic = typeof meta.topic === "string" ? meta.topic : null;
   const text = answer.answer.trim();
+
+  // ── JTBD slot tracking ─────────────────────────────────────────────────
+  // Record the slot we asked-and-answered so the next nextStep call prunes
+  // any candidate that maps to the same slot. Topic is preferred; spec_path
+  // is the secondary signal. Idempotent — same slot doesn't double-append.
+  // Unmapped JTBD topics are recorded separately for offline analysis (the
+  // task spec calls for unmappedJtbdTopics).
+  //
+  // Topics like `stance_because_*` or `pending_architecture_decisions:*`
+  // intentionally do not map to JTBD slots — the JTBD method may still be
+  // selected as the asker but the topic itself is owned by another concern.
+  // Those are silently skipped instead of warned about.
+  if (answer.method === "jtbd") {
+    const slot = jtbdSlotForCandidate({ topic, specPath });
+    if (slot) {
+      const existing = readAskedJtbdSlots(state);
+      if (!existing.includes(slot)) {
+        state.workingMemory.askedJtbdSlots = [...existing, slot];
+      }
+    } else if (topic && !isKnownNonJtbdTopic(topic)) {
+      // We had a JTBD answer with a topic, but the topic doesn't map to a
+      // known slot. Log once and shelve the topic so the next pass at the
+      // mapping table can decide whether to add a slot for it.
+      const unmapped = (state.workingMemory.unmappedJtbdTopics as string[] | undefined) ?? [];
+      if (!unmapped.includes(topic)) {
+        state.workingMemory.unmappedJtbdTopics = [...unmapped, topic];
+        // eslint-disable-next-line no-console -- intentional warning for slot-mapping gaps.
+        console.warn(
+          `[intake-controller] JTBD topic "${topic}" did not map to a known slot; recorded under workingMemory.unmappedJtbdTopics`,
+        );
+      }
+    }
+  }
 
   if (text === "") {
     state.workingMemory.promotedSteps = [...promoted, dedupKey];
