@@ -71,7 +71,7 @@ export default function DocumentViewPage() {
     enabled: !!projectId,
   });
 
-  const { data: stages = [] } = useQuery<Stage[]>({
+  const { data: stages = [], isLoading: stagesLoading } = useQuery<Stage[]>({
     queryKey: ["/api/projects", projectId, "stages"],
     enabled: !!projectId,
   });
@@ -317,7 +317,12 @@ export default function DocumentViewPage() {
     }
   };
 
-  if (!project || !stage) {
+  // Loading: project still fetching, OR stages still fetching.
+  // Empty: project loaded, stages loaded, but the requested stageId is not in
+  // the project's stage set (fresh project before docs generation, or a stale
+  // / mistyped URL). Show a friendly empty state so the page isn't a silent
+  // infinite spinner.
+  if (!project || stagesLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#110f0d" }}>
         <div
@@ -331,6 +336,56 @@ export default function DocumentViewPage() {
           }}
         />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!stage) {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <Nav />
+        <div
+          data-testid="document-view-empty"
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 24px",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ maxWidth: 480 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 12 }}>
+              No document for this stage yet
+            </h1>
+            <p style={{ fontSize: 14, color: "#a89a8c", lineHeight: 1.5, marginBottom: 24 }}>
+              {project.name} hasn't generated this stage yet, or the stage URL is stale. Head back to the project's documents page to see what's available.
+            </p>
+            <button
+              onClick={() => setLocation(`/documents/${projectId}`)}
+              data-testid="button-back-to-documents"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                minHeight: 36,
+                padding: "8px 16px",
+                background: "#f0b65e",
+                color: "#110f0d",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              <ArrowLeft size={14} aria-hidden="true" /> Back to documents
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

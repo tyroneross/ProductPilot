@@ -156,6 +156,8 @@ export default function DocumentsPage() {
           <div style={{ marginBottom: 10 }}>
             <button
               onClick={() => setLocation("/projects")}
+              data-testid="button-breadcrumb-projects"
+              aria-label={`Back to projects (from ${project.name})`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -165,7 +167,11 @@ export default function DocumentsPage() {
                 cursor: "pointer",
                 color: "#a89a8c",
                 fontSize: 13,
-                padding: 0,
+                // WCAG 2.5.8 minimum touch target is 24x24 px. Pad vertically so the
+                // clickable height satisfies the rule even though the visible text
+                // line is only ~20 px tall.
+                minHeight: 24,
+                padding: "2px 0",
                 fontFamily: "inherit",
                 transition: "color 0.15s",
               }}
