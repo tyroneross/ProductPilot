@@ -295,8 +295,14 @@ export default function ProjectsPage() {
                     <button
                       aria-label="Project options"
                       className="menu-btn"
+                      data-testid={`button-project-options-${project.id}`}
                       onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : project.id); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: textMuted, padding: 4, borderRadius: 4, display: "flex", alignItems: "center", minHeight: 32, minWidth: 32, justifyContent: "center", transition: "color 0.15s" }}
+                      // 44x44 satisfies WCAG 2.5.8 AAA target-size on mobile and matches
+                      // Apple HIG / Material guidance. The visible glyph stays 16x16 inside
+                      // the larger click area (padding fills the rest), so dense list rows
+                      // don't visually shift; the regression IBR mobile-viewport audit flagged
+                      // a 32x32 bounding box.
+                      style={{ background: "none", border: "none", cursor: "pointer", color: textMuted, padding: 4, borderRadius: 4, display: "flex", alignItems: "center", minHeight: 44, minWidth: 44, justifyContent: "center", transition: "color 0.15s" }}
                     >
                       <MoreHorizontal size={16} />
                     </button>
