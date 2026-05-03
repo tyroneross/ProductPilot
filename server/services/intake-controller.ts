@@ -61,6 +61,13 @@ export interface IntakeQuestion {
   chips: string[];
   intent: string;
   rule_fired: string;
+  // Slot-aware topic emitted by the method module (jtbd rev 3+). For JTBD
+  // this is one of: persona | trigger | exclusions | outcome | jobs |
+  // non_goals | priority. The route layer / eval forwards it into
+  // metadata.topic so the slot-dedup ledger reflects what the question
+  // actually asked, not just what the controller queued. Optional for
+  // forward-compat with QFD/Pugh which do not emit a JTBD slot.
+  topic?: string;
   // The path inside the Spec graph this answer lands at. Used by ingestAnswer to merge.
   extracts_into: {
     spec_path: string;
@@ -182,6 +189,22 @@ export function jtbdSlotForCandidate(input: {
     if (topic === "p0_need_designation") return "priority";
     // stance_because_* and pending_architecture_decisions:* are NOT JTBD slots
     // — stance is its own gate (multi-category) and ADRs route to Pugh.
+    //
+    // Prompt-emitted slot-ID topics (rev 3 of methods.jtbd, 2026-05-03).
+    // The JTBD prompt now stamps every question with topic = one of the 7
+    // slot strings. These map identity-style; the candidate-unknown topics
+    // above remain the dedup primary-key on the controller side, but when a
+    // route layer or the eval forwards the prompt's topic into ingestAnswer,
+    // the mapper still resolves to the right slot. Additive only — never
+    // changes the candidate-topic mappings above.
+    if (topic === "persona") return "persona";
+    if (topic === "trigger") return "trigger";
+    if (topic === "exclusions") return "exclusions";
+    if (topic === "outcome") return "outcome";
+    if (topic === "jobs") return "jobs";
+    // "non_goals" already mapped above; same string serves both candidate
+    // and prompt-emitted topic.
+    if (topic === "priority") return "priority";
   }
 
   // Spec-path fallback — questions whose topic was generic or missing but
@@ -480,6 +503,7 @@ export async function callMethodGenerator(
       chips: ["Specific role / job title", "Trigger moment", "Frequency of use"],
       intent: `Method ${method} declined: ${result.reason ?? "preconditions not met"}`,
       rule_fired: "passthrough",
+      topic: "persona",
       extracts_into: { spec_path: "personas[*].name", kind: "string", merge_strategy: "append" },
     };
   }
@@ -488,6 +512,7 @@ export async function callMethodGenerator(
     chips: Array.isArray(result.chips) ? result.chips.slice(0, 4).map(String) : fallbackQuestion(method).chips,
     intent: typeof result.intent === "string" ? result.intent : "method-generator-fallback",
     rule_fired: typeof result.rule_fired === "string" ? result.rule_fired : "1",
+    topic: typeof result.topic === "string" ? result.topic : undefined,
     extracts_into: result.extracts_into ?? { spec_path: "personas[*].name", kind: "string", merge_strategy: "append" },
     payload: result.triplet || result.cell || undefined,
   };
@@ -500,6 +525,7 @@ function fallbackQuestion(method: IntakeMethod): IntakeQuestion {
       chips: ["High — core to the job", "Medium — useful but not essential", "Low — nice-to-have only", "Not at all"],
       intent: "QFD fallback when LLM response was malformed.",
       rule_fired: "fallback",
+      // QFD does not emit a JTBD slot — leave topic undefined.
       extracts_into: { spec_path: "features[*].acceptanceCriteria", kind: "weight", merge_strategy: "weight_map" },
     };
   }
@@ -509,6 +535,7 @@ function fallbackQuestion(method: IntakeMethod): IntakeQuestion {
       chips: ["Better (+)", "Same (0)", "Worse (-)"],
       intent: "Pugh fallback when LLM response was malformed.",
       rule_fired: "fallback",
+      // Pugh does not emit a JTBD slot — leave topic undefined.
       extracts_into: { spec_path: "adrs[*].cites", kind: "pugh_cell", merge_strategy: "score_map" },
     };
   }
@@ -517,6 +544,7 @@ function fallbackQuestion(method: IntakeMethod): IntakeQuestion {
     chips: ["Right after a sales call", "When their inbox crosses 50 unread", "End of every sprint"],
     intent: "JTBD fallback when LLM response was malformed.",
     rule_fired: "fallback",
+    topic: "trigger",
     extracts_into: { spec_path: "personas[*].trigger", kind: "string", merge_strategy: "append" },
   };
 }
@@ -691,11 +719,51 @@ export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
     }
 
     // Generate the question via the method-specific module.
+    // Pass askedJtbdSlots so the JTBD prompt can avoid re-asking a slot the
+    // controller already recorded. The 8B Groq model is unstable at obeying
+    // this hint alone (see CSV header note for the reverted prompt-only
+    // attempt), so the controller also dedupes the response below.
     const question = await callMethodGenerator(
       method,
-      { productState, spec, intakeAnswersSoFar: history, blockingTopUnknown: top },
+      {
+        productState,
+        spec,
+        intakeAnswersSoFar: history,
+        blockingTopUnknown: top,
+        askedJtbdSlots: askedSlots,
+      },
       opts,
     );
+
+    // Post-generation slot dedup. The candidate-side dedup at line 654 catches
+    // candidate-unknown topics already filled (persona, trigger, exclusions,
+    // outcome, non_goals, priority — those have a deriveCandidateUnknowns
+    // rule). It does NOT catch the `jobs` slot or any slot whose discovery
+    // candidate was pruned but whose JTBD rule-4 still emits a follow-up.
+    // This second-pass dedup keys on the question's emitted topic + spec_path.
+    // If the JTBD prompt re-picks an already-answered slot, fall through to
+    // the INFER branch instead of asking again. Non-JTBD methods (qfd, pugh)
+    // skip this — their state is bounded by features/adrs, not slots.
+    //
+    // Fallback chain: question.topic (jtbd rev 3+) → spec_path → null. The 8B
+    // model is occasionally unreliable about the topic field, so spec_path is
+    // a second-line signal. If neither resolves, the question proceeds (better
+    // to ask once unnecessarily than to never ask a real gap).
+    if (method === "jtbd") {
+      const requestedSlot = jtbdSlotForCandidate({
+        topic: typeof question.topic === "string" ? question.topic : null,
+        specPath: question.extracts_into?.spec_path ?? null,
+      });
+      if (requestedSlot && askedSlots.includes(requestedSlot)) {
+        // Slot already asked-and-recorded. Skip the ASK and let safe-defaults
+        // close out the remaining candidates.
+        const inferTargets = scoring.filter((s) => s.decision === "infer").slice(0, 4);
+        const defaults = inferTargets.length > 0
+          ? await callSafeDefaultsInferer({ productState, spec, topics: inferTargets }, opts)
+          : [];
+        return { action: "infer", defaults, scoring };
+      }
+    }
 
     return { action: "ask", question, method, scoring };
   }

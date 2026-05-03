@@ -77,6 +77,21 @@ describe("jtbdSlotForCandidate", () => {
     expect(jtbdSlotForCandidate({ topic: "pending_architecture_decisions:2" })).toBeNull();
   });
 
+  // jtbd prompt rev 3 (2026-05-03): every question stamps topic with one of
+  // the 7 slot strings. The route layer / eval forward this into ingestAnswer
+  // so the slot-dedup ledger reflects what was actually asked. These mappings
+  // are additive — the candidate-unknown topics above remain authoritative
+  // for deriveCandidateUnknowns dedup.
+  it("maps prompt-emitted slot-ID topics to their slots", () => {
+    expect(jtbdSlotForCandidate({ topic: "persona" })).toBe("persona");
+    expect(jtbdSlotForCandidate({ topic: "trigger" })).toBe("trigger");
+    expect(jtbdSlotForCandidate({ topic: "exclusions" })).toBe("exclusions");
+    expect(jtbdSlotForCandidate({ topic: "outcome" })).toBe("outcome");
+    expect(jtbdSlotForCandidate({ topic: "jobs" })).toBe("jobs");
+    expect(jtbdSlotForCandidate({ topic: "non_goals" })).toBe("non_goals");
+    expect(jtbdSlotForCandidate({ topic: "priority" })).toBe("priority");
+  });
+
   it("falls back to spec_path when topic is missing", () => {
     expect(jtbdSlotForCandidate({ specPath: "personas[*].name" })).toBe("persona");
     expect(jtbdSlotForCandidate({ specPath: "personas[*].trigger" })).toBe("trigger");

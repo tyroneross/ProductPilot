@@ -32,6 +32,10 @@ export interface IntakeQuestion {
   chips: string[];
   intent: string;
   rule_fired: string;
+  // Slot-aware topic (jtbd rev 3+, 2026-05-03). One of:
+  // persona | trigger | exclusions | outcome | jobs | non_goals | priority.
+  // Optional for forward-compat with QFD/Pugh.
+  topic?: string;
   extracts_into: { spec_path: string; kind: string; merge_strategy: string };
   payload?: Record<string, unknown>;
 }
@@ -158,12 +162,16 @@ export function AdaptiveIntake({
         questionText: action.question.text,
         answer: draftAnswer.trim(),
         method: action.method,
-        // Pass extracts_into + top scoring topic so the controller can promote
-        // the answer into the correct spec slice. Without these, the candidate
-        // deriver keeps re-emitting the same gap every turn.
+        // Pass extracts_into + the topic the ASK actually targeted so the
+        // controller can promote the answer into the correct spec slice and
+        // its slot-dedup ledger reflects what was asked.
+        // Precedence (jtbd rev 3+, 2026-05-03): prompt-emitted question.topic
+        // wins because the JTBD model now stamps every question with one of
+        // the 7 slot strings. Falls back to the candidate-unknown topic from
+        // the blocking-scorer for qfd/pugh and any rev-2 jtbd output.
         metadata: {
           extracts_into: action.question.extracts_into,
-          topic: action.scoring?.[0]?.topic ?? null,
+          topic: action.question.topic ?? action.scoring?.[0]?.topic ?? null,
         },
       });
       setStep((s) => s + 1);

@@ -631,10 +631,16 @@ async function evalAdaptive(): Promise<void> {
       questionsAsked++;
       console.log(`  [adaptive-eval] ASK ${questionsAsked} (${action.method}): ${action.question.text.slice(0, 60)}...`);
       console.log(`    [adaptive-eval] simulated answer: ${nextSimulated.slice(0, 50)}...`);
-      // Pass extracts_into + the top scoring topic so ingestAnswer can promote
-      // the answer into the right spec slice. Without this, deriveCandidateUnknowns
-      // re-emits the same gaps every turn and the loop hits MAX_INTAKE_STEPS.
+      // Pass extracts_into + the topic the ASK actually targeted so
+      // ingestAnswer can promote the answer into the right spec slice and the
+      // slot-dedup ledger reflects what was asked, not what was queued.
+      // Precedence (rev-3 jtbd, 2026-05-03): the prompt-emitted question.topic
+      // wins because the JTBD model now stamps every question with one of the
+      // 7 slot strings. Falls back to the candidate-unknown topic from the
+      // blocking-scorer (legacy behavior — used by qfd/pugh and any rev-2
+      // jtbd output that has not been redeployed yet).
       const topScoringTopic = action.scoring?.[0]?.topic ?? null;
+      const askedTopic = action.question.topic ?? topScoringTopic;
       const ingest = ingestAnswer({
         state: productState,
         answer: {
@@ -645,7 +651,7 @@ async function evalAdaptive(): Promise<void> {
           method: action.method,
           metadata: {
             extracts_into: action.question.extracts_into,
-            topic: topScoringTopic,
+            topic: askedTopic,
           },
         },
       });
