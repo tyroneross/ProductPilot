@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import path from "node:path";
 import url from "node:url";
 import { logger } from "./lib/logger";
+import { assertJournalCoversAllMigrations } from "./lib/migrate-guard";
 
 // Build database URL from environment variables
 function getDatabaseUrl(): string {
@@ -129,10 +130,16 @@ export async function runMigrations(): Promise<boolean> {
   try {
     logger.info("Running database migrations");
 
+    const migrationsFolder = resolveMigrationsFolder();
+
+    // Fail loud if a *.sql file on disk is missing from _journal.json.
+    // drizzle-orm's migrator iterates the journal — unjournaled SQL would
+    // be silently skipped in production. See server/lib/migrate-guard.ts.
+    assertJournalCoversAllMigrations(migrationsFolder);
+
     await stampPreExistingMigrations(pool);
 
     const db = drizzle(pool);
-    const migrationsFolder = resolveMigrationsFolder();
     await migrate(db, { migrationsFolder });
 
     logger.info("Database migrations completed successfully");

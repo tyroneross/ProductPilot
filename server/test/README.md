@@ -60,6 +60,19 @@ multi-platform parity, the path is `@testcontainers/postgresql`. The
 testcontainers behind it would be a single-file change in
 `helpers/postgres-sandbox.ts` plus adding the dev-dep. Not wired today.
 
+## Migration journal guard
+
+`migrate-journal-guard.test.ts` runs in the default `npm run test` mode. It
+fixtures a temp directory rather than the real `migrations/` folder, so it
+needs no DB and no special env. The guard it covers (`server/lib/migrate-guard.ts`)
+runs at production startup and throws if a `*.sql` migration file on disk is
+missing from `migrations/meta/_journal.json` — the failure mode that hit
+0003_adaptive_intake (which would have skipped four schema changes in prod
+because drizzle-orm's migrator iterates the journal, not the directory).
+
+Add a fixture case here whenever the guard's behavior changes (e.g. new
+ignore pattern, new error format).
+
 ## Adding new RLS tests
 
 1. Use the `withAppRole(...)` helper in `rls-spec-artifacts.test.ts` for any
