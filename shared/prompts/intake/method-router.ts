@@ -2,11 +2,11 @@
  * ---
  * key: intake.method_router
  * version: 0.1.0
- * defaultModel: claude-haiku-4-5
+ * defaultModel: llama-3.1-8b-instant
  * prompt_builder_score: 22
  * prompt_builder_score_max: 25
  * prompt_builder_dimensions: { accuracy: 5, clarity: 5, constraints: 4, determinism: 4, completeness: 4 }
- * prompt_builder_revision: 1
+ * prompt_builder_revision: 2
  * prompt_builder_run_at: 2026-05-02
  * prompt_builder_notes: |
  *   Scored 22/25 against prompt-builder 5-dim rubric (no blockers; lowest 4).
@@ -26,9 +26,12 @@
  *   - qfd:   features in flight, need to weight which need they serve. Light: persona × need × feature triplets, no House of Quality matrix.
  *   - pugh:  two or more candidate solutions, need to compare them on a fixed criteria axis.
  *
- * Why Haiku and not Sonnet:
- *   - Output is one short JSON object. Sonnet adds latency without lifting accuracy.
- *   - Method choice is a 3-way classification — exactly Haiku's wheelhouse.
+ * Why a fast classification tier (Haiku-class):
+ *   - Output is one short JSON object. A reasoning tier adds latency without lifting accuracy.
+ *   - Method choice is a 3-way classification — Haiku-class wheelhouse.
+ *   - 2026-05-02: defaultModel is `llama-3.1-8b-instant` on Groq (deflated
+ *     Anthropic Haiku-tier). The shape is identical; an Anthropic Haiku
+ *     remains reachable via BYOK userConfig when callers want it.
  *
  * Output contract: {"method": "jtbd"|"qfd"|"pugh", "reason": "<one sentence>"}
  */
@@ -86,13 +89,13 @@ const promptModule: PromptModule = {
   key: "intake.method_router",
   version: "0.1.0",
   content: METHOD_ROUTER_PROMPT_CONTENT,
-  defaultModel: "claude-haiku-4-5",
+  defaultModel: "llama-3.1-8b-instant",
   // 22/25 [Accuracy:5 Clarity:5 Constraints:4 Determinism:4 Completeness:4].
   prompt_builder_score: 22,
-  prompt_builder_revision: 1,
+  prompt_builder_revision: 2,
   prompt_builder_run_at: "2026-05-02",
   prompt_builder_notes:
-    "22/25. T2 classification. Haiku-tier. Phase 3 follow-ups: 1-shot example, no-fit escape hatch, tie-break documentation.",
+    "22/25. T2 classification. Haiku-tier (now Groq llama-3.1-8b-instant — see r2 routing override 2026-05-02). Phase 3 follow-ups: 1-shot example, no-fit escape hatch, tie-break documentation.",
 };
 
 export default promptModule;

@@ -1,9 +1,36 @@
 # Phase 2 adaptive intake eval — 2026-05-02
-# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.
-# When run live the script routes each fixture through IntakeController.nextStep+ingestAnswer until done.
+# Live run on Groq. Median questions_asked target: ≤ 7 (plan §Phase 2 ship gate).
+# Result: median = 9 — TARGET MISSED. 8 of 9 fixtures hit MAX_INTAKE_STEPS=9 with 0 inferences.
+#
+# Diagnosis (NOT a Groq routing problem — would reproduce on Anthropic the same way):
+# The IntakeController treats `simulatedDiscoveryAnswers` as opaque strings written to
+# workingMemory.intakeAnswers[] but never extracts them into spec.personas / scenarios /
+# nonGoals. As a result deriveCandidateUnknowns() keeps emitting the same candidates and
+# blockingScorer (now Groq llama-3.1-8b-instant) keeps scoring them ≥ BLOCKING_THRESHOLD=6,
+# so every step takes the ASK branch until MAX_INTAKE_STEPS hard-stops the loop.
+#
+# Only pp-09 (claude-plugin) hit the INFER branch — its 3rd answer landed below threshold.
+# The structured-output reliability test (server/test/baselines/2026-05-02-groq-structured-validity.csv)
+# shows Groq emits valid JSON on every call, so this is not a JSON-parsing or schema-shape issue.
+#
+# Follow-up tasks (NOT done as part of this routing override):
+#   1. Wire fixture answer → spec.persona / spec.scenario extraction in eval harness OR
+#      add a `simulatedSpecState` field to fixtures that pre-populates the spec graph.
+#   2. Tune blockingScorer prompt to shift toward INFER when evidence accumulates across turns
+#      (currently each scoring call sees a fresh-feeling input because spec stays empty).
+#   3. Re-run the eval and re-evaluate the ≤7 median gate.
+#
+# Total cost across 9 fixtures: ~$0.00 (Groq pricing on llama-3.1-8b-instant +
+# gpt-oss-120b at usage levels here is well under one cent — recorded server-side via
+# llm_calls but not summed in the row's total_cost_usd column).
+#
 fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result
-pp-01,clear-b2b-saas,0,0,0,0.000000,deferred
-pp-02,fuzzy-consumer,0,0,0,0.000000,deferred
-pp-03,internal-workflow,0,0,0,0.000000,deferred
-pp-04,ai-automation,0,0,0,0.000000,deferred
-pp-05,data-heavy-dashboard,0,0,0,0.000000,deferred
+pp-01,clear-b2b-saas,9,0,14858,0.000000,ok-target-missed
+pp-02,fuzzy-consumer,9,0,13529,0.000000,ok-target-missed
+pp-03,internal-workflow,9,0,11951,0.000000,ok-target-missed
+pp-04,ai-automation,9,0,13202,0.000000,ok-target-missed
+pp-05,data-heavy-dashboard,9,0,15631,0.000000,ok-target-missed
+pp-06,ios-native-app,9,0,18663,0.000000,ok-target-missed
+pp-07,macos-native-app,9,0,12985,0.000000,ok-target-missed
+pp-08,vite-spa,9,0,12636,0.000000,ok-target-missed
+pp-09,claude-plugin,3,4,5675,0.000000,ok-met-target

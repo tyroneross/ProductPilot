@@ -1,4 +1,5 @@
 /**
+/**
  * Test 3 — cache breakpoint placement.
  *
  * Plan §"Security considerations": the Anthropic prompt-cache breakpoint
@@ -7,6 +8,13 @@
  * breakpoint after it means the cache prefix only contains data the current
  * actor is allowed to see. Placing the breakpoint BEFORE the project context
  * would allow cache hits to leak across tenants.
+ *
+ * 2026-05-02 routing override: alpha defaults route through Groq, which
+ * does NOT support prompt caching. The cache_control markers are silently
+ * dropped at runtime on the Groq path. This test still passes because the
+ * SystemBlock structure is provider-agnostic — Anthropic uses the marker,
+ * Groq ignores it. The test guards correctness for the day Anthropic
+ * routing is re-enabled (BYOK or default flip).
  *
  * This test asserts:
  *   1. There is exactly one cache_control marker in the system blocks.

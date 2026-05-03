@@ -100,8 +100,8 @@ vi.mock("../storage-hybrid", () => {
 });
 
 // Stub aiService so the linter never reaches the network. The route runs
-// lintSpec(), which would otherwise consult the LLM tier when ANTHROPIC_API_KEY
-// is set in the test environment.
+// lintSpec(), which would otherwise consult the LLM tier when GROQ_API_KEY
+// (or ANTHROPIC_API_KEY) is set in the test environment.
 vi.mock("../services/ai", async () => {
   const real = await vi.importActual<typeof import("../services/ai")>("../services/ai");
   return {

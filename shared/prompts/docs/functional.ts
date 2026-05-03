@@ -2,12 +2,12 @@
  * ---
  * key: docs.functional
  * version: 0.2.0
- * defaultModel: claude-sonnet-4-5
+ * defaultModel: openai/gpt-oss-120b
  * prompt_builder_score: 78
- * prompt_builder_revision: 2
+ * prompt_builder_revision: 3
  * prompt_builder_run_at: 2026-05-02
  * prompt_builder_notes: |
- *   v0.2.0 — Phase 4 augmentation. Architecture stage now consumes the user's
+ *   v0.2.0 (r3) — Phase 4 augmentation. Architecture stage now consumes the user's
  *   100-point tradeoffWeights AND stanceBecauseClauses; every ADR must cite at
  *   least one of the two. Reviewed via prompt-builder:score; structure follows
  *   the prompt-builder shape (role → context → output → constraints → format →
@@ -15,6 +15,11 @@
  *   regex catches references reliably. Score 78/100 (reviewer: prompt-builder
  *   skill, 2026-05-02; deductions: still relies on caller-rendered context block
  *   for weight values rather than a structured tool schema).
+ *   2026-05-02 r3: defaultModel switched from claude-sonnet-4-5 to
+ *   openai/gpt-oss-120b on Groq. Phase 4 ADR generation is the highest-stakes
+ *   structured output in the alpha; gpt-oss-120b is Groq's strongest reasoning
+ *   model and produces the JSON shape this prompt requires reliably (≥90%
+ *   first-pass validity per server/test/baselines/2026-05-02-groq-structured-validity.csv).
  * ---
  */
 
@@ -63,12 +68,12 @@ const promptModule: PromptModule = {
   key: "docs.functional",
   version: "0.2.0",
   content: FUNCTIONAL_PROMPT_CONTENT,
-  defaultModel: "claude-sonnet-4-5",
+  defaultModel: "openai/gpt-oss-120b",
   prompt_builder_score: 78,
-  prompt_builder_revision: 2,
+  prompt_builder_revision: 3,
   prompt_builder_run_at: "2026-05-02",
   prompt_builder_notes:
-    "v0.2.0 — Phase 4 augmentation. Architecture stage now consumes tradeoffWeights AND stanceBecauseClauses; every ADR cites at least one. Reviewed via prompt-builder:score (78/100, 2026-05-02).",
+    "v0.2.0 r3 — Phase 4 augmentation. Architecture stage now consumes tradeoffWeights AND stanceBecauseClauses; every ADR cites at least one. Reviewed via prompt-builder:score (78/100, 2026-05-02). 2026-05-02 r3: defaultModel switched from claude-sonnet-4-5 to openai/gpt-oss-120b on Groq for live alpha.",
 };
 
 export default promptModule;

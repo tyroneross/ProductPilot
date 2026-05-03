@@ -1,4 +1,16 @@
 # Phase 1 cache-hit live measurement — 2026-05-02
-# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.
+# CLOSED-AS-MOOT (2026-05-02 routing override): the alpha defaults to Groq for Phase
+# 3/4/5 paths because the user has GROQ_API_KEY and not ANTHROPIC_API_KEY. Groq does
+# not support Anthropic-shaped prompt caching; the cache_control breakpoints in
+# server/prompt-builders.ts are silently dropped at runtime on the Groq path.
+#
+# The 87% structural cacheable-prefix calculation (Phase 1 entry criterion) remains
+# documentation-only. It would re-activate the moment an ANTHROPIC_API_KEY is added or
+# a caller passes a BYOK Anthropic LLMConfig. The cache-breakpoint placement is still
+# correct architecture (see server/test/cache-breakpoint.test.ts — passing) and is
+# retained for that day.
+#
+# This sentinel CSV deliberately stays as the only artifact — no live Anthropic call
+# is made in this environment.
 fixture_id,pass,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reduction_pct
-n/a,n/a,0,0,0,0,deferred
+n/a,n/a,0,0,0,0,closed-as-moot

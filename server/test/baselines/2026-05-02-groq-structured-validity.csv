@@ -1,0 +1,12 @@
+# Groq structured-output reliability — 2026-05-02
+# Each row is 10 live calls against the Groq model named on that row's prompt module.
+# Pass criteria (plan §Structured-output reliability validation):
+#   first_pass_valid / total_calls >= 0.9, OR
+#   (first_pass_valid + retry_valid) / total_calls >= 0.95.
+# hard_fail = both first-pass and retry-pass invalid (counts toward neither).
+schema,total_calls,first_pass_valid,retry_valid,hard_fail,observations
+Spec,10,10,0,0,"Highest-stakes structured output — Phase 4 ADR-bearing Spec."
+ProductState.stanceBecauseClauses,10,10,0,0,"Phase 2 intake — small, fast classification target."
+LintIssue[],10,10,0,0,"Phase 3 LLM-tier linter — empty array is the most common shape."
+method-router decision,10,10,0,0,"Phase 2 method router — small classification, low ambiguity."
+blocking-scorer tuple[],10,10,0,0,"Phase 2 blocking scorer — fixed-length array shape."

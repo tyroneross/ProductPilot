@@ -16,7 +16,7 @@
  *
  * Security:
  *   - Production guard: line 1 of executable code.
- *   - ANTHROPIC_API_KEY read from env only — never logged.
+ *   - GROQ_API_KEY / ANTHROPIC_API_KEY read from env only — never logged.
  *   - No DB writes (storage-hybrid not imported; recordLlmCall fires internally
  *     inside AIService but fails silently on missing DB connection).
  *   - No proprietary references, no PII-shaped data.
@@ -114,11 +114,9 @@ function makeStageStub(template: (typeof DEFAULT_STAGES)[number]): Stage {
 // Resolve model name — mirrors AIService.normalizeModel logic
 // ---------------------------------------------------------------------------
 function resolveModel(task: "deliverable" | "complex"): string {
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
-  if (hasAnthropic) {
-    return task === "complex" ? "claude-opus-4-7" : "claude-sonnet-4-5";
-  }
-  // Groq fallback
+  // 2026-05-02 routing override: AIService.getDefaultConfig now routes
+  // deliverable/complex to Groq even when both keys are present. Keep this
+  // helper aligned so the cost-summing math uses the right rate row.
   return "openai/gpt-oss-120b";
 }
 
@@ -309,16 +307,16 @@ async function main() {
   // Check for API key before incurring any cost
   if (!process.env.ANTHROPIC_API_KEY && !process.env.GROQ_API_KEY) {
     console.error(
-      "[eval] No ANTHROPIC_API_KEY or GROQ_API_KEY found in environment. " +
-      "Set ANTHROPIC_API_KEY and re-run. Aborting.",
+      "[eval] No GROQ_API_KEY or ANTHROPIC_API_KEY found in environment. " +
+      "Set GROQ_API_KEY and re-run. Aborting.",
     );
     process.exit(1);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     console.warn(
-      "[eval] ANTHROPIC_API_KEY not set — falling back to Groq. " +
-      "Cost rates will use Groq pricing. Results may differ from Anthropic baseline.",
+      "[eval] GROQ_API_KEY not set — alpha defaults route through Anthropic. " +
+      "This path is only exercised when the user supplies BYOK Anthropic credentials.",
     );
   }
 
@@ -536,22 +534,23 @@ async function measureCache(): Promise<void> {
 //
 // Pass criterion (plan §Phase 2): median questions_asked across 5 fixtures ≤ 7.
 //
-// Skips the LLM path when ANTHROPIC_API_KEY is absent (Groq does not match the
-// shapes of our adaptive sub-prompts well; routing to Groq would degrade signal).
-// In skip mode we still write a sentinel row so the report can cite the deferral.
+// 2026-05-02 routing override: the IntakeController defaults to Groq when
+// GROQ_API_KEY is present (with or without an Anthropic key). Only skip
+// when neither key is configured. The Groq structured-output reliability
+// test (server/test/groq-structured-output.test.ts) is the empirical
+// support for ≥90% first-pass JSON validity on the controller's schemas.
 // ---------------------------------------------------------------------------
 async function evalAdaptive(): Promise<void> {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const adaptivePath = join(__dirname, "baselines/2026-05-02-adaptive.csv");
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GROQ_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     console.warn(
-      "[adaptive-eval] ANTHROPIC_API_KEY not set — IntakeController sub-prompts run on Haiku-tier; " +
-      "skipping live run with sentinel CSV row.",
+      "[adaptive-eval] No GROQ_API_KEY or ANTHROPIC_API_KEY set — skipping live run with sentinel CSV row.",
     );
     const sentinel = [
       "# Phase 2 adaptive intake eval — 2026-05-02",
-      "# DEFERRED: ANTHROPIC_API_KEY not set in env at run time. [CLEANUP] tracking.",
+      "# DEFERRED: no LLM provider key set in env at run time. [CLEANUP] tracking.",
       "# When run live the script routes each fixture through IntakeController.nextStep+ingestAnswer until done.",
       "fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result",
       ...SAMPLE_PRODUCTS.map((p) => `${p.id},${p.archetype},0,0,0,0.000000,deferred`),

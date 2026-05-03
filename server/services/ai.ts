@@ -155,15 +155,20 @@ export class AIService {
       throw new Error("No LLM API key configured. Set GROQ_API_KEY or ANTHROPIC_API_KEY.");
     }
 
-    // With both keys: deliverables + classification + complex go to Anthropic; chat stays on Groq.
+    // 2026-05-02 routing override: Phase 3/4/5 alpha runs on Groq even when an
+    // Anthropic key is present. Rationale: the user has GROQ_API_KEY and wants
+    // alpha to ship on a single live provider. Anthropic stays reachable via
+    // explicit BYOK (userConfig.provider='anthropic') so cache_control code
+    // paths remain exercised when the caller opts in. The previous "both keys
+    // → Anthropic for deliverable/complex/classification" rule is recorded in
+    // git history (commit before this one) for the day Anthropic comes back.
     if (hasAnthropic && hasGroq) {
       switch (task) {
         case 'deliverable':
-          return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY!, model: 'claude-sonnet-4-5' };
         case 'complex':
-          return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY!, model: 'claude-opus-4-7' };
+          return { provider: 'groq', apiKey: process.env.GROQ_API_KEY!, model: GROQ_MODELS.reasoning };
         case 'classification':
-          return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY!, model: 'claude-haiku-4-5' };
+          return { provider: 'groq', apiKey: process.env.GROQ_API_KEY!, model: GROQ_MODELS.fast };
         case 'chat':
         default:
           return { provider: 'groq', apiKey: process.env.GROQ_API_KEY!, model: GROQ_MODELS.fast };

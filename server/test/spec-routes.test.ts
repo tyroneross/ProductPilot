@@ -96,7 +96,10 @@ let testAudit: any[];
 
 beforeEach(async () => {
   // Without a key the LLM tier short-circuits in spec-linter — we want that.
+  // 2026-05-02: linter's hasKey gate now reads either GROQ_API_KEY or
+  // ANTHROPIC_API_KEY, so clear both.
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.GROQ_API_KEY;
   vi.resetModules();
   const { registerRoutes } = await import("../routes");
   const storageMod = await import("../storage-hybrid");

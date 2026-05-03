@@ -539,7 +539,13 @@ const ALLOWED_LLM_CATEGORIES = new Set(["ambiguous_language", "unresolved_contra
 
 async function llmCheck(input: LintInput): Promise<{ issues: LintIssue[]; ran: boolean }> {
   // No llmConfig + no global key → skip cleanly.
-  const hasKey = !!input.llmConfig?.apiKey || !!process.env.ANTHROPIC_API_KEY;
+  // 2026-05-02: Groq is now the default provider for the LLM-tier review
+  // (defaultModel on shared/prompts/lint/spec-review.ts → llama-3.1-8b-instant);
+  // accept either Anthropic or Groq global key as the gate signal.
+  const hasKey =
+    !!input.llmConfig?.apiKey ||
+    !!process.env.GROQ_API_KEY ||
+    !!process.env.ANTHROPIC_API_KEY;
   if (!hasKey) return { issues: [], ran: false };
 
   // Validate spec entity ids the LLM will be allowed to cite, so a hallucinated

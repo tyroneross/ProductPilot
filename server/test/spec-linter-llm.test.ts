@@ -13,13 +13,16 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { ProductStateSchema, SpecSchema } from "@shared/schema";
 
 // We mock both the env key (so no real provider is hit) and the AIService
-// instance the linter imports.
+// instance the linter imports. 2026-05-02: linter's hasKey gate now accepts
+// either GROQ_API_KEY or ANTHROPIC_API_KEY; tests stand on the Groq side
+// because that's the new default routing.
 beforeEach(() => {
   vi.resetModules();
-  process.env.ANTHROPIC_API_KEY = "test-key-12345";
+  process.env.GROQ_API_KEY = "test-key-12345";
 });
 
 afterEach(() => {
+  delete process.env.GROQ_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   vi.unstubAllEnvs?.();
 });
@@ -152,6 +155,7 @@ describe("spec-linter — LLM tier dispatch", () => {
   });
 
   it("skips the LLM tier silently when no key is configured", async () => {
+    delete process.env.GROQ_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
     vi.doMock("../services/ai", async () => {
       const real = await vi.importActual<any>("../services/ai");
