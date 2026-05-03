@@ -33,6 +33,22 @@ describe("AdaptiveIntake — render states", () => {
     expect(screen.getByTestId("adaptive-intake-loading")).toBeTruthy();
   });
 
+  it("loading state shows a Cancel escape hatch when onCancel is provided", () => {
+    const fetcher = vi.fn(() => new Promise(() => {})); // never resolves
+    const onCancel = vi.fn();
+    render(<AdaptiveIntake projectId="p1" fetcher={fetcher as any} onCancel={onCancel} />);
+    const btn = screen.getByTestId("adaptive-intake-cancel");
+    expect(btn).toBeTruthy();
+    btn.click();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("loading state omits the Cancel button when onCancel is not provided", () => {
+    const fetcher = vi.fn(() => new Promise(() => {})); // never resolves
+    render(<AdaptiveIntake projectId="p1" fetcher={fetcher as any} />);
+    expect(screen.queryByTestId("adaptive-intake-cancel")).toBeNull();
+  });
+
   it("renders ASK action with question, chips, and textarea", async () => {
     const askAction: IntakeAction = {
       action: "ask",

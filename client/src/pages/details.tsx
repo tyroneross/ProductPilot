@@ -291,6 +291,7 @@ export default function DetailsPage() {
           <AdaptiveIntake
             projectId={adaptiveProjectId}
             onComplete={() => setLocation(`/documents/${adaptiveProjectId}`)}
+            onCancel={() => setLocation("/projects")}
             onChallengeAssumption={(a) => {
               toast({
                 title: "Challenged assumption",

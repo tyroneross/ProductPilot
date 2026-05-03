@@ -98,6 +98,8 @@ export interface AdaptiveIntakeProps {
   onChallengeAssumption?: (assumption: SafeDefault) => void;
   /** Called after a successful tradeoff-weight finalize. Caller routes to Brief view. */
   onFinalize?: (result: { spec: unknown; renderedMarkdown: string }) => void;
+  /** Called when the user bails out of intake (e.g. from the loading screen escape hatch). Caller routes back to projects. */
+  onCancel?: () => void;
 }
 
 // Default fetcher uses fetch with credentials so the auth cookie flows.
@@ -125,6 +127,7 @@ export function AdaptiveIntake({
   onComplete,
   onChallengeAssumption,
   onFinalize,
+  onCancel,
 }: AdaptiveIntakeProps) {
   const [action, setAction] = useState<IntakeAction | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -193,9 +196,47 @@ export function AdaptiveIntake({
 
   // ----- render states -----
   if (loading) {
+    // Render a small skeleton (textarea-shaped block) plus a Cancel escape
+    // hatch. Two reasons:
+    //   1) UX — if /intake/next stalls or the user changes their mind during
+    //      the network roundtrip, they can bail back to /projects rather than
+    //      being trapped on a loading screen.
+    //   2) Audit visibility — IBR audits expect at least one interactive
+    //      element on every page state. A loading screen with only static
+    //      text reads as `elementsScanned: 0` and trips false signals.
     return (
       <div data-testid="adaptive-intake-loading" style={containerStyle}>
-        <p style={{ color: "#a89a8c", fontSize: "13px" }}>Loading next question…</p>
+        <p style={{ color: "#a89a8c", fontSize: "13px", marginBottom: "12px" }}>Loading next question…</p>
+        <div
+          aria-hidden="true"
+          style={{
+            height: "60px",
+            background: "rgba(245,240,235,0.04)",
+            borderRadius: "8px",
+            marginBottom: "12px",
+          }}
+        />
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            data-testid="adaptive-intake-cancel"
+            aria-label="Cancel and return to projects"
+            style={{
+              minHeight: "36px",
+              padding: "8px 14px",
+              background: "transparent",
+              color: "#a89a8c",
+              border: "1px solid rgba(200,180,160,0.18)",
+              borderRadius: "8px",
+              fontFamily: "inherit",
+              fontSize: "13px",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        )}
       </div>
     );
   }
