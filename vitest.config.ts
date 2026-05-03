@@ -12,11 +12,16 @@ import react from "@vitejs/plugin-react";
  *
  * Tests live under server/test/. Naming convention: `*.test.ts`.
  *
- * The integration test for RLS (server/test/rls-spec-artifacts.test.ts)
- * skips itself when TEST_DATABASE_URL is unset; CI sets it. See the
- * [CLEANUP] register in the Phase 1 completion report for the open item
- * to wire that env var into local dev.
+ * RLS live-run mode: when `RLS_SANDBOX=1` is set (via `npm run test:rls`),
+ * `server/test/helpers/rls-global-setup.ts` provisions an ephemeral Postgres
+ * database against the local `postgresql@15` Homebrew service, applies all
+ * migrations, and exposes the connection string via `RLS_SANDBOX_URL`. The
+ * sandbox is dropped on teardown. Default `npm run test` is unaffected; the
+ * RLS test file skips itself when neither `RLS_SANDBOX` nor the legacy
+ * `TEST_DATABASE_URL` is set. See `server/test/README.md`.
  */
+const useRlsSandbox = process.env.RLS_SANDBOX === "1";
+
 export default defineConfig({
   // @vitejs/plugin-react handles the JSX transform for *.test.tsx component tests.
   // tsconfig has `jsx: preserve` (Vite's responsibility); without this plugin Vitest's
@@ -32,6 +37,9 @@ export default defineConfig({
     ],
     globals: false,
     testTimeout: 15000,
+    // Gated globalSetup: only spin up the Postgres sandbox when explicitly
+    // opted in. Avoids burdening the default test path with a DB dependency.
+    globalSetup: useRlsSandbox ? ["./server/test/helpers/rls-global-setup.ts"] : [],
   },
   resolve: {
     alias: {

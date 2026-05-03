@@ -13,7 +13,8 @@
     "build:vercel": "vite build && esbuild api/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist/api",
     "eval:intake": "node --env-file=.env.local --import=tsx server/test/eval-intake.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:rls": "RLS_SANDBOX=1 vitest run server/test/rls-spec-artifacts.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
