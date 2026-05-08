@@ -120,6 +120,18 @@ export default function DocumentViewPage() {
   );
   const publishBlocked = unwaivedBlockers.length > 0;
 
+  // Adaptive-intake gating: when project is in adaptive mode AND no answers
+  // have been captured yet, the regenerate endpoint will 400 with
+  // `adaptive_intake_incomplete`. Surface a "Continue intake" link rather than
+  // a button that 400s, so the user knows where to go.
+  const adaptiveIntakeAnswers = ((project?.productState as
+    | { workingMemory?: { intakeAnswers?: unknown[] } }
+    | null
+    | undefined)?.workingMemory?.intakeAnswers) ?? [];
+  const adaptiveIntakeIncomplete =
+    project?.intakeMode === "adaptive" && adaptiveIntakeAnswers.length === 0;
+  const continueIntakeHref = projectId ? `/details?projectId=${projectId}&adaptive=1` : "/details";
+
   // Build ordered list of docs with their stage data
   const orderedDocs = DOC_TYPES.map((dt) => ({
     ...dt,
@@ -306,10 +318,22 @@ export default function DocumentViewPage() {
         title: "Document regenerated",
         description: `${stage.title} has been regenerated with ${detailLevel} level.`,
       });
-    } catch {
+    } catch (err) {
+      // apiRequest throws Error(`${status}: ${body}`). Body may be JSON ({message:...}) or plain text.
+      const raw = err instanceof Error ? err.message : String(err);
+      const colon = raw.indexOf(": ");
+      const status = colon > 0 ? raw.slice(0, colon) : "";
+      const body = colon > 0 ? raw.slice(colon + 2) : raw;
+      let serverMessage = body;
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && typeof parsed.message === "string") serverMessage = parsed.message;
+      } catch {
+        // body wasn't JSON — fall through with the raw text
+      }
       toast({
-        title: "Regeneration failed",
-        description: "Please try again.",
+        title: status === "400" ? "Can't generate yet" : "Regeneration failed",
+        description: serverMessage || "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -519,15 +543,27 @@ export default function DocumentViewPage() {
               <Download style={{ width: 13, height: 13 }} />
               <span>{isExporting ? "Exporting…" : publishBlocked ? "Export blocked" : "Export All"}</span>
             </ActionButton>
-            <ActionButton
-              onClick={() => setShowRegenerateDialog(true)}
-              disabled={isRegenerating}
-              data-testid="button-regenerate-document"
-              aria-label="Regenerate document"
-            >
-              <RefreshCw style={{ width: 13, height: 13, animation: isRegenerating ? "spin 0.8s linear infinite" : "none" }} />
-              <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
-            </ActionButton>
+            {adaptiveIntakeIncomplete ? (
+              <ActionButton
+                onClick={() => setLocation(continueIntakeHref)}
+                disabled={false}
+                data-testid="button-continue-intake"
+                aria-label="Continue adaptive intake"
+              >
+                <ArrowLeft style={{ width: 13, height: 13 }} />
+                <span>Continue intake</span>
+              </ActionButton>
+            ) : (
+              <ActionButton
+                onClick={() => setShowRegenerateDialog(true)}
+                disabled={isRegenerating}
+                data-testid="button-regenerate-document"
+                aria-label="Regenerate document"
+              >
+                <RefreshCw style={{ width: 13, height: 13, animation: isRegenerating ? "spin 0.8s linear infinite" : "none" }} />
+                <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
+              </ActionButton>
+            )}
           </div>
         </div>
 
@@ -741,26 +777,49 @@ export default function DocumentViewPage() {
             }}
           >
             <p style={{ fontSize: 13, color: "#a89a8c", marginBottom: 16 }}>
-              No content has been generated for this document yet.
+              {adaptiveIntakeIncomplete
+                ? "Finish the adaptive intake to generate this document."
+                : "No content has been generated for this document yet."}
             </p>
-            <button
-              onClick={() => setShowRegenerateDialog(true)}
-              style={{
-                padding: "8px 16px",
-                background: "#f0b65e",
-                color: "#110f0d",
-                border: "none",
-                borderRadius: 6,
-                fontSize: 13,
-                fontWeight: 500,
-                fontFamily: "inherit",
-                cursor: "pointer",
-                minHeight: 36,
-              }}
-              data-testid="button-generate-document"
-            >
-              Generate Document
-            </button>
+            {adaptiveIntakeIncomplete ? (
+              <button
+                onClick={() => setLocation(continueIntakeHref)}
+                style={{
+                  padding: "8px 16px",
+                  background: "#f0b65e",
+                  color: "#110f0d",
+                  border: "none",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  minHeight: 36,
+                }}
+                data-testid="button-continue-intake-empty"
+              >
+                Continue intake
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowRegenerateDialog(true)}
+                style={{
+                  padding: "8px 16px",
+                  background: "#f0b65e",
+                  color: "#110f0d",
+                  border: "none",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  minHeight: 36,
+                }}
+                data-testid="button-generate-document"
+              >
+                Generate Document
+              </button>
+            )}
           </div>
         )}
       </main>

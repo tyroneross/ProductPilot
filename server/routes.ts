@@ -833,8 +833,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const { project } = projectAccess;
 
-      if (!project.surveyResponses || !project.surveyDefinition) {
-        return res.status(400).json({ message: "Survey not completed" });
+      // Resolve survey-shaped inputs for the doc-generation prompt. Three sources, in order:
+      //   1. Legacy: project.surveyDefinition + project.surveyResponses (8-question intake flow).
+      //   2. Adaptive: project.intakeMode === 'adaptive' → synthesize from
+      //      productState.workingMemory.intakeAnswers[] (the adaptive intake's append log).
+      //   3. minimumDetails: when neither survey nor adaptive answers exist but
+      //      minimumDetails was captured, project that into a Q/A list.
+      // The buildDocumentGenerationPrompt accepts `unknown` for both fields and
+      // JSON.stringifies them into the prompt — synthesizing the same shape keeps
+      // the LLM contract stable across intake modes.
+      let surveyDefinition: unknown = project.surveyDefinition;
+      let surveyResponses: unknown = project.surveyResponses;
+
+      if (!surveyResponses || !surveyDefinition) {
+        if (project.intakeMode === "adaptive") {
+          const productState = (project.productState ?? {}) as {
+            workingMemory?: {
+              intakeAnswers?: Array<{
+                step?: string;
+                method?: string | null;
+                question?: string;
+                answer?: unknown;
+                metadata?: Record<string, unknown>;
+              }>;
+            };
+          };
+          const intakeAnswers = Array.isArray(productState.workingMemory?.intakeAnswers)
+            ? productState.workingMemory!.intakeAnswers!
+            : [];
+          if (intakeAnswers.length === 0) {
+            return res.status(400).json({
+              message:
+                "Adaptive intake has no captured answers yet. Continue the intake flow before regenerating documents.",
+              code: "adaptive_intake_incomplete",
+            });
+          }
+          surveyDefinition = {
+            source: "adaptive_intake",
+            description:
+              "Synthesized from productState.workingMemory.intakeAnswers — adaptive controller-driven Q/A.",
+            questions: intakeAnswers.map((row, i) => ({
+              id: `adaptive-q-${i}`,
+              step: row.step ?? null,
+              method: row.method ?? null,
+              question: row.question ?? `Adaptive question ${i + 1}`,
+            })),
+          };
+          surveyResponses = Object.fromEntries(
+            intakeAnswers.map((row, i) => [`adaptive-q-${i}`, row.answer ?? null]),
+          );
+        } else if (project.minimumDetails) {
+          // Project minimumDetails into a Q/A shape so the same prompt works.
+          const md = project.minimumDetails as Record<string, unknown>;
+          const entries = Object.entries(md).filter(([, v]) => v !== null && v !== undefined && v !== "");
+          if (entries.length === 0) {
+            return res.status(400).json({ message: "Minimum details are empty.", code: "minimum_details_empty" });
+          }
+          surveyDefinition = {
+            source: "minimum_details",
+            description: "Synthesized from project.minimumDetails.",
+            questions: entries.map(([key], i) => ({ id: `min-${i}`, key, question: key })),
+          };
+          surveyResponses = Object.fromEntries(entries.map(([key, value], i) => [`min-${i}`, value]));
+        } else {
+          return res.status(400).json({
+            message:
+              "No intake captured for this project yet. Complete the survey or adaptive intake before regenerating documents.",
+            code: "intake_incomplete",
+          });
+        }
       }
 
       // Parse document preferences from request body
@@ -875,7 +942,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const userConfig = await getLLMConfig(req);
 
-      await Promise.allSettled(stages.map(async (stage) => {
+      const stageResults = await Promise.all(stages.map(async (stage) => {
         // Get detail level for this stage (default to detailed)
         const detailLevel = preferencesMap.get(stage.id) || "detailed";
 
@@ -889,12 +956,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (titleLower.includes('test') || titleLower.includes('qa') || titleLower.includes('quality') || titleLower.includes('guide') || titleLower.includes('deploy') || titleLower.includes('release')) return 'testing';
           return 'general';
         })();
-        
+
         const relevantPrompts = activePrompts.filter(p => p.category === stageCategory || p.category === 'general');
         const docPrompt = buildDocumentGenerationPrompt({
           stage,
-          surveyDefinition: project.surveyDefinition,
-          surveyResponses: project.surveyResponses,
+          surveyDefinition,
+          surveyResponses,
           detailLevel,
           activePrompts,
           relevantPrompts,
@@ -949,15 +1016,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
               detailLevel,
             },
           }).catch((e) => logger.error({ err: e }, "[audit] stage.regenerate failed"));
-        } catch (stageError) {
-          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage");
-        }
-      }))
 
-      res.json({ message: "Documentation generated successfully" });
+          return { ok: true as const, stageId: stage.id, stageTitle: stage.title };
+        } catch (stageError) {
+          const message = stageError instanceof Error ? stageError.message : String(stageError);
+          logger.error({ err: stageError, stageTitle: stage.title, stageNumber: stage.stageNumber }, "Error generating docs for stage");
+          return { ok: false as const, stageId: stage.id, stageTitle: stage.title, error: message };
+        }
+      }));
+
+      const failed = stageResults.filter(r => !r.ok) as Array<{ ok: false; stageId: string; stageTitle: string; error: string }>;
+      const succeeded = stageResults.filter(r => r.ok);
+
+      // All stages failed — surface the first error so the client can show it.
+      if (succeeded.length === 0 && failed.length > 0) {
+        return res.status(502).json({
+          message: `Doc generation failed: ${failed[0].error}`,
+          failed: failed.map(f => ({ stageTitle: f.stageTitle, error: f.error })),
+        });
+      }
+
+      res.json({
+        message: "Documentation generated successfully",
+        succeeded: succeeded.length,
+        failed: failed.length,
+        ...(failed.length > 0 ? { failures: failed.map(f => ({ stageTitle: f.stageTitle, error: f.error })) } : {}),
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Doc generation error");
-      res.status(500).json({ message: "Failed to generate documentation" });
+      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
     }
   });
 
@@ -1037,7 +1125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const userConfig = await getLLMConfig(req);
 
-      await Promise.allSettled(coreStagesToGenerate.map(async (stage) => {
+      const minResults = await Promise.all(coreStagesToGenerate.map(async (stage) => {
         const docPrompt = buildMinimumDetailsDocumentPrompt({
           stage,
           minimalContext,
@@ -1067,15 +1155,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
 
           await storage.updateStage(stage.id, { progress: 100 });
+          return { ok: true as const, stageTitle: stage.title };
         } catch (stageError) {
-          logger.error({ err: stageError, stageTitle: stage.title }, "Error generating docs for stage (minimum)");
+          const message = stageError instanceof Error ? stageError.message : String(stageError);
+          logger.error({ err: stageError, stageTitle: stage.title, stageNumber: stage.stageNumber }, "Error generating docs for stage (minimum)");
+          return { ok: false as const, stageTitle: stage.title, error: message };
         }
       }));
 
-      res.json({ message: "Documentation generated from minimum details" });
+      const minFailed = minResults.filter(r => !r.ok) as Array<{ ok: false; stageTitle: string; error: string }>;
+      const minSucceeded = minResults.filter(r => r.ok);
+
+      if (minSucceeded.length === 0 && minFailed.length > 0) {
+        return res.status(502).json({
+          message: `Doc generation failed: ${minFailed[0].error}`,
+          failed: minFailed.map(f => ({ stageTitle: f.stageTitle, error: f.error })),
+        });
+      }
+
+      res.json({
+        message: "Documentation generated from minimum details",
+        succeeded: minSucceeded.length,
+        failed: minFailed.length,
+        ...(minFailed.length > 0 ? { failures: minFailed.map(f => ({ stageTitle: f.stageTitle, error: f.error })) } : {}),
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Min doc generation error");
-      res.status(500).json({ message: "Failed to generate documentation" });
+      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
     }
   });
 
