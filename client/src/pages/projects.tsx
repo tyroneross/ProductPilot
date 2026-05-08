@@ -112,27 +112,31 @@ export default function ProjectsPage() {
               Resume where you left off or start a new product.
             </p>
           </div>
-          {/* Desktop CTA */}
+          {/* Desktop CTA — hidden in empty state so the hero button is the single primary action */}
+          {(isLoading || sorted.length > 0) && (
+            <button
+              onClick={() => setLocation("/details")}
+              data-testid="button-new-product"
+              style={{ ...ctaStyle, height: 40, padding: "0 18px" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
+              className="hidden-mobile"
+            >
+              Start new product
+            </button>
+          )}
+        </div>
+
+        {/* Mobile CTA — same gating as desktop */}
+        {(isLoading || sorted.length > 0) && (
           <button
             onClick={() => setLocation("/details")}
-            data-testid="button-new-product"
-            style={{ ...ctaStyle, height: 40, padding: "0 18px" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
-            className="hidden-mobile"
+            className="show-mobile"
+            style={{ ...ctaStyle, width: "100%", height: 48, fontSize: 15, borderRadius: 10, marginBottom: 28 }}
           >
             Start new product
           </button>
-        </div>
-
-        {/* Mobile CTA */}
-        <button
-          onClick={() => setLocation("/details")}
-          className="show-mobile"
-          style={{ ...ctaStyle, width: "100%", height: 48, fontSize: 15, borderRadius: 10, marginBottom: 28 }}
-        >
-          Start new product
-        </button>
+        )}
 
         <style>{`
           .hidden-mobile { display: inline-flex !important; }

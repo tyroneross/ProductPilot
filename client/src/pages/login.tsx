@@ -35,6 +35,27 @@ export default function LoginPage() {
   const [magicLinkLoading, setMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
 
+  // Auth provider capabilities — drives "Coming soon" greying for unconfigured providers.
+  // Optimistic defaults (assume enabled) so the UI doesn't flash a disabled state on load;
+  // capabilities arrive within a render and correct any unconfigured provider before interaction.
+  const [capabilities, setCapabilities] = useState<{ google: boolean; magicLink: boolean }>({
+    google: true,
+    magicLink: true,
+  });
+  useEffect(() => {
+    fetch("/api/auth/capabilities", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data === "object") {
+          setCapabilities({
+            google: Boolean(data.google),
+            magicLink: Boolean(data.magicLink),
+          });
+        }
+      })
+      .catch(() => { /* leave optimistic defaults */ });
+  }, []);
+
   // Forgot password state
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
@@ -494,7 +515,10 @@ export default function LoginPage() {
           {/* Google button */}
           <button
             type="button"
-            onClick={handleGoogleSignIn}
+            onClick={capabilities.google ? handleGoogleSignIn : undefined}
+            disabled={!capabilities.google}
+            aria-disabled={!capabilities.google}
+            title={capabilities.google ? undefined : "Google sign-in is not yet configured for this deployment."}
             style={{
               width: "100%",
               height: "44px",
@@ -502,15 +526,17 @@ export default function LoginPage() {
               alignItems: "center",
               justifyContent: "center",
               gap: "10px",
-              background: "#f5f0eb",
-              color: "#110f0d",
+              background: capabilities.google ? "#f5f0eb" : "#3a3530",
+              color: capabilities.google ? "#110f0d" : "#8a7e72",
               border: "none",
               borderRadius: "8px",
               fontSize: "14px",
               fontWeight: 600,
               fontFamily: "inherit",
-              cursor: "pointer",
+              cursor: capabilities.google ? "pointer" : "not-allowed",
+              opacity: capabilities.google ? 1 : 0.7,
               marginBottom: "0.75rem",
+              position: "relative",
             }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24">
@@ -531,7 +557,25 @@ export default function LoginPage() {
                 fill="#EA4335"
               />
             </svg>
-            Continue with Google
+            <span>Continue with Google</span>
+            {!capabilities.google && (
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  color: "#a89a8c",
+                  background: "rgba(168,154,140,0.12)",
+                  border: "1px solid rgba(168,154,140,0.25)",
+                  borderRadius: "4px",
+                  padding: "2px 6px",
+                  marginLeft: "4px",
+                }}
+              >
+                Coming soon
+              </span>
+            )}
           </button>
 
           {/* Demo mode — promoted alternative path (NN/g: primary action visible, weighted appropriately) */}
@@ -815,8 +859,10 @@ export default function LoginPage() {
               <>
                 <button
                   type="button"
-                  onClick={handleMagicLink}
-                  disabled={magicLinkLoading || authLoading}
+                  onClick={capabilities.magicLink ? handleMagicLink : undefined}
+                  disabled={!capabilities.magicLink || magicLinkLoading || authLoading}
+                  aria-disabled={!capabilities.magicLink || magicLinkLoading || authLoading}
+                  title={capabilities.magicLink ? undefined : "Magic Link sign-in is not yet configured for this deployment."}
                   style={{
                     height: "44px",
                     width: "100%",
@@ -825,29 +871,48 @@ export default function LoginPage() {
                     justifyContent: "center",
                     gap: "8px",
                     background: "transparent",
-                    color: magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c",
+                    color: !capabilities.magicLink || magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c",
                     border: "1px solid rgba(200,180,160,0.18)",
                     borderRadius: "8px",
                     fontSize: "14px",
                     fontWeight: 500,
                     fontFamily: "inherit",
-                    cursor: magicLinkLoading || authLoading ? "not-allowed" : "pointer",
+                    cursor: !capabilities.magicLink || magicLinkLoading || authLoading ? "not-allowed" : "pointer",
+                    opacity: !capabilities.magicLink ? 0.7 : 1,
                     transition: "border-color 0.15s, color 0.15s",
                     marginTop: "4px",
                   }}
                   onMouseEnter={(e) => {
-                    if (!magicLinkLoading && !authLoading) {
+                    if (capabilities.magicLink && !magicLinkLoading && !authLoading) {
                       e.currentTarget.style.borderColor = "rgba(200,180,160,0.35)";
                       e.currentTarget.style.color = "#f5f0eb";
                     }
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.borderColor = "rgba(200,180,160,0.18)";
-                    e.currentTarget.style.color = magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c";
+                    e.currentTarget.style.color = !capabilities.magicLink || magicLinkLoading || authLoading ? "#6b5d52" : "#a89a8c";
                   }}
                 >
                   <Mail size={16} />
-                  {magicLinkLoading ? "Sending…" : "Continue with Magic Link"}
+                  <span>{magicLinkLoading ? "Sending…" : "Continue with Magic Link"}</span>
+                  {!capabilities.magicLink && (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 500,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        color: "#a89a8c",
+                        background: "rgba(168,154,140,0.12)",
+                        border: "1px solid rgba(168,154,140,0.25)",
+                        borderRadius: "4px",
+                        padding: "2px 6px",
+                        marginLeft: "4px",
+                      }}
+                    >
+                      Coming soon
+                    </span>
+                  )}
                 </button>
                 {magicLinkSent && (
                   <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>

@@ -279,6 +279,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
   });
 
+  // Public capabilities endpoint — tells the login UI which auth providers
+  // are actually wired so it can grey out the rest. Drives the "Coming soon"
+  // state next to Google and Magic Link when their server-side env is missing.
+  app.get("/api/auth/capabilities", (_req, res) => {
+    res.json({
+      google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      magicLink: Boolean(process.env.RESEND_API_KEY && process.env.AUTH_FROM_EMAIL),
+      password: true,
+    });
+  });
+
   // Admin check endpoint
   app.get("/api/admin/check", requireAuth, (req: any, res) => {
     res.json({
