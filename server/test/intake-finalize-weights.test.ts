@@ -214,16 +214,20 @@ describe("POST /api/projects/:projectId/intake/finalize — Phase 4 weights body
     expect(sumErr).toBeDefined();
   });
 
-  it("returns 400 with code=tradeoff_weights_required when body omits weights AND productState has none", async () => {
+  it("auto-defaults weights and finalizes successfully when body omits AND productState has none", async () => {
+    // No-blocks principle (2026-05-08): instead of refusing, finalize fills in
+    // a sensible default tradeoff allocation and flags weightsAssumed=true so
+    // the user can spot-check or override later.
     makeProject("p-finalize-3"); // productState has no tradeoffWeights
     const res = await post(
       "/api/projects/p-finalize-3/intake/finalize",
       {}, // no weights
       { "x-test-user": "ownerA" },
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.code).toBe("tradeoff_weights_required");
+    expect(body.weightsAssumed).toBe(true);
+    expect(body.spec).toBeDefined();
   });
 
   it("returns 400 when unacceptable_tradeoff is outside the six-axis enum", async () => {

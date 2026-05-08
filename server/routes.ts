@@ -1388,12 +1388,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hydrateProductState,
         finalize,
         applyTradeoffWeights,
-        weightsAreSet,
+        ensureTradeoffWeights,
       } = await import("./services/intake-controller");
       let productState = hydrateProductState(project.productState);
 
       const bodyWeights = req.body?.tradeoffWeights;
       let weightsApplied = false;
+      let weightsAssumed = false;
       if (bodyWeights !== undefined) {
         try {
           const result = applyTradeoffWeights({ state: productState, weights: bodyWeights });
@@ -1408,12 +1409,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           throw err;
         }
-      } else if (!weightsAreSet(productState.tradeoffWeights)) {
-        return res.status(400).json({
-          message:
-            "Tradeoff weights are required to finalize. Provide a tradeoffWeights body summing to 100 across the six axes plus an unacceptable_tradeoff.",
-          code: "tradeoff_weights_required",
-        });
+      } else {
+        // No-blocks principle: when the user hasn't allocated weights, fill in
+        // a sensible default and mark them assumed rather than refusing.
+        const ensured = ensureTradeoffWeights(productState);
+        if (ensured.assumed) {
+          productState = ensured.productState;
+          await storage.updateProject(project.id, { productState });
+          weightsAssumed = true;
+        }
       }
 
       const { spec, renderedMarkdown } = finalize({
@@ -1434,11 +1438,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           specId: spec.id,
           markdownChars: renderedMarkdown.length,
           weightsApplied,
+          weightsAssumed,
           tradeoffWeights: productState.tradeoffWeights ?? null,
         },
       }).catch((e) => logger.error({ err: e }, "[audit] intake.finalize failed"));
 
-      res.json({ spec, renderedMarkdown, productState });
+      res.json({ spec, renderedMarkdown, productState, weightsAssumed });
     } catch (error) {
       logger.error({ err: error }, "[intake/finalize] error");
       res.status(500).json({ message: "Failed to finalize intake" });
@@ -1614,30 +1619,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { project, actor } = projectAccess;
       if (!requireAdaptiveMode(project, res)) return;
 
-      const { hydrateProductState, finalize, weightsAreSet } = await import(
+      const { hydrateProductState, finalize, ensureTradeoffWeights } = await import(
         "./services/intake-controller"
       );
       const { lintSpec } = await import("./services/spec-linter");
       const { generateHandoff } = await import("./services/agent-handoff");
       const { scrubSecretsDeep } = await import("./lib/secret-crypto");
 
-      const productState = hydrateProductState(project.productState);
+      let productState = hydrateProductState(project.productState);
 
-      // Gate 3: weights must be allocated. Mirrors the intake/finalize gate.
-      if (!weightsAreSet(productState.tradeoffWeights)) {
-        void storage.createAuditEvent({
-          actorType: actor.kind,
-          actorId: actor.id,
-          action: "handoff.export",
-          resourceType: "project",
-          resourceId: project.id,
-          metadata: { outcome: "blocked", reason: "tradeoff_weights_required" },
-        }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
-        return res.status(409).json({
-          message:
-            "Tradeoff weights are required before export. Allocate the 100-point distribution across the six axes plus an unacceptable_tradeoff.",
-          code: "tradeoff_weights_required",
-        });
+      // No-blocks principle: when weights aren't allocated, default them and
+      // surface the assumption in the audit + response rather than refusing.
+      const ensured = ensureTradeoffWeights(productState);
+      let weightsAssumed = false;
+      if (ensured.assumed) {
+        productState = ensured.productState;
+        await storage.updateProject(project.id, { productState });
+        weightsAssumed = true;
       }
 
       // Build the spec the same way intake/finalize does.
@@ -1710,9 +1708,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           markdownChars: handoffMarkdown.length,
           platformTarget: spec.platformTarget,
           waiverIds: Object.keys(waiverBag),
+          weightsAssumed,
         },
       }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
 
+      if (weightsAssumed) {
+        res.setHeader("X-Weights-Assumed", "true");
+      }
       res.setHeader("Content-Type", "text/markdown; charset=utf-8");
       res.status(200).send(handoffMarkdown);
     } catch (error) {

@@ -573,6 +573,46 @@ export function weightsAreSet(weights: TradeoffWeights | undefined | null): bool
 }
 
 /**
+ * No-blocks principle (2026-05-08) — sensible default tradeoff allocation
+ * used when finalize or export is called and the user hasn't filled the
+ * 100-point form yet. The controller used to hard-reject; now it auto-fills
+ * with this allocation and marks `tradeoff_weights_assumed=true` in working
+ * memory so downstream renderers can flag it as synthesized.
+ *
+ * Distribution rationale: even-ish split with a small +1 each on UX and speed
+ * (the two axes most projects implicitly weight highest at MVP), security
+ * declared the unacceptable tradeoff (the safest default — refusing to
+ * compromise on it cannot make a generated spec worse).
+ */
+export const DEFAULT_TRADEOFF_WEIGHTS: TradeoffWeights = {
+  speed_to_alpha: 18,
+  scalability: 16,
+  ux_polish: 18,
+  maintainability: 16,
+  cost: 16,
+  security: 16,
+  unacceptable_tradeoff: "security",
+};
+
+export function ensureTradeoffWeights(state: ProductState): {
+  productState: ProductState;
+  assumed: boolean;
+} {
+  if (weightsAreSet(state.tradeoffWeights)) {
+    return { productState: state, assumed: false };
+  }
+  const next: ProductState = ProductStateSchema.parse({
+    ...state,
+    tradeoffWeights: DEFAULT_TRADEOFF_WEIGHTS,
+    workingMemory: {
+      ...(state.workingMemory ?? {}),
+      tradeoff_weights_assumed: true,
+    },
+  });
+  return { productState: next, assumed: true };
+}
+
+/**
  * Phase 4 — apply a validated tradeoff-weight allocation to productState.
  * Pure: returns a NEW productState; caller persists. Throws ZodError on invalid
  * input so the route layer can return 400 with field-level detail.

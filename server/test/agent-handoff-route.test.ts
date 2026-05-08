@@ -233,15 +233,18 @@ describe("GET /api/projects/:projectId/handoff.md", () => {
     expect(body.code).toBe("intake_mode_not_adaptive");
   });
 
-  it("returns 409 (tradeoff_weights_required) when productState has no weights", async () => {
+  it("auto-defaults weights when productState has none and exports successfully with X-Weights-Assumed header", async () => {
+    // No-blocks principle (2026-05-08): export proceeds with synthesized
+    // weights rather than refusing. The audit row records weightsAssumed=true
+    // and the response carries an X-Weights-Assumed: true header so the
+    // downstream consumer (Claude Code) can see the allocation was inferred.
     testProjects["p3"] = makeProject("p3", {
       productState: ProductStateSchema.parse({}), // no tradeoffWeights
     });
     const res = await get("/api/projects/p3/handoff.md", { "x-test-user": "ownerA" });
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.code).toBe("tradeoff_weights_required");
-    expect(testAudit.some((e) => e.action === "handoff.export" && e.metadata?.outcome === "blocked")).toBe(true);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Weights-Assumed")).toBe("true");
+    expect(testAudit.some((e) => e.action === "handoff.export" && e.metadata?.weightsAssumed === true)).toBe(true);
   });
 
   it("returns 200 + text/markdown when all gates pass (clean lint, valid weights, adaptive mode)", async () => {
@@ -339,21 +342,22 @@ describe("GET /api/projects/:projectId/handoff.md", () => {
   it("writes a handoff.export audit row on every request (gate or success)", async () => {
     testProjects["p6"] = makeProject("p6", { intakeMode: "survey" });
     const res = await get("/api/projects/p6/handoff.md", { "x-test-user": "ownerA" });
-    // 409 from the mode gate runs BEFORE any audit row in our impl — verify
-    // that's the documented behavior. (Auth + mode gates short-circuit; only
-    // weight/PII/blocker gates write audit rows.)
+    // The intake_mode gate is structural (the route only operates on adaptive
+    // projects) and short-circuits before any audit-writing path. That part is
+    // unchanged.
     expect(res.status).toBe(409);
     expect(testAudit.filter((e) => e.action === "handoff.export").length).toBe(0);
 
-    // Now flip to adaptive without weights → audit row written.
+    // Adaptive project without weights now succeeds (weights auto-defaulted)
+    // and writes a success audit row carrying weightsAssumed=true.
     testProjects["p6"] = makeProject("p6", {
       productState: ProductStateSchema.parse({}),
     });
     const res2 = await get("/api/projects/p6/handoff.md", { "x-test-user": "ownerA" });
-    expect(res2.status).toBe(409);
+    expect(res2.status).toBe(200);
     expect(
       testAudit.filter(
-        (e) => e.action === "handoff.export" && e.metadata?.reason === "tradeoff_weights_required",
+        (e) => e.action === "handoff.export" && e.metadata?.weightsAssumed === true,
       ).length,
     ).toBe(1);
   });
