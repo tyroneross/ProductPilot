@@ -1978,18 +1978,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Settings routes (require auth) ──
 
-  // GET /api/settings — get current user's LLM settings
+  // GET /api/settings — get current user's LLM settings + platform-key availability.
+  //
+  // The server already falls back to process.env.GROQ_API_KEY (and
+  // ANTHROPIC_API_KEY) when no BYOK is configured (see services/ai.ts), so
+  // signed-in users with no key still get LLM work for free as long as the
+  // platform key is set on the host. The settings UI needs to know which
+  // platform keys are available so it can render a truthful status line
+  // instead of "free demo" text that doesn't reflect actual provider routing.
   app.get("/api/settings", requireAuth, async (req: any, res) => {
     try {
       const settings = await storage.getUserSettings(req.userId);
-      const result = settings || { llmProvider: 'groq', llmModel: 'openai/gpt-oss-120b', llmApiKey: null };
+      const result: Record<string, unknown> = settings
+        ? { ...settings }
+        : { llmProvider: 'groq', llmModel: 'openai/gpt-oss-120b', llmApiKey: null };
       // Mask API key in response
-      const rawKey = result.llm_api_key || result.llmApiKey;
+      const rawKey = (result.llm_api_key as string | null | undefined) || (result.llmApiKey as string | null | undefined);
       if (rawKey) {
         result.llmApiKeyMasked = rawKey.slice(0, 7) + '...' + rawKey.slice(-4);
         delete result.llm_api_key;
         delete result.llmApiKey;
       }
+      result.platformKeysAvailable = {
+        groq: Boolean(process.env.GROQ_API_KEY),
+        anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+        openai: Boolean(process.env.OPENAI_API_KEY),
+      };
       res.json(result);
     } catch (error) {
       res.status(500).json({ message: "Failed to get settings" });

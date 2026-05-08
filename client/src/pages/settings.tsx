@@ -18,6 +18,11 @@ interface SettingsResponse {
   llmProvider?: Provider;
   llmModel?: string;
   llmApiKeyMasked?: string;
+  platformKeysAvailable?: {
+    groq?: boolean;
+    anthropic?: boolean;
+    openai?: boolean;
+  };
 }
 
 export default function SettingsPage() {
@@ -35,6 +40,11 @@ export default function SettingsPage() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [originalProvider, setOriginalProvider] = useState<Provider>("groq");
   const [originalModel, setOriginalModel] = useState(PROVIDER_DEFAULTS.groq.model);
+  const [platformKeys, setPlatformKeys] = useState<Record<Provider, boolean>>({
+    groq: false,
+    anthropic: false,
+    openai: false,
+  });
 
   // Load settings on mount when authenticated
   useEffect(() => {
@@ -50,6 +60,13 @@ export default function SettingsPage() {
         setOriginalProvider(p);
         setOriginalModel(m);
         if (data.llmApiKeyMasked) setSavedKeyMasked(data.llmApiKeyMasked);
+        if (data.platformKeysAvailable) {
+          setPlatformKeys({
+            groq: Boolean(data.platformKeysAvailable.groq),
+            anthropic: Boolean(data.platformKeysAvailable.anthropic),
+            openai: Boolean(data.platformKeysAvailable.openai),
+          });
+        }
       })
       .catch(() => {});
   }, [isAuthenticated]);
@@ -194,8 +211,30 @@ export default function SettingsPage() {
                   LLM Configuration
                 </h2>
                 <p style={{ fontSize: "13px", color: "#a89a8c", margin: "0 0 1.5rem 0", lineHeight: 1.5 }}>
-                  Add your own API key to use a different model. Without a key, the free Groq demo is used.
+                  {platformKeys[provider]
+                    ? "Add your own API key to use a different model. Without a key, the platform key for the selected provider is used (free tier)."
+                    : "Add your own API key to start using this provider. No platform fallback is configured for this provider."}
                 </p>
+
+                {/* Banner: both BYOK and platform key missing for the selected provider. */}
+                {!savedKeyMasked && !platformKeys[provider] && (
+                  <div
+                    role="alert"
+                    data-testid="settings-no-key-banner"
+                    style={{
+                      background: "rgba(217,98,79,0.07)",
+                      border: "1px solid rgba(217,98,79,0.4)",
+                      borderRadius: "8px",
+                      padding: "10px 14px",
+                      marginBottom: "1.25rem",
+                      fontSize: "13px",
+                      color: "#e5a89a",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    No API key configured for {PROVIDER_DEFAULTS[provider].label}. Add one below to start generating documents.
+                  </div>
+                )}
 
                 {/* Provider selector */}
                 <div style={{ marginBottom: "1.25rem" }}>
@@ -336,21 +375,34 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* Status line */}
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {/* Status line — three states:
+                      BYOK set                    -> "Using <Provider> with your API key" (orange dot)
+                      No BYOK + platform key      -> "Using platform <Provider> key (free tier)" (green dot)
+                      No BYOK + no platform key   -> "No API key configured for <Provider>" (red dot)
+                */}
+                <div
+                  data-testid="settings-status-line"
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
                   <span
                     style={{
                       width: "6px",
                       height: "6px",
                       borderRadius: "50%",
                       flexShrink: 0,
-                      background: savedKeyMasked ? "#f0b65e" : "#4caf7d",
+                      background: savedKeyMasked
+                        ? "#f0b65e"
+                        : platformKeys[provider]
+                          ? "#4caf7d"
+                          : "#d9624f",
                     }}
                   />
                   <span style={{ fontSize: "13px", color: "#6b5d52" }}>
                     {savedKeyMasked
                       ? `Using ${PROVIDER_DEFAULTS[provider].label} with your API key`
-                      : "Using Groq Llama 3.3 (free demo)"}
+                      : platformKeys[provider]
+                        ? `Using platform ${PROVIDER_DEFAULTS[provider].label} key (free tier)`
+                        : `No API key configured for ${PROVIDER_DEFAULTS[provider].label}`}
                   </span>
                 </div>
               </div>
