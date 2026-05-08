@@ -43,7 +43,7 @@ export default function LoginPage() {
     magicLink: true,
   });
   useEffect(() => {
-    fetch("/api/auth/capabilities", { credentials: "include" })
+    fetch("/api/auth-capabilities", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data && typeof data === "object") {
