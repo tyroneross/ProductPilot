@@ -8,6 +8,7 @@ import { fromNodeHeaders } from "better-auth/node";
 import { db } from "../db";
 import { canSendAuthEmail, sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from "./email";
 import * as authSchema from "./schema";
+import { logger } from "../lib/logger";
 
 const authDb = (() => {
   if (!db) {
@@ -183,10 +184,16 @@ export const extractUser: RequestHandler = async (req: any, _res, next) => {
     req.authSession = session;
     req.user = session?.user ?? null;
     req.userId = session?.user?.id ?? null;
-  } catch {
+  } catch (err) {
+    // Better Auth can throw on transient KV/DB errors, malformed cookies, or
+    // expired/revoked sessions. We don't propagate (requireAuth handles 401),
+    // but we DO log so operational issues aren't invisible — silently treating
+    // every error as "no session" hid the long-running BETTER_AUTH_URL trailing-\n
+    // bug for ~2 weeks because every getSession() call was rejecting.
     req.authSession = null;
     req.user = null;
     req.userId = null;
+    logger.warn({ err, path: req.path }, "[auth] extractUser failed; treating as anonymous");
   }
 
   next();
