@@ -1535,16 +1535,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })).optional(),
       }).parse(req.body);
 
-      // Server-side enforcement of the non-waivable PII rule. The UI should
-      // never attempt this, but a manual API call must be rejected anyway.
-      if (body.rule === "pii_handling_note_missing") {
-        return res.status(409).json({
-          message: "This rule is non-waivable: PII handling notes are required by policy.",
-          code: "rule_non_waivable",
-          rule: body.rule,
-        });
-      }
-
+      // Lint advisories are advisory; waivers freely accepted. Audit-event
+      // logging below preserves the trail for review.
       const { sanitizeWaiverReason } = await import("./services/spec-linter");
       const cleanReason = sanitizeWaiverReason(body.reason);
       if (cleanReason.length === 0) {
@@ -1677,45 +1669,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isWaived = (issueId: string) =>
         Object.prototype.hasOwnProperty.call(waiverBag, issueId);
 
-      // Gate 4: any non-waivable issue is unconditionally blocking. The PII
-      // handling-note rule sets waivable=false, so any issue with waivable=false
-      // is server-policy-enforced regardless of severity.
-      const nonWaivable = lint.issues.filter((i) => i.waivable === false);
-      if (nonWaivable.length > 0) {
-        const issueIds = nonWaivable.map((i) => i.id);
-        const waiverIds = Object.keys(waiverBag);
-        void storage.createAuditEvent({
-          actorType: actor.kind,
-          actorId: actor.id,
-          action: "handoff.export",
-          resourceType: "project",
-          resourceId: project.id,
-          metadata: {
-            outcome: "blocked",
-            reason: "pii_handling_note_missing",
-            nonWaivableCount: nonWaivable.length,
-            waiverIds,
-          },
-        }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
-        return res.status(409).json({
-          message:
-            "Export blocked: one or more non-waivable issues remain. PII DataPoints without handlingNote are non-waivable by policy.",
-          code: "pii_handling_note_missing",
-          issues: nonWaivable.map((i) => ({
-            id: i.id,
-            rule: i.rule,
-            message: i.message,
-            refs: i.refs,
-          })),
-        });
-      }
-
-      // Gate 5: any unwaived blocker fails export.
-      const unwaivedBlockers = lint.issues.filter(
-        (i) => i.severity === "block" && !isWaived(i.id),
+      // No-blocks principle (2026-05-08): lint findings are advisory and travel
+      // with the export rather than gating it. The UI surfaces them so the user
+      // and downstream consumer (Claude Code) see them. Tradeoff weights (Gate
+      // 3 above) remain structural — the export format is undefined without
+      // them. Everything else flows through.
+      // We DO still emit an audit event with the lint summary so a reviewer
+      // can audit unwaived warnings post-hoc.
+      const advisoryWarn = lint.issues.filter(
+        (i) => (i.severity === "warn" || i.severity === "block") && !isWaived(i.id),
       );
-      if (unwaivedBlockers.length > 0) {
-        const waiverIds = Object.keys(waiverBag);
+      if (advisoryWarn.length > 0) {
         void storage.createAuditEvent({
           actorType: actor.kind,
           actorId: actor.id,
@@ -1723,23 +1687,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           resourceType: "project",
           resourceId: project.id,
           metadata: {
-            outcome: "blocked",
-            reason: "unwaived_blocker_present",
-            unwaivedBlockerCount: unwaivedBlockers.length,
-            blockerIds: unwaivedBlockers.map((i) => i.id),
-            waiverIds,
+            outcome: "exported_with_advisories",
+            advisoryCount: advisoryWarn.length,
+            advisoryIds: advisoryWarn.map((i) => i.id),
           },
         }).catch((e) => logger.error({ err: e }, "[audit] handoff.export failed"));
-        return res.status(409).json({
-          message: `Export blocked: ${unwaivedBlockers.length} unwaived blocker${unwaivedBlockers.length === 1 ? "" : "s"} remain.`,
-          code: "unwaived_blocker_present",
-          issues: unwaivedBlockers.map((i) => ({
-            id: i.id,
-            rule: i.rule,
-            message: i.message,
-            refs: i.refs,
-          })),
-        });
       }
 
       // All gates clear. Scrub once at the boundary as defense in depth, then render.

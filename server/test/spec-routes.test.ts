@@ -197,18 +197,18 @@ describe("POST /api/projects/:projectId/spec/waive", () => {
     expect(res.status).toBe(403);
   });
 
-  it("rejects waive on the non-waivable PII rule with 409", async () => {
+  it("accepts waive on PII rule (advisory post-2026-05-08; no rule is non-waivable)", async () => {
+    // Per the no-blocks principle, ALL lint rules became advisory + waivable.
+    // Previously PII handling-note was hard-rejected on waive; now the user/
+    // builder may freely waive any advisory and the action is audited.
     testProjects["pw3"] = makeProject("pw3", "ownerA");
     const res = await post(
       "/api/projects/pw3/spec/waive",
       { issueId: "x", rule: "pii_handling_note_missing", reason: "we accept the risk" },
       { "x-test-user": "ownerA" },
     );
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.code).toBe("rule_non_waivable");
-    // No audit row for a rejected non-waivable attempt.
-    expect(testAudit.find((e: any) => e.action === "spec.waive" && e.resourceId === "pw3")).toBeUndefined();
+    expect(res.status).toBe(200);
+    expect(testAudit.find((e: any) => e.action === "spec.waive" && e.resourceId === "pw3")).toBeDefined();
   });
 
   it("records a waiver with sanitized reason and writes an audit row", async () => {

@@ -84,7 +84,7 @@ describe("spec-linter — Stage-1 Fidelity Check", () => {
     const result = lintSpecSync({ spec, productState: state });
     const issue = result.issues.find((i) => i.rule === "stage1_fidelity_below_threshold");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.waivable).toBe(true); // waivable per spec — only PII is non-waivable
   });
 

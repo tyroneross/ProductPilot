@@ -99,7 +99,7 @@ describe("spec-linter — adr_missing_weight_or_stance_citation", () => {
       (i) => i.rule === "adr_missing_weight_or_stance_citation",
     );
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.waivable).toBe(true);
     expect(issue?.refs[0]?.id).toBe("adr-1");
   });

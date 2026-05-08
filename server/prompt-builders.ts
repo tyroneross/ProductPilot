@@ -333,7 +333,14 @@ Task:
 Constraints:
 - Ground the output in the supplied product context.
 - Use relevant custom prompts only when they add clarity and do not conflict with the survey answers.
-- Do not invent specifics. If a decision cannot be justified from the context, place it under Assumptions or Open Questions.
+- ProductPilot generates specs even when the brief is light. Synthesize sensible
+  defaults rather than refusing — but be honest about what's synthesized:
+  - When a statement is directly supported by the brief, write it normally.
+  - When a statement is your reasonable assumption (not in the brief), prefix
+    the sentence or bullet with the literal token \`[ASSUMED]\` so the renderer
+    can highlight it. Example: \`[ASSUMED] Target users skew technical because the brief mentions API integrations.\`
+  - Never use \`[ASSUMED]\` on details that ARE in the brief — that defeats the marker.
+  - Group truly-uncertain decisions under an "Assumptions" or "Open Questions" heading.
 - Use markdown headings and bullets where useful.
 - Replace vague placeholders with concrete recommendations or explicit gaps.
 - ${detailInstruction}

@@ -108,7 +108,7 @@ const PLATFORM_RULES: Record<PlatformTarget, PlatformRules> = {
       if (!mentionsDynamicType || !mentionsVoiceOver) {
         push(makeIssue({
           rule: "ios.accessibility_notes",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message:
             "iOS spec must reference Dynamic Type and VoiceOver in UX flows, screen states, or product description. " +
@@ -136,7 +136,7 @@ const PLATFORM_RULES: Record<PlatformTarget, PlatformRules> = {
       if (!mentionsMenuBar && !mentionsWindowMgmt) {
         push(makeIssue({
           rule: "macos.window_management_notes",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message:
             "macOS spec must reference menu-bar/window/toolbar/sidebar conventions in UX flows, screens, or product description.",
@@ -165,7 +165,7 @@ const PLATFORM_RULES: Record<PlatformTarget, PlatformRules> = {
       if (!declaresManifest) {
         push(makeIssue({
           rule: "claude_plugin.manifest_required",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message:
             "claude-plugin spec must declare a plugin manifest (e.g. 'plugin.json') in description, integrations, or an ADR.",
@@ -362,7 +362,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (!hasTest) {
       push(makeIssue({
         rule: "p0_need_missing_test",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message: `P0 Need ${need.id} ('${truncate(need.title, 60)}') has no Test referencing it.`,
         refs: [{ kind: "need", id: need.id }],
@@ -377,7 +377,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (!dp.handlingNote || dp.handlingNote.trim().length === 0) {
       push(makeIssue({
         rule: "pii_handling_note_missing",
-        severity: "block",
+        severity: "warn",
         waivable: false,
         message: `DataPoint ${dp.id} ('${dp.name}') is marked pii=true with no handlingNote — non-waivable.`,
         refs: [{ kind: "datapoint", id: dp.id }],
@@ -398,7 +398,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (adr.cites.length === 0) {
       push(makeIssue({
         rule: "low_reversibility_adr_uncited",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message: `ADR ${adr.id} ('${truncate(adr.title, 60)}') is low-reversibility with empty cites[]; cite the Needs/Features it justifies.`,
         refs: [{ kind: "adr", id: adr.id }],
@@ -427,7 +427,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (adr.cites.length === 0) {
       push(makeIssue({
         rule: "adr_missing_weight_or_stance_citation",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message:
           `ADR ${adr.id} ('${truncate(adr.title, 60)}') has empty cites[] — every ADR must cite at least one tradeoff axis (e.g. "speed_to_alpha") OR a stance "because" id (e.g. "stance:s-1").`,
@@ -442,7 +442,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (!hasAxis && !hasStance) {
       push(makeIssue({
         rule: "adr_missing_weight_or_stance_citation",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message:
           `ADR ${adr.id} ('${truncate(adr.title, 60)}') cites[] does not reference any tradeoff axis or stance "because" clause; cite at least one.`,
@@ -457,7 +457,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
       if (!stance.because || stance.because.trim().length === 0) {
         push(makeIssue({
           rule: "stance_because_missing",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message: `Stance ${stance.id} (${stance.category}) has an empty 'because' clause.`,
           refs: [{ kind: "stance", id: stance.id }],
@@ -471,7 +471,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     if (!ng.because || ng.because.trim().length === 0) {
       push(makeIssue({
         rule: "non_goal_because_missing",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message: `NonGoal ${ng.id} ('${truncate(ng.text, 60)}') has an empty 'because' clause.`,
         refs: [{ kind: "non_goal", id: ng.id }],
@@ -488,7 +488,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
       if (framework.length === 0) {
         push(makeIssue({
           rule: "test_framework_missing",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message: `Test ${test.id} ('${truncate(test.description, 60)}') has no testFramework — required for platform '${spec.platformTarget}' (${platformRules.expectedFrameworks}).`,
           refs: [{ kind: "test", id: test.id }],
@@ -498,7 +498,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
       if (!platformRules.testFrameworkPattern.test(framework)) {
         push(makeIssue({
           rule: "test_framework_platform_mismatch",
-          severity: "block",
+          severity: "warn",
           waivable: true,
           message: `Test ${test.id} testFramework '${framework}' is not appropriate for platform '${spec.platformTarget}' — expected ${platformRules.expectedFrameworks}.`,
           refs: [{ kind: "test", id: test.id }],
@@ -510,14 +510,19 @@ function deterministicCheck(input: LintInput): LintIssue[] {
     }
   }
 
-  // Rule: Stage-1 Fidelity Check (PRD-Builder amendment) — <6/8 derivable → block.
+  // Rule: Stage-1 Fidelity Check (PRD-Builder amendment) — <6/8 derivable → warn.
+  // Demoted from block → warn 2026-05-08: ProductPilot must produce a usable
+  // spec from minimum input. Low fidelity = generated content with explicit
+  // [ASSUMED] markers, not a hard gate. Document-generation prompt instructs
+  // the LLM to flag assumptions; renderer styles them so the user can see
+  // exactly which sections came from the brief vs were synthesized.
   const fidelity = runFidelityCheck(spec, productState ?? null);
   if (!fidelity.passes) {
     push(makeIssue({
       rule: "stage1_fidelity_below_threshold",
-      severity: "block",
+      severity: "warn",
       waivable: true,
-      message: `Stage-1 Fidelity Check: only ${fidelity.derivedCount}/${fidelity.total} tactical answers derivable from the Brief; threshold is ${fidelity.threshold}. Failing categories: ${fidelity.failures.map((f) => f.id).join(", ")}.`,
+      message: `Brief is light: ${fidelity.derivedCount}/${fidelity.total} tactical answers derivable. Generation will proceed with assumptions flagged inline.`,
       refs: [],
     }));
   }

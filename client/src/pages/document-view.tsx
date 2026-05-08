@@ -1,6 +1,47 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+// Renderer for the `[ASSUMED]` marker the LLM emits when synthesizing content
+// not directly supported by the user's brief. Splits any text node that
+// contains the marker and replaces the literal token with a small amber chip
+// so the user can scan a generated doc and immediately see what was inferred
+// vs what came from their input.
+function highlightAssumed(node: ReactNode): ReactNode {
+  if (typeof node === "string") {
+    if (!node.includes("[ASSUMED]")) return node;
+    const parts = node.split("[ASSUMED]");
+    return parts.flatMap((part, i) =>
+      i === 0
+        ? [part]
+        : [
+            <span
+              key={`a-${i}`}
+              style={{
+                display: "inline-block",
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#f0b65e",
+                background: "rgba(240,182,94,0.12)",
+                border: "1px solid rgba(240,182,94,0.32)",
+                borderRadius: "4px",
+                padding: "1px 6px",
+                marginRight: "6px",
+                verticalAlign: "1px",
+              }}
+              title="Synthesized from defaults — not derived from your brief"
+            >
+              Assumed
+            </span>,
+            part,
+          ],
+    );
+  }
+  if (Array.isArray(node)) return node.map((c, i) => <span key={i}>{highlightAssumed(c)}</span>);
+  return node;
+}
 import Nav from "@/components/nav";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
@@ -115,10 +156,13 @@ export default function DocumentViewPage() {
 
   const projectWaivers = ((project?.productState as { workingMemory?: { waivers?: Record<string, unknown> } } | null | undefined)?.workingMemory?.waivers) ?? {};
   const isWaived = (issueId: string) => Object.prototype.hasOwnProperty.call(projectWaivers, issueId);
-  const unwaivedBlockers = (lintResult?.issues ?? []).filter(
-    (i) => i.severity === "block" && !isWaived(i.id),
+  // Lint surfaces are advisory — they inform the user but don't block actions.
+  // A single severity flag is kept so the panel can warn-tint when there are
+  // un-waived warnings, but no button is disabled because of it.
+  const visibleIssues = (lintResult?.issues ?? []).filter(
+    (i) => i.severity !== "info" && !isWaived(i.id),
   );
-  const publishBlocked = unwaivedBlockers.length > 0;
+  const hasAdvisories = visibleIssues.length > 0;
 
   // Adaptive-intake gating: when project is in adaptive mode AND no answers
   // have been captured yet, the regenerate endpoint will 400 with
@@ -249,7 +293,7 @@ export default function DocumentViewPage() {
   // weights. Any 409 surface as an inline toast describing the gate.
   const isHandoffPlatform = !!project?.intakeMode && project.intakeMode === "adaptive";
   const handoffDisabled =
-    !projectId || !isHandoffPlatform || publishBlocked || isCopyingHandoff;
+    !projectId || !isHandoffPlatform || isCopyingHandoff;
 
   const handleCopyHandoff = async () => {
     if (!projectId || handoffDisabled) return;
@@ -514,34 +558,22 @@ export default function DocumentViewPage() {
                 onClick={handleCopyHandoff}
                 disabled={handoffDisabled}
                 data-testid="button-copy-handoff"
-                aria-label={
-                  publishBlocked
-                    ? `Handoff blocked — resolve or waive ${unwaivedBlockers.length} lint blocker${unwaivedBlockers.length === 1 ? "" : "s"}`
-                    : isCopyingHandoff
-                      ? "Preparing handoff…"
-                      : "Copy for Claude Code"
-                }
+                aria-label={isCopyingHandoff ? "Preparing handoff…" : "Copy for Claude Code"}
               >
                 {handoffCopied ? <Check style={{ width: 13, height: 13 }} /> : <Code style={{ width: 13, height: 13 }} />}
                 <span>
-                  {isCopyingHandoff
-                    ? "Copying…"
-                    : handoffCopied
-                      ? "Copied"
-                      : publishBlocked
-                        ? "Handoff blocked"
-                        : "Copy for Claude Code"}
+                  {isCopyingHandoff ? "Copying…" : handoffCopied ? "Copied" : "Copy for Claude Code"}
                 </span>
               </ActionButton>
             )}
             <ActionButton
               onClick={handleExport}
-              disabled={isExporting || publishBlocked}
+              disabled={isExporting}
               data-testid="button-export-all"
-              aria-label={publishBlocked ? `Export blocked — resolve or waive ${unwaivedBlockers.length} lint blocker${unwaivedBlockers.length === 1 ? "" : "s"}` : "Export all documents"}
+              aria-label="Export all documents"
             >
               <Download style={{ width: 13, height: 13 }} />
-              <span>{isExporting ? "Exporting…" : publishBlocked ? "Export blocked" : "Export All"}</span>
+              <span>{isExporting ? "Exporting…" : "Export All"}</span>
             </ActionButton>
             {adaptiveIntakeIncomplete ? (
               <ActionButton
@@ -652,14 +684,14 @@ export default function DocumentViewPage() {
         }}
       >
         {/* Spec linter panel — adaptive-mode only. Surfaces unwaived blockers, warnings, info */}
-        {lintEnabled && lintResult && lintResult.issues.length > 0 && (
+        {lintEnabled && lintResult && hasAdvisories && (
           <div
             data-testid="lint-panel"
             style={{
               background: "#1a1714",
               borderRadius: 8,
-              border: `1px solid ${publishBlocked ? "rgba(220,90,80,0.35)" : "rgba(200,180,160,0.12)"}`,
-              padding: "16px 20px",
+              border: "1px solid rgba(240,182,94,0.22)",
+              padding: "12px 16px",
               marginBottom: 16,
             }}
           >
@@ -670,23 +702,17 @@ export default function DocumentViewPage() {
                 gap: 8,
                 fontSize: 13,
                 fontWeight: 500,
-                color: publishBlocked ? "#dc5a50" : "#f5f0eb",
+                color: "#f0b65e",
                 marginBottom: 8,
               }}
             >
-              {publishBlocked ? (
-                <ShieldAlert style={{ width: 14, height: 14 }} />
-              ) : (
-                <Info style={{ width: 14, height: 14 }} />
-              )}
+              <Info style={{ width: 14, height: 14 }} />
               <span>
-                {publishBlocked
-                  ? `Publish blocked: ${unwaivedBlockers.length} ${unwaivedBlockers.length === 1 ? "issue" : "issues"} require attention or waiver`
-                  : `Spec lint: ${lintResult.issues.length} ${lintResult.issues.length === 1 ? "note" : "notes"}`}
+                {visibleIssues.length === 1 ? "1 note" : `${visibleIssues.length} notes`} on this spec
               </span>
             </div>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-              {lintResult.issues.map((issue) => {
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              {visibleIssues.map((issue) => {
                 const waived = isWaived(issue.id);
                 const sevColor =
                   issue.severity === "block" ? "#dc5a50" :
@@ -710,9 +736,6 @@ export default function DocumentViewPage() {
                   >
                     <Icon style={{ width: 12, height: 12, color: sevColor, flexShrink: 0, marginTop: 3 }} />
                     <div style={{ flex: 1 }}>
-                      <span style={{ color: sevColor, fontWeight: 500, marginRight: 6 }}>
-                        [{issue.severity}{!issue.waivable ? " · non-waivable" : ""}]
-                      </span>
                       <span>{issue.message}</span>
                       {waived && (
                         <span style={{ color: "#6b5d52", marginLeft: 6, fontStyle: "italic" }}>· waived</span>
@@ -763,7 +786,15 @@ export default function DocumentViewPage() {
               className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e] prose-p:text-[#c8b4a0] prose-li:text-[#c8b4a0]"
               style={{ fontSize: 14, lineHeight: 1.7 }}
             >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p>{highlightAssumed(children)}</p>,
+                  li: ({ children }) => <li>{highlightAssumed(children)}</li>,
+                }}
+              >
+                {documentContent}
+              </ReactMarkdown>
             </div>
           </div>
         ) : (

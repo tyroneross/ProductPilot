@@ -78,7 +78,76 @@ export default function Nav() {
           Product<span style={{ color: "#f0b65e" }}>Pilot</span>
         </a>
 
-        {/* Hamburger menu */}
+        {/* Right side: explicit auth action + hamburger menu */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* Auth action — separate from nav menu so users don't have to dig
+              for Sign In / Sign Out. Hidden during the brief auth-loading
+              window to avoid flicker. */}
+          {isAuthenticated ? (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              data-testid="button-nav-signout"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                height: "36px",
+                padding: "0 12px",
+                background: "transparent",
+                border: "1px solid rgba(200,180,160,0.18)",
+                borderRadius: "8px",
+                color: "#a89a8c",
+                fontSize: "13px",
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                transition: "border-color 0.15s, color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(224,112,112,0.45)";
+                e.currentTarget.style.color = "#e07070";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(200,180,160,0.18)";
+                e.currentTarget.style.color = "#a89a8c";
+              }}
+            >
+              <LogOut size={14} />
+              Sign Out
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setLocation("/login")}
+              aria-label="Sign in"
+              data-testid="button-nav-signin"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                height: "36px",
+                padding: "0 14px",
+                background: "#f0b65e",
+                border: "none",
+                borderRadius: "8px",
+                color: "#110f0d",
+                fontSize: "13px",
+                fontWeight: 600,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#e7a84a"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#f0b65e"; }}
+            >
+              <LogIn size={14} />
+              Sign In
+            </button>
+          )}
+
+        {/* Hamburger menu — navigation only; auth lives in the button above */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -230,27 +299,6 @@ export default function Nav() {
                   Settings
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator style={{ background: "rgba(200,180,160,0.08)", margin: "4px 0" }} />
-
-                <DropdownMenuItem
-                  onSelect={handleSignOut}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "9px 10px",
-                    borderRadius: "6px",
-                    fontSize: "14px",
-                    fontWeight: 500,
-                    color: "#e07070",
-                    cursor: "pointer",
-                    outline: "none",
-                  }}
-                  className="nav-item-destructive"
-                >
-                  <LogOut size={15} />
-                  Sign Out
-                </DropdownMenuItem>
               </>
             ) : (
               <>
@@ -294,31 +342,11 @@ export default function Nav() {
                   Projects
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator style={{ background: "rgba(200,180,160,0.08)", margin: "4px 0" }} />
-
-                <DropdownMenuItem
-                  onSelect={() => setLocation("/login")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "9px 10px",
-                    borderRadius: "6px",
-                    fontSize: "14px",
-                    fontWeight: 500,
-                    color: "#c8b4a0",
-                    cursor: "pointer",
-                    outline: "none",
-                  }}
-                  className="nav-item"
-                >
-                  <LogIn size={15} />
-                  Sign In
-                </DropdownMenuItem>
               </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       <style>{`

@@ -94,7 +94,7 @@ describe("spec-linter — p0_need_missing_test", () => {
     const result = lintSpecSync({ spec, productState: fullState() });
     const issue = result.issues.find((i) => i.rule === "p0_need_missing_test");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.waivable).toBe(true);
     expect(issue?.refs[0]?.id).toBe("need-x");
   });
@@ -117,7 +117,7 @@ describe("spec-linter — pii_handling_note_missing (non-waivable)", () => {
     const result = lintSpecSync({ spec, productState: fullState() });
     const issue = result.issues.find((i) => i.rule === "pii_handling_note_missing");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.waivable).toBe(false); // critical: this rule is non-waivable
   });
 
@@ -157,7 +157,7 @@ describe("spec-linter — low_reversibility_adr_uncited", () => {
     const result = lintSpecSync({ spec, productState: fullState() });
     const issue = result.issues.find((i) => i.rule === "low_reversibility_adr_uncited");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
   });
 
   it("does not block when low-reversibility ADR cites something", () => {
@@ -188,7 +188,7 @@ describe("spec-linter — stance_because_missing", () => {
     const result = lintSpecSync({ spec: clean8FidelitySpec(), productState: stateBad });
     const issue = result.issues.find((i) => i.rule === "stance_because_missing");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.refs[0]?.kind).toBe("stance");
   });
 });
@@ -201,7 +201,7 @@ describe("spec-linter — non_goal_because_missing", () => {
     const result = lintSpecSync({ spec, productState: fullState() });
     const issue = result.issues.find((i) => i.rule === "non_goal_because_missing");
     expect(issue).toBeDefined();
-    expect(issue?.severity).toBe("block");
+    expect(issue?.severity).toBe("warn");
     expect(issue?.refs[0]?.id).toBe("ng-2");
   });
 });

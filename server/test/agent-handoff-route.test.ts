@@ -256,12 +256,15 @@ describe("GET /api/projects/:projectId/handoff.md", () => {
     expect(testAudit.some((e) => e.action === "handoff.export" && e.metadata?.outcome === "success")).toBe(true);
   });
 
-  it("returns 409 (unwaived_blocker_present) when the linter reports an unwaived blocker", async () => {
+  it("exports successfully when the linter reports unwaived warn issues; audit logs them as advisories", async () => {
+    // Per the no-blocks principle (2026-05-08), warn-severity findings travel
+    // with the export rather than gating it. The audit trail records them so a
+    // reviewer can spot-check post-hoc, but the user is not stopped.
     setLintStub([
       {
         id: "lint-fixture-1",
         rule: "p0_need_missing_test",
-        severity: "block",
+        severity: "warn",
         waivable: true,
         message: "P0 Need N-1 has no Test referencing it.",
         refs: [{ kind: "need", id: "N-1" }],
@@ -269,36 +272,36 @@ describe("GET /api/projects/:projectId/handoff.md", () => {
     ]);
     testProjects["p5"] = makeProject("p5");
     const res = await get("/api/projects/p5/handoff.md", { "x-test-user": "ownerA" });
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.code).toBe("unwaived_blocker_present");
-    expect(Array.isArray(body.issues)).toBe(true);
-    expect(body.issues.length).toBe(1);
-    expect(body.issues[0].id).toBe("lint-fixture-1");
-    const auditRow = testAudit.find((e) => e.action === "handoff.export");
-    expect(auditRow?.metadata?.outcome).toBe("blocked");
-    expect(auditRow?.metadata?.reason).toBe("unwaived_blocker_present");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    const advisoryAudit = testAudit.find(
+      (e) => e.action === "handoff.export" && e.metadata?.outcome === "exported_with_advisories",
+    );
+    expect(advisoryAudit).toBeDefined();
+    expect(advisoryAudit?.metadata?.advisoryCount).toBe(1);
+    expect(advisoryAudit?.metadata?.advisoryIds).toContain("lint-fixture-1");
   });
 
-  it("returns 409 (pii_handling_note_missing) when a non-waivable issue exists", async () => {
+  it("exports successfully even when a PII handling-note advisory is unwaived; logs it as advisory", async () => {
+    // Previously hard-blocked. Now: surfaced as an advisory and the user/builder
+    // decides whether to act on it. The export still happens.
     setLintStub([
       {
         id: "lint-fixture-pii",
         rule: "pii_handling_note_missing",
-        severity: "block",
-        waivable: false,
+        severity: "warn",
+        waivable: true,
         message: "DataPoint DP-1 marked pii=true with no handlingNote.",
         refs: [{ kind: "datapoint", id: "DP-1" }],
       },
     ]);
     testProjects["p7"] = makeProject("p7");
     const res = await get("/api/projects/p7/handoff.md", { "x-test-user": "ownerA" });
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.code).toBe("pii_handling_note_missing");
-    expect(body.issues[0].id).toBe("lint-fixture-pii");
-    const auditRow = testAudit.find((e) => e.action === "handoff.export");
-    expect(auditRow?.metadata?.reason).toBe("pii_handling_note_missing");
+    expect(res.status).toBe(200);
+    const advisoryAudit = testAudit.find(
+      (e) => e.action === "handoff.export" && e.metadata?.outcome === "exported_with_advisories",
+    );
+    expect(advisoryAudit?.metadata?.advisoryIds).toContain("lint-fixture-pii");
   });
 
   it("waived blockers (issue id present in working-memory waivers) clear the gate", async () => {
