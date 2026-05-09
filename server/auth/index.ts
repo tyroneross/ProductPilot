@@ -158,7 +158,19 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        await sendMagicLinkEmail({ email, url });
+        try {
+          await sendMagicLinkEmail({ email, url });
+        } catch (err) {
+          // Better Auth swallows our throw and returns a generic 500; capture
+          // the underlying provider message (e.g. Resend "domain not verified")
+          // so the failure isn't invisible. Email + truncated url only — never
+          // log the full magic-link URL because it's a single-use credential.
+          logger.error(
+            { err, email, urlPrefix: url.slice(0, 80) },
+            "[auth] magic-link send failed",
+          );
+          throw err;
+        }
       },
       storeToken: "hashed",
       // Token TTL: 15 min is friendlier for mobile paste UX than the 5-min default.

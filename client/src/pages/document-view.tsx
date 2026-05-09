@@ -176,6 +176,15 @@ export default function DocumentViewPage() {
     project?.intakeMode === "adaptive" && adaptiveIntakeAnswers.length === 0;
   const continueIntakeHref = projectId ? `/details?projectId=${projectId}&adaptive=1` : "/details";
 
+  // Tradeoff weights flagged as auto-defaulted (when finalize/export was
+  // called without the user allocating). Server sets the flag inside
+  // productState.workingMemory; we surface it as a small advisory in the
+  // document view so the user can choose to allocate explicitly.
+  const tradeoffWeightsAssumed = Boolean(
+    (project?.productState as { workingMemory?: { tradeoff_weights_assumed?: boolean } } | null | undefined)
+      ?.workingMemory?.tradeoff_weights_assumed,
+  );
+
   // Build ordered list of docs with their stage data
   const orderedDocs = DOC_TYPES.map((dt) => ({
     ...dt,
@@ -684,6 +693,47 @@ export default function DocumentViewPage() {
         }}
       >
         {/* Spec linter panel — adaptive-mode only. Surfaces unwaived blockers, warnings, info */}
+        {tradeoffWeightsAssumed && (
+          <div
+            data-testid="weights-assumed-banner"
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: "1px solid rgba(240,182,94,0.22)",
+              padding: "10px 14px",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 13,
+              color: "#c8b4a0",
+            }}
+          >
+            <Info style={{ width: 14, height: 14, color: "#f0b65e", flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>
+              Tradeoff priorities were inferred (even split, security as the priority axis). Allocate them to refine architecture decisions.
+            </span>
+            <button
+              onClick={() => setLocation(continueIntakeHref)}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(240,182,94,0.4)",
+                color: "#f0b65e",
+                borderRadius: 6,
+                padding: "5px 10px",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+              data-testid="button-allocate-weights"
+            >
+              Allocate
+            </button>
+          </div>
+        )}
+
         {lintEnabled && lintResult && hasAdvisories && (
           <div
             data-testid="lint-panel"
