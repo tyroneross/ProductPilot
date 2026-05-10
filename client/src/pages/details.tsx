@@ -149,11 +149,15 @@ export default function DetailsPage() {
     setIsEnhancing(true);
     try {
       const res = await apiRequest("POST", "/api/enhance-idea", { idea });
-      const data = (await res.json()) as { enhanced?: string };
-      if (data?.enhanced && typeof data.enhanced === "string") {
+      const data = (await res.json().catch(() => ({}))) as { enhanced?: string; message?: string };
+      if (res.ok && data?.enhanced && typeof data.enhanced === "string") {
         setProductIdea(data.enhanced);
       } else {
-        toast({ title: "Enhance failed", description: "Try again in a moment.", variant: "destructive" });
+        toast({
+          title: "Enhance failed",
+          description: data?.message || "Try again in a moment.",
+          variant: "destructive",
+        });
       }
     } catch {
       toast({ title: "Enhance failed", description: "Try again in a moment.", variant: "destructive" });
@@ -325,6 +329,7 @@ export default function DetailsPage() {
             rows={5}
             value={productIdea}
             onChange={(e) => setProductIdea(e.target.value)}
+            maxLength={2000}
             placeholder="e.g. A meal planning app that suggests recipes based on dietary preferences and budget..."
             className="w-full outline-none transition-colors caret-[#f0b65e]"
             style={{

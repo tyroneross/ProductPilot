@@ -1986,8 +1986,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (idea.length < 3) {
         return res.status(400).json({ message: "Idea must be at least 3 characters." });
       }
-      if (idea.length > 500) {
-        return res.status(400).json({ message: "Idea too long (max 500 chars)." });
+      if (idea.length > 2000) {
+        return res.status(400).json({ message: "Idea too long (max 2000 chars)." });
       }
 
       // Use the same per-user LLM config if the user has one, else fall back to demo Groq.
