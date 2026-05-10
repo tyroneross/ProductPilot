@@ -269,8 +269,9 @@ export default function DetailsPage() {
       });
       clearDraftStorage();
       setLocation(`/documents/${project.id}`);
-    } catch {
-      toast({ title: "Generation failed", description: "Please try again.", variant: "destructive" });
+    } catch (err) {
+      const description = err instanceof Error && err.message ? err.message : "Please try again.";
+      toast({ title: "Generation failed", description, variant: "destructive" });
     } finally {
       setIsGenerating(false);
     }

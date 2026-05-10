@@ -39,10 +39,11 @@ export default function StagePage() {
       });
       setLocation("/projects");
     },
-    onError: () => {
+    onError: (err) => {
+      const description = err instanceof Error && err.message ? err.message : "Please try again.";
       toast({
         title: "Failed to skip stage",
-        description: "Please try again.",
+        description,
         variant: "destructive",
       });
     },

@@ -253,7 +253,22 @@ export default function SessionSurveyPage() {
         body: JSON.stringify({ role: "user", content }),
       });
       if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
+        let serverMessage = res.statusText;
+        try {
+          const text = await res.text();
+          if (text) {
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed === "object") {
+              const m = (parsed as Record<string, unknown>).message ?? (parsed as Record<string, unknown>).error;
+              if (typeof m === "string" && m.trim().length > 0) serverMessage = m;
+            } else {
+              serverMessage = text;
+            }
+          }
+        } catch {
+          // body not JSON; fall back to statusText
+        }
+        throw new Error(`${res.status}: ${serverMessage}`);
       }
 
       const reader = res.body.getReader();
