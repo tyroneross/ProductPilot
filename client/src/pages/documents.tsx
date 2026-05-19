@@ -445,6 +445,38 @@ export default function DocumentsPage() {
               Refine with AI
             </button>
 
+            <button
+              onClick={() =>
+                setLocation(`/session/survey?projectId=${projectId}`)
+              }
+              data-testid="button-edit-survey-responses"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                border: "1px solid rgba(240,182,94,0.30)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "#f0b65e",
+                fontSize: 13,
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                transition: "border-color 0.2s, background 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                e.currentTarget.style.background = "rgba(240,182,94,0.05)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              Edit survey responses
+            </button>
+
             {completedDocs.length > 0 && completedDocs[0].stage && (
               <button
                 onClick={() =>

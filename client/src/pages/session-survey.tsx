@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil, Menu, X, Check } from "lucide-react";
+import { ArrowLeft, Send, Save, ChevronRight, Loader2, Plus, Trash2, Sparkles, Pencil, Menu, X, Check, RefreshCw } from "lucide-react";
 import Nav from "@/components/nav";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ export default function SessionSurveyPage() {
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [isGeneratingDocs, setIsGeneratingDocs] = useState(false);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0, stageName: "" });
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [showDocumentSelection, setShowDocumentSelection] = useState(false);
   const [documentSelections, setDocumentSelections] = useState<Record<string, { selected: boolean; detailLevel: "detailed" | "summary" }>>({});
   const [showPromptsSection, setShowPromptsSection] = useState(false);
@@ -424,6 +426,32 @@ export default function SessionSurveyPage() {
       });
     },
   });
+
+  const handleResetSurvey = async () => {
+    if (!projectId) return;
+    setIsResetting(true);
+    try {
+      await apiRequest("POST", `/api/projects/${projectId}/survey/reset`, {});
+      // Clear local survey state so the UI restarts from the top.
+      setSurveyResponses({});
+      setCurrentSectionIndex(0);
+      surveyRestored.current = false;
+      await refetchProject();
+      setShowResetDialog(false);
+      toast({
+        title: "Survey reset",
+        description: "All responses cleared. You can start over.",
+      });
+    } catch {
+      toast({
+        title: "Reset failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const handleNextSection = () => {
     autoSaveSurveyMutation.mutate(surveyResponses);
@@ -1018,6 +1046,31 @@ export default function SessionSurveyPage() {
           </div>
 
           <div style={{ height: 1, background: "rgba(200,180,160,0.08)", flexShrink: 0 }} />
+
+          {projectId && (
+            <button
+              onClick={() => setShowResetDialog(true)}
+              data-testid="button-reset-survey"
+              style={{
+                margin: "10px 12px 0",
+                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "transparent",
+                border: "1px solid rgba(240,182,94,0.30)",
+                borderRadius: 6,
+                color: "#f0b65e",
+                fontSize: 12,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <RefreshCw size={13} aria-hidden="true" />
+              Reset survey
+            </button>
+          )}
 
           {/* Steps list */}
           <nav
@@ -1839,6 +1892,34 @@ export default function SessionSurveyPage() {
         selectedCount={selectedCount}
         handleConfirmGenerate={handleConfirmGenerate}
       />
+
+      <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset survey?</DialogTitle>
+            <DialogDescription>
+              This clears all your saved survey answers and restarts the survey
+              from the beginning. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            <Button
+              variant="outline"
+              onClick={() => setShowResetDialog(false)}
+              disabled={isResetting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleResetSurvey()}
+              disabled={isResetting}
+              data-testid="button-confirm-reset-survey"
+            >
+              {isResetting ? "Resetting…" : "Reset survey"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

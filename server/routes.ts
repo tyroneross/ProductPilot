@@ -838,6 +838,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reset the entire survey — clears saved responses and returns the project
+  // to the discovery phase so the user can start over. Audited.
+  app.post("/api/projects/:projectId/survey/reset", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+
+      await storage.updateProject(project.id, {
+        surveyResponses: null,
+        surveyPhase: "discovery",
+      });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "survey.reset",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { previousPhase: project.surveyPhase ?? null },
+      }).catch((e) => logger.error({ err: e }, "[audit] survey.reset failed"));
+
+      res.json({ message: "Survey reset", surveyPhase: "discovery" });
+    } catch (error) {
+      logger.error({ err: error }, "[survey.reset] error");
+      res.status(500).json({ message: "Failed to reset survey" });
+    }
+  });
+
   app.post("/api/projects/:projectId/generate-docs-from-survey", async (req: any, res) => {
     try {
       const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
