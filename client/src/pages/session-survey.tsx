@@ -213,8 +213,15 @@ export default function SessionSurveyPage() {
     try {
       const contextLabel = getIntakeContext() || getPlatformLabel(projectType);
       const problemStatement = minimumDetails?.problemStatement || productIdea;
+      // Derive a meaningful name from intake data already in scope. The legacy
+      // timestamp-only name ("Survey Draft - HH:MM:SS") made the projects list
+      // ambiguous — every row looked identical.
+      const baseName = (problemStatement || contextLabel || "").trim();
+      const projectName = baseName
+        ? baseName.slice(0, 60) + (baseName.length > 60 ? "…" : "")
+        : `Draft - ${new Date().toLocaleDateString()}`;
       const res = await apiRequest("POST", "/api/projects", {
-        name: `Survey Draft - ${new Date().toLocaleTimeString()}`,
+        name: projectName,
         description: `[${contextLabel}] ${problemStatement.slice(0, 200)}`,
         mode: "survey",
         aiModel: "claude-sonnet",
