@@ -345,9 +345,14 @@ async function runSchema(c: SchemaCase): Promise<SchemaSummary> {
 
 function writeCsv(rows: SchemaSummary[]): string {
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const baselineDir = join(__dirname, "baselines");
-  mkdirSync(baselineDir, { recursive: true });
-  const path = join(baselineDir, "2026-05-02-groq-structured-validity.csv");
+  // Per-run output goes to the gitignored eval-runs/ dir (matches the
+  // eval-intake.ts precedent). The committed baselines/*.csv is a read-only
+  // reference and is intentionally NOT rewritten by `npm run test`, so a
+  // normal test run never dirties a git-tracked file.
+  const runDir = join(__dirname, "eval-runs");
+  mkdirSync(runDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const path = join(runDir, `groq-structured-validity-${stamp}.csv`);
 
   const header = [
     "# Groq structured-output reliability — 2026-05-02",
@@ -415,7 +420,11 @@ describe("Groq structured-output reliability — live (gated on GROQ_API_KEY)", 
     // Only meaningful when at least one schema test ran.
     if (summaries.length === 0) return;
     const path = writeCsv(summaries);
-    expect(path).toContain("2026-05-02-groq-structured-validity.csv");
+    // Assert the run copy landed in the gitignored eval-runs/ dir, NOT in the
+    // committed baselines/ snapshot — proves the write target moved.
+    expect(path).toContain("eval-runs");
+    expect(path).toContain("groq-structured-validity");
+    expect(path).not.toContain("baselines");
   });
 });
 
