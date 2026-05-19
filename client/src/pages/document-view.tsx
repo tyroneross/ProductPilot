@@ -165,6 +165,14 @@ export default function DocumentViewPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [handoffCopied, setHandoffCopied] = useState(false);
   const [isCopyingHandoff, setIsCopyingHandoff] = useState(false);
+  const [isDownloadingDoc, setIsDownloadingDoc] = useState(false);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [versions, setVersions] = useState<
+    Array<{ version: number; createdAt: string; charCount: number }> | null
+  >(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
@@ -353,6 +361,116 @@ export default function DocumentViewPage() {
       toast({ title: "Export failed", description: "Please try again.", variant: "destructive" });
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  // Download a server-rendered markdown blob from an endpoint that sets a
+  // Content-Disposition filename. Shared by per-doc and aggregate export.
+  const downloadMarkdown = async (url: string, fallbackName: string) => {
+    const res = await fetch(url, { method: "GET", credentials: "include" });
+    if (!res.ok) {
+      throw new Error(`Request failed (${res.status})`);
+    }
+    const text = await res.text();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] ?? fallbackName;
+    const blob = new Blob([text], { type: "text/markdown" });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+  };
+
+  const handleDownloadDoc = async () => {
+    if (!projectId || !stage) return;
+    setIsDownloadingDoc(true);
+    try {
+      await downloadMarkdown(
+        `/api/projects/${projectId}/stages/${stage.id}/document.md`,
+        `${stage.title}.md`,
+      );
+      toast({ title: "Document downloaded", description: `${stage.title}.md saved.` });
+    } catch (err) {
+      toast({
+        title: "Download failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloadingDoc(false);
+    }
+  };
+
+  const handleDownloadAll = async () => {
+    if (!projectId) return;
+    setIsDownloadingAll(true);
+    try {
+      await downloadMarkdown(
+        `/api/projects/${projectId}/documents.md`,
+        `${project?.name ?? "project"}-all-documents.md`,
+      );
+      toast({ title: "All documents downloaded", description: "Combined markdown saved." });
+    } catch (err) {
+      toast({
+        title: "Download failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
+  const openHistory = async () => {
+    if (!projectId || !stage) return;
+    setShowHistory(true);
+    setVersionsLoading(true);
+    setVersions(null);
+    try {
+      const res = await apiRequest(
+        "GET",
+        `/api/projects/${projectId}/stages/${stage.id}/versions`,
+      );
+      setVersions(await res.json());
+    } catch {
+      toast({
+        title: "Couldn't load history",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  const handleRestoreVersion = async (version: number) => {
+    if (!projectId || !stage) return;
+    setRestoringVersion(version);
+    try {
+      await apiRequest(
+        "POST",
+        `/api/projects/${projectId}/stages/${stage.id}/versions/${version}/restore`,
+      );
+      await refetchMessages();
+      setShowHistory(false);
+      toast({
+        title: "Version restored",
+        description: `Version ${version} is now the current document (saved as a new version).`,
+      });
+    } catch (err) {
+      toast({
+        title: "Restore failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRestoringVersion(null);
     }
   };
 
@@ -631,13 +749,40 @@ export default function DocumentViewPage() {
               </ActionButton>
             )}
             <ActionButton
+              onClick={handleDownloadDoc}
+              disabled={isDownloadingDoc}
+              data-testid="button-download-doc"
+              aria-label="Download this document as markdown"
+            >
+              <Download style={{ width: 13, height: 13 }} />
+              <span>{isDownloadingDoc ? "Saving…" : "Download .md"}</span>
+            </ActionButton>
+            <ActionButton
+              onClick={handleDownloadAll}
+              disabled={isDownloadingAll}
+              data-testid="button-download-all-md"
+              aria-label="Download all documents as one markdown file"
+            >
+              <Download style={{ width: 13, height: 13 }} />
+              <span>{isDownloadingAll ? "Saving…" : "Download all"}</span>
+            </ActionButton>
+            <ActionButton
+              onClick={openHistory}
+              disabled={false}
+              data-testid="button-version-history"
+              aria-label="View version history"
+            >
+              <ListTodo style={{ width: 13, height: 13 }} />
+              <span>History</span>
+            </ActionButton>
+            <ActionButton
               onClick={handleExport}
               disabled={isExporting}
               data-testid="button-export-all"
-              aria-label="Export all documents"
+              aria-label="Export all documents as JSON"
             >
               <Download style={{ width: 13, height: 13 }} />
-              <span>{isExporting ? "Exporting…" : "Export All"}</span>
+              <span>{isExporting ? "Exporting…" : "Export JSON"}</span>
             </ActionButton>
             {adaptiveIntakeIncomplete ? (
               <ActionButton
@@ -1067,6 +1212,86 @@ export default function DocumentViewPage() {
             </Button>
             <Button onClick={handleRegenerate} className="btn-primary">
               Regenerate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Version history — restore is non-destructive: it copies an older
+          version's content into a new current version, history is preserved. */}
+      <Dialog open={showHistory} onOpenChange={setShowHistory}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Version history — {stage.title}</DialogTitle>
+            <DialogDescription>
+              Each regenerate saves a new version. Restoring an earlier version
+              makes it the current document and keeps the full history.
+            </DialogDescription>
+          </DialogHeader>
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            {versionsLoading ? (
+              <p style={{ fontSize: 13, color: "#a89a8c", padding: "12px 0" }}>
+                Loading versions…
+              </p>
+            ) : !versions || versions.length === 0 ? (
+              <p
+                data-testid="version-history-empty"
+                style={{ fontSize: 13, color: "#a89a8c", padding: "12px 0" }}
+              >
+                No earlier versions yet.
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {[...versions]
+                  .sort((a, b) => b.version - a.version)
+                  .map((v, idx) => {
+                    const isCurrent = idx === 0;
+                    return (
+                      <li
+                        key={v.version}
+                        data-testid={`version-row-${v.version}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          padding: "10px 0",
+                          borderBottom: "1px solid rgba(200,180,160,0.08)",
+                        }}
+                      >
+                        <div style={{ fontSize: 13 }}>
+                          <span style={{ fontWeight: 600 }}>
+                            Version {v.version}
+                          </span>
+                          {isCurrent && (
+                            <span style={{ color: "#f0b65e", marginLeft: 8 }}>
+                              (current)
+                            </span>
+                          )}
+                          <div style={{ fontSize: 11, color: "#a89a8c", marginTop: 2 }}>
+                            {new Date(v.createdAt).toLocaleString()} · {v.charCount} chars
+                          </div>
+                        </div>
+                        {!isCurrent && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={restoringVersion !== null}
+                            onClick={() => handleRestoreVersion(v.version)}
+                            data-testid={`button-restore-${v.version}`}
+                          >
+                            {restoringVersion === v.version ? "Restoring…" : "Restore"}
+                          </Button>
+                        )}
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowHistory(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
