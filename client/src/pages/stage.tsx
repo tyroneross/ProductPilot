@@ -2,12 +2,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, SkipForward } from "lucide-react";
 import Nav from "@/components/nav";
+import Breadcrumb from "@/components/breadcrumb";
+import { displayProjectName } from "@/lib/project-name";
 import ChatInterface from "@/components/chat-interface";
 import InsightsPanel from "@/components/insights-panel";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Stage } from "@shared/schema";
+import type { Stage, Project } from "@shared/schema";
 
 export default function StagePage() {
   const { stageId } = useParams();
@@ -18,6 +20,13 @@ export default function StagePage() {
   const { data: stage, isLoading } = useQuery<Stage>({
     queryKey: ["/api/stages", stageId],
     enabled: !!stageId,
+  });
+
+  // Project is fetched only to label the breadcrumb's middle segment.
+  // Endpoint is ownership-enforced server-side (loadOwnedProject / RLS).
+  const { data: project } = useQuery<Project>({
+    queryKey: ["/api/projects", stage?.projectId],
+    enabled: !!stage?.projectId,
   });
 
   const skipStageMutation = useMutation({
@@ -74,6 +83,15 @@ export default function StagePage() {
     <div className="min-h-screen bg-surface-secondary flex flex-col">
       <Nav />
       <header className="border-b border-[rgba(200,180,160,0.08)] bg-surface-primary px-6 py-4">
+        <Breadcrumb
+          segments={[
+            { label: "Projects", href: "/projects" },
+            ...(project
+              ? [{ label: displayProjectName(project), href: `/documents/${stage.projectId}` }]
+              : []),
+            { label: stage.title },
+          ]}
+        />
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button

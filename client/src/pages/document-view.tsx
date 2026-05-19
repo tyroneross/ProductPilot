@@ -43,6 +43,8 @@ function highlightAssumed(node: ReactNode): ReactNode {
   return node;
 }
 import Nav from "@/components/nav";
+import Breadcrumb from "@/components/breadcrumb";
+import { displayProjectName } from "@/lib/project-name";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Info } from "lucide-react";
@@ -657,6 +659,17 @@ export default function DocumentViewPage() {
           borderBottom: "1px solid rgba(200,180,160,0.08)",
         }}
       >
+        {/* Breadcrumb — full navigable hierarchy */}
+        <div style={{ maxWidth: "52rem", margin: "0 auto", padding: "10px 24px 0" }}>
+          <Breadcrumb
+            segments={[
+              { label: "Projects", href: "/projects" },
+              { label: displayProjectName(project), href: `/documents/${projectId}` },
+              { label: stage.title },
+            ]}
+          />
+        </div>
+
         {/* Top bar: back + title + actions */}
         <div
           style={{
@@ -721,7 +734,7 @@ export default function DocumentViewPage() {
                 marginTop: 1,
               }}
             >
-              {project.name}
+              {displayProjectName(project)}
             </div>
           </div>
 
