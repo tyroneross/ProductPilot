@@ -373,12 +373,27 @@ export default function DocumentsPage() {
                           fontFamily: "inherit",
                           padding: "5px 12px",
                           borderRadius: 6,
-                          // Distinct enabled/disabled visual states.
-                          background: hasIntake && !generateMutation.isPending ? "#f0b65e" : "transparent",
-                          color: hasIntake && !generateMutation.isPending ? "#110f0d" : "#6b5d52",
-                          border: hasIntake && !generateMutation.isPending ? "none" : "1px solid rgba(200,180,160,0.12)",
+                          // Outline/secondary treatment matching "Edit survey responses"
+                          // so the bottom "Generate all documents" stays the only filled CTA.
+                          // Distinct enabled/disabled visual states preserved.
+                          background: "transparent",
+                          color: hasIntake && !generateMutation.isPending ? "#f0b65e" : "#6b5d52",
+                          border:
+                            hasIntake && !generateMutation.isPending
+                              ? "1px solid rgba(240,182,94,0.30)"
+                              : "1px solid rgba(200,180,160,0.12)",
                           cursor: hasIntake && !generateMutation.isPending ? "pointer" : "not-allowed",
-                          transition: "background 0.15s",
+                          transition: "border-color 0.2s, background 0.2s",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!hasIntake || generateMutation.isPending) return;
+                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                          e.currentTarget.style.background = "rgba(240,182,94,0.05)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!hasIntake || generateMutation.isPending) return;
+                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                          e.currentTarget.style.background = "transparent";
                         }}
                       >
                         {rowPending ? "Starting…" : "Generate"}
