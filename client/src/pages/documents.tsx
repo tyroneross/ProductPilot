@@ -380,19 +380,19 @@ export default function DocumentsPage() {
                           color: hasIntake && !generateMutation.isPending ? "#f0b65e" : "#6b5d52",
                           border:
                             hasIntake && !generateMutation.isPending
-                              ? "1px solid rgba(240,182,94,0.30)"
+                              ? "1px solid rgba(240,182,94,0.46)"
                               : "1px solid rgba(200,180,160,0.12)",
                           cursor: hasIntake && !generateMutation.isPending ? "pointer" : "not-allowed",
                           transition: "border-color 0.2s, background 0.2s",
                         }}
                         onMouseEnter={(e) => {
                           if (!hasIntake || generateMutation.isPending) return;
-                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.71)";
                           e.currentTarget.style.background = "rgba(240,182,94,0.05)";
                         }}
                         onMouseLeave={(e) => {
                           if (!hasIntake || generateMutation.isPending) return;
-                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                          e.currentTarget.style.borderColor = "rgba(240,182,94,0.46)";
                           e.currentTarget.style.background = "transparent";
                         }}
                       >
@@ -455,7 +455,7 @@ export default function DocumentsPage() {
                 alignItems: "center",
                 gap: 6,
                 padding: "8px 16px",
-                border: "1px solid rgba(240,182,94,0.30)",
+                border: "1px solid rgba(240,182,94,0.46)",
                 borderRadius: 6,
                 background: "transparent",
                 color: "#f0b65e",
@@ -466,11 +466,11 @@ export default function DocumentsPage() {
                 transition: "border-color 0.2s, background 0.2s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.71)";
                 e.currentTarget.style.background = "rgba(240,182,94,0.05)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.46)";
                 e.currentTarget.style.background = "transparent";
               }}
             >
@@ -485,7 +485,7 @@ export default function DocumentsPage() {
                 alignItems: "center",
                 gap: 6,
                 padding: "8px 16px",
-                border: "1px solid rgba(240,182,94,0.30)",
+                border: "1px solid rgba(240,182,94,0.46)",
                 borderRadius: 6,
                 background: "transparent",
                 color: "#f0b65e",
@@ -496,11 +496,11 @@ export default function DocumentsPage() {
                 transition: "border-color 0.2s, background 0.2s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "rgba(240,182,94,0.55)";
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.71)";
                 e.currentTarget.style.background = "rgba(240,182,94,0.05)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "rgba(240,182,94,0.30)";
+                e.currentTarget.style.borderColor = "rgba(240,182,94,0.46)";
                 e.currentTarget.style.background = "transparent";
               }}
             >
