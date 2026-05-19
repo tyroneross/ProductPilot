@@ -11,8 +11,18 @@
  *   7. Sum doc word counts
  *   8. Write one CSV row per fixture
  *
- * Output: server/test/baselines/2026-05-02.csv (baseline commit)
- *         server/test/eval-runs/<timestamp>.csv (subsequent runs, gitignored)
+ * Output (default — every run, including the live ones):
+ *   server/test/eval-runs/<timestamp>.csv (gitignored per-run copy)
+ *
+ * Output (only when UPDATE_BASELINE=1 is set in env):
+ *   server/test/baselines/2026-05-02.csv         (main intake baseline)
+ *   server/test/baselines/2026-05-02-cache.csv   (cache live-run / sentinel)
+ *   server/test/baselines/2026-05-02-adaptive.csv (adaptive live-run / sentinel)
+ *
+ * Re-baselining is a deliberate, explicit action: only run with
+ * `UPDATE_BASELINE=1 npm run eval:intake` when you have working API keys and
+ * have intentionally accepted a new normal. The default run leaves the
+ * committed baseline files untouched so regression/drift detection stays armed.
  *
  * Security:
  *   - Production guard: line 1 of executable code.
@@ -353,17 +363,28 @@ async function main() {
   // __dirname equivalent for ESM
   const __dirname = dirname(fileURLToPath(import.meta.url));
 
-  // Baseline path (committed snapshot) — resolves to server/test/baselines/
-  const baselinePath = join(__dirname, "baselines/2026-05-02.csv");
-  writeFileSync(baselinePath, csvContent, "utf-8");
-  console.log(`\n[eval] Baseline written to: ${baselinePath}`);
-
-  // Also write a timestamped run copy to eval-runs/ (gitignored)
+  // Always write a timestamped run copy to eval-runs/ (gitignored).
   const runDir = join(__dirname, "eval-runs");
   mkdirSync(runDir, { recursive: true });
   const runPath = join(runDir, `${new Date().toISOString().replace(/[:.]/g, "-")}.csv`);
   writeFileSync(runPath, csvContent, "utf-8");
-  console.log(`[eval] Run copy written to: ${runPath}`);
+  console.log(`\n[eval] Run copy written to: ${runPath}`);
+
+  // Baseline overwrite is gated: only when UPDATE_BASELINE=1 do we rewrite the
+  // committed snapshot at server/test/baselines/2026-05-02.csv. Otherwise the
+  // committed reference stays untouched so regression detection remains armed.
+  const updateBaseline =
+    process.env.UPDATE_BASELINE === "1" || process.env.UPDATE_BASELINE === "true";
+  const baselinePath = join(__dirname, "baselines/2026-05-02.csv");
+  if (updateBaseline) {
+    writeFileSync(baselinePath, csvContent, "utf-8");
+    console.log(`[eval] UPDATE_BASELINE=1 — committed baseline rewritten at: ${baselinePath}`);
+  } else {
+    console.log(
+      `[eval] Committed baseline preserved at: ${baselinePath} ` +
+        `(set UPDATE_BASELINE=1 to refresh it)`,
+    );
+  }
 
   console.log("\n[eval] Baseline CSV:");
   console.log(csvContent);
@@ -399,6 +420,14 @@ async function main() {
 async function measureCache(): Promise<void> {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const cachePath = join(__dirname, "baselines/2026-05-02-cache.csv");
+  const runDir = join(__dirname, "eval-runs");
+  mkdirSync(runDir, { recursive: true });
+  const cacheRunPath = join(
+    runDir,
+    `cache-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`,
+  );
+  const updateBaseline =
+    process.env.UPDATE_BASELINE === "1" || process.env.UPDATE_BASELINE === "true";
 
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn(
@@ -411,8 +440,17 @@ async function measureCache(): Promise<void> {
       "fixture_id,pass,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reduction_pct",
       "n/a,n/a,0,0,0,0,deferred",
     ].join("\n") + "\n";
-    writeFileSync(cachePath, sentinel, "utf-8");
-    console.log(`[cache] Sentinel written to: ${cachePath}`);
+    writeFileSync(cacheRunPath, sentinel, "utf-8");
+    console.log(`[cache] Sentinel run copy written to: ${cacheRunPath}`);
+    if (updateBaseline) {
+      writeFileSync(cachePath, sentinel, "utf-8");
+      console.log(`[cache] UPDATE_BASELINE=1 — committed baseline rewritten at: ${cachePath}`);
+    } else {
+      console.log(
+        `[cache] Committed baseline preserved at: ${cachePath} ` +
+          `(set UPDATE_BASELINE=1 to refresh it)`,
+      );
+    }
     return;
   }
 
@@ -503,8 +541,17 @@ async function measureCache(): Promise<void> {
     `${fixture.id},${second.pass},${second.input_tokens},${second.output_tokens},${second.cache_read_tokens},${second.cache_write_tokens},${reductionPct.toFixed(2)}`,
   ];
   const csv = csvLines.join("\n") + "\n";
-  writeFileSync(cachePath, csv, "utf-8");
-  console.log(`\n[cache] Cache CSV written to: ${cachePath}`);
+  writeFileSync(cacheRunPath, csv, "utf-8");
+  console.log(`\n[cache] Cache run copy written to: ${cacheRunPath}`);
+  if (updateBaseline) {
+    writeFileSync(cachePath, csv, "utf-8");
+    console.log(`[cache] UPDATE_BASELINE=1 — committed baseline rewritten at: ${cachePath}`);
+  } else {
+    console.log(
+      `[cache] Committed baseline preserved at: ${cachePath} ` +
+        `(set UPDATE_BASELINE=1 to refresh it)`,
+    );
+  }
   console.log(`[cache] Reduction in billed input tokens: ${reductionPct.toFixed(2)}%`);
   console.log(`[cache] Second-pass cache_read_tokens: ${second.cache_read_tokens}`);
 
@@ -543,6 +590,14 @@ async function measureCache(): Promise<void> {
 async function evalAdaptive(): Promise<void> {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const adaptivePath = join(__dirname, "baselines/2026-05-02-adaptive.csv");
+  const runDir = join(__dirname, "eval-runs");
+  mkdirSync(runDir, { recursive: true });
+  const adaptiveRunPath = join(
+    runDir,
+    `adaptive-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`,
+  );
+  const updateBaseline =
+    process.env.UPDATE_BASELINE === "1" || process.env.UPDATE_BASELINE === "true";
 
   if (!process.env.GROQ_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     console.warn(
@@ -555,8 +610,19 @@ async function evalAdaptive(): Promise<void> {
       "fixture_id,archetype,questions_asked,infer_count,time_to_finalize_ms,total_cost_usd,result",
       ...SAMPLE_PRODUCTS.map((p) => `${p.id},${p.archetype},0,0,0,0.000000,deferred`),
     ].join("\n") + "\n";
-    writeFileSync(adaptivePath, sentinel, "utf-8");
-    console.log(`[adaptive-eval] Sentinel written to: ${adaptivePath}`);
+    writeFileSync(adaptiveRunPath, sentinel, "utf-8");
+    console.log(`[adaptive-eval] Sentinel run copy written to: ${adaptiveRunPath}`);
+    if (updateBaseline) {
+      writeFileSync(adaptivePath, sentinel, "utf-8");
+      console.log(
+        `[adaptive-eval] UPDATE_BASELINE=1 — committed baseline rewritten at: ${adaptivePath}`,
+      );
+    } else {
+      console.log(
+        `[adaptive-eval] Committed baseline preserved at: ${adaptivePath} ` +
+          `(set UPDATE_BASELINE=1 to refresh it)`,
+      );
+    }
     return;
   }
 
@@ -688,8 +754,19 @@ async function evalAdaptive(): Promise<void> {
       [r.fixture_id, r.archetype, r.questions_asked, r.infer_count, r.time_to_finalize_ms, r.total_cost_usd, r.result].join(","),
     ),
   ].join("\n") + "\n";
-  writeFileSync(adaptivePath, csv, "utf-8");
-  console.log(`\n[adaptive-eval] CSV written to: ${adaptivePath}`);
+  writeFileSync(adaptiveRunPath, csv, "utf-8");
+  console.log(`\n[adaptive-eval] Run copy written to: ${adaptiveRunPath}`);
+  if (updateBaseline) {
+    writeFileSync(adaptivePath, csv, "utf-8");
+    console.log(
+      `[adaptive-eval] UPDATE_BASELINE=1 — committed baseline rewritten at: ${adaptivePath}`,
+    );
+  } else {
+    console.log(
+      `[adaptive-eval] Committed baseline preserved at: ${adaptivePath} ` +
+        `(set UPDATE_BASELINE=1 to refresh it)`,
+    );
+  }
 
   // Median + pass/fail summary.
   const sorted = [...rows.map((r) => r.questions_asked)].sort((a, b) => a - b);
