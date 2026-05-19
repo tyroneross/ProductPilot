@@ -93,6 +93,67 @@ const DOC_TYPES = [
   },
 ];
 
+// Warm Craft loading skeleton for the document view. Shown while the project,
+// stages, OR the stage's messages are still fetching so the user never sees a
+// bare empty frame flash before content arrives (the prior gate ignored the
+// messages query, so `documentContent` was "" for a beat and the whole page
+// rendered blank).
+function DocumentViewSkeleton() {
+  const shimmer = "dv-skel-shimmer";
+  const bar = (w: string, h = 14, mb = 12) => (
+    <div
+      className={shimmer}
+      style={{ width: w, height: h, borderRadius: 6, marginBottom: mb }}
+    />
+  );
+  return (
+    <div
+      data-testid="document-view-skeleton"
+      className="min-h-screen flex flex-col"
+      style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      aria-busy="true"
+      aria-label="Loading document"
+    >
+      <style>{`
+        @keyframes dvSkelPulse { 0% { opacity: .55 } 50% { opacity: 1 } 100% { opacity: .55 } }
+        .dv-skel-shimmer {
+          background: linear-gradient(90deg, rgba(240,182,94,0.06), rgba(240,182,94,0.12), rgba(240,182,94,0.06));
+          animation: dvSkelPulse 1.4s ease-in-out infinite;
+        }
+      `}</style>
+      <Nav />
+      {/* Header bar */}
+      <div style={{ background: "#1a1714", borderBottom: "1px solid rgba(200,180,160,0.08)" }}>
+        <div style={{ maxWidth: "52rem", margin: "0 auto", padding: "12px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+          <div className={shimmer} style={{ width: 32, height: 32, borderRadius: 8 }} />
+          <div className={shimmer} style={{ width: 220, height: 18, borderRadius: 6 }} />
+          <div style={{ flex: 1 }} />
+          <div className={shimmer} style={{ width: 90, height: 30, borderRadius: 8 }} />
+          <div className={shimmer} style={{ width: 90, height: 30, borderRadius: 8 }} />
+        </div>
+        {/* Tab strip */}
+        <div style={{ maxWidth: "52rem", margin: "0 auto", padding: "0 24px 10px", display: "flex", gap: 8 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className={shimmer} style={{ width: 86, height: 28, borderRadius: 6 }} />
+          ))}
+        </div>
+      </div>
+      {/* Body shimmer lines */}
+      <div style={{ maxWidth: "52rem", margin: "0 auto", padding: "32px 24px", width: "100%" }}>
+        {bar("38%", 22, 24)}
+        {bar("100%")}
+        {bar("96%")}
+        {bar("88%")}
+        {bar("100%")}
+        {bar("72%", 14, 28)}
+        {bar("100%")}
+        {bar("90%")}
+        {bar("60%")}
+      </div>
+    </div>
+  );
+}
+
 export default function DocumentViewPage() {
   const { projectId, stageId } = useParams();
   const [, setLocation] = useLocation();
@@ -119,7 +180,7 @@ export default function DocumentViewPage() {
 
   const stage = stages.find((s) => s.id === stageId);
 
-  const { data: messages = [], refetch: refetchMessages } = useQuery<Message[]>({
+  const { data: messages = [], refetch: refetchMessages, isLoading: messagesLoading } = useQuery<Message[]>({
     queryKey: ["/api/stages", stageId, "messages"],
     enabled: !!stageId,
   });
@@ -399,22 +460,16 @@ export default function DocumentViewPage() {
   // the project's stage set (fresh project before docs generation, or a stale
   // / mistyped URL). Show a friendly empty state so the page isn't a silent
   // infinite spinner.
-  if (!project || stagesLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#110f0d" }}>
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            border: "2px solid rgba(240,182,94,0.2)",
-            borderTopColor: "#f0b65e",
-            borderRadius: "50%",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
+  // Show the Warm Craft skeleton while project/stages are fetching OR while the
+  // requested stage exists but its messages (the document body) are still
+  // loading and nothing has rendered yet. This removes the empty-frame flash
+  // the user saw when clicking "View".
+  if (
+    !project ||
+    stagesLoading ||
+    (stage && messagesLoading && documentContent === "")
+  ) {
+    return <DocumentViewSkeleton />;
   }
 
   if (!stage) {
