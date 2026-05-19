@@ -1,7 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, FileText, ListTodo, Layout, Code, BookOpen, Layers } from "lucide-react";
+import { useState } from "react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import Nav from "@/components/nav";
+import Breadcrumb from "@/components/breadcrumb";
+import { displayProjectName } from "@/lib/project-name";
 import type { Project, Stage } from "@shared/schema";
 
 const SHIMMER_STYLE: React.CSSProperties = {
@@ -21,47 +25,28 @@ const SPINNER_STYLE: React.CSSProperties = {
 };
 
 const DOC_TYPES = [
-  {
-    stageNumber: 1,
-    title: "Requirements Definition",
-    description: "Core users, problem space, and success metrics",
-    icon: "📋",
-  },
-  {
-    stageNumber: 2,
-    title: "Product Requirements",
-    description: "Feature scope, user stories, and acceptance criteria",
-    icon: "📄",
-  },
-  {
-    stageNumber: 3,
-    title: "UI Wireframes",
-    description: "Page layouts, navigation flow, and interaction patterns",
-    icon: "🖼️",
-  },
-  {
-    stageNumber: 4,
-    title: "System Architecture",
-    description: "Tech stack, data model, and service design",
-    icon: "🗄️",
-  },
-  {
-    stageNumber: 5,
-    title: "Coding Prompts",
-    description: "Implementation instructions for your AI coding assistant",
-    icon: "💻",
-  },
-  {
-    stageNumber: 6,
-    title: "Development Guide",
-    description: "Build phases, milestones, and deployment strategy",
-    icon: "🚀",
-  },
+  { stageNumber: 1, title: "Requirements Definition", description: "Core users, problem space, and success metrics", icon: "📋" },
+  { stageNumber: 2, title: "Product Requirements", description: "Feature scope, user stories, and acceptance criteria", icon: "📄" },
+  { stageNumber: 3, title: "UI Wireframes", description: "Page layouts, navigation flow, and interaction patterns", icon: "🖼️" },
+  { stageNumber: 4, title: "System Architecture", description: "Tech stack, data model, and service design", icon: "🗄️" },
+  { stageNumber: 5, title: "Coding Prompts", description: "Implementation instructions for your AI coding assistant", icon: "💻" },
+  { stageNumber: 6, title: "Development Guide", description: "Build phases, milestones, and deployment strategy", icon: "🚀" },
 ];
+
+type DocState = "complete" | "generating" | "not-generated";
+
+function docStateOf(stage: Stage | undefined): DocState {
+  if (stage && stage.progress === 100) return "complete";
+  if (stage && stage.progress > 0 && stage.progress < 100) return "generating";
+  return "not-generated";
+}
 
 export default function DocumentsPage() {
   const { projectId } = useParams();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [pendingStageId, setPendingStageId] = useState<string | "all" | null>(null);
 
   const { data: project } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -83,20 +68,17 @@ export default function DocumentsPage() {
     stage: stages.find((s) => s.stageNumber === docType.stageNumber),
   }));
 
-  const completedDocs = docs.filter((d) => d.stage && d.stage.progress === 100);
-  const generatingDocs = docs.filter((d) => d.stage && d.stage.progress > 0 && d.stage.progress < 100);
+  const completedDocs = docs.filter((d) => docStateOf(d.stage) === "complete");
+  const generatingDocs = docs.filter((d) => docStateOf(d.stage) === "generating");
+  const notGeneratedDocs = docs.filter((d) => docStateOf(d.stage) === "not-generated");
   const isGenerating = generatingDocs.length > 0;
 
-  // For generation progress bar
   const totalDocs = docs.length;
   const completedCount = completedDocs.length;
   const currentlyGeneratingDoc = generatingDocs[0];
   const progressPct = totalDocs > 0 ? (completedCount / totalDocs) * 100 : 0;
+  const firstIncompleteStage = docs.find((d) => docStateOf(d.stage) !== "complete")?.stage;
 
-  // For "Refine with AI" — navigate to first incomplete stage
-  const firstIncompleteStage = docs.find((d) => !d.stage || d.stage.progress < 100)?.stage;
-
-  // Stat line: most recent updatedAt among completed stages
   const lastGenerated: Date | null = completedDocs
     .map((d) => d.stage?.updatedAt)
     .filter(Boolean)
@@ -105,14 +87,60 @@ export default function DocumentsPage() {
 
   const timeAgo = lastGenerated
     ? (() => {
-        const diffMs = Date.now() - lastGenerated.getTime();
-        const diffMin = Math.floor(diffMs / 60000);
+        const diffMin = Math.floor((Date.now() - lastGenerated.getTime()) / 60000);
         if (diffMin < 1) return "just now";
         if (diffMin < 60) return `${diffMin} min ago`;
-        const diffHr = Math.floor(diffMin / 60);
-        return `${diffHr}h ago`;
+        return `${Math.floor(diffMin / 60)}h ago`;
       })()
     : null;
+
+  // Reuses the existing assumed-content signal (same path document-view reads).
+  const inputsAssumed = Boolean(
+    (project?.productState as { workingMemory?: { tradeoff_weights_assumed?: boolean } } | null | undefined)
+      ?.workingMemory?.tradeoff_weights_assumed,
+  );
+
+  // Generation is honest only when the project has captured intake — the
+  // existing endpoint 400s otherwise. Gate optimistically; the server stays the
+  // source of truth and any 400 message is surfaced via toast.
+  const hasIntake = Boolean(
+    project &&
+      (project.surveyPhase === "complete" ||
+        project.surveyResponses ||
+        project.minimumDetails ||
+        project.intakeMode === "adaptive"),
+  );
+
+  const generateMutation = useMutation({
+    mutationFn: async (target: { stageId: string } | "all") => {
+      const documentPreferences =
+        target === "all"
+          ? []
+          : [{ stageId: target.stageId, detailLevel: "detailed" as const }];
+      const res = await apiRequest(
+        "POST",
+        `/api/projects/${projectId}/generate-docs-from-survey`,
+        { documentPreferences },
+      );
+      return res.json();
+    },
+    onSuccess: () => {
+      // The 3s stages poll picks up progress once invalidated.
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
+    },
+    onError: (err: unknown) => {
+      const description =
+        err instanceof Error && err.message ? err.message : "Please try again.";
+      toast({ title: "Generation failed", description, variant: "destructive" });
+    },
+    onSettled: () => setPendingStageId(null),
+  });
+
+  function triggerGenerate(target: { stageId: string } | "all", key: string | "all") {
+    if (!hasIntake || generateMutation.isPending) return;
+    setPendingStageId(key);
+    generateMutation.mutate(target);
+  }
 
   if (!project) {
     return (
@@ -132,9 +160,10 @@ export default function DocumentsPage() {
     );
   }
 
+  const projectLabel = displayProjectName(project);
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      {/* Keyframes */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes shimmer { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }
@@ -143,75 +172,38 @@ export default function DocumentsPage() {
 
       <Nav />
 
-      {/* Main */}
       <main style={{ flex: 1 }}>
-        <div
-          style={{
-            maxWidth: "44rem",
-            margin: "0 auto",
-            padding: "2.5rem 1.5rem 3rem",
-          }}
-        >
-          {/* Breadcrumb */}
-          <div style={{ marginBottom: 10 }}>
-            <button
-              onClick={() => setLocation("/projects")}
-              data-testid="button-breadcrumb-projects"
-              aria-label={`Back to projects (from ${project.name})`}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "#a89a8c",
-                fontSize: 13,
-                // WCAG 2.5.8 minimum touch target is 24x24 px. Pad vertically so the
-                // clickable height satisfies the rule even though the visible text
-                // line is only ~20 px tall.
-                minHeight: 24,
-                padding: "2px 0",
-                fontFamily: "inherit",
-                transition: "color 0.15s",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#f5f0eb")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "#a89a8c")}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6 }}>
-                <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {project.name}
-            </button>
-          </div>
+        <div style={{ maxWidth: "44rem", margin: "0 auto", padding: "2.5rem 1.5rem 3rem" }}>
+          {/* Breadcrumb — full navigable hierarchy */}
+          <Breadcrumb
+            segments={[
+              { label: "Projects", href: "/projects" },
+              { label: projectLabel },
+            ]}
+          />
 
           {/* Page header */}
           <header style={{ marginBottom: "1.75rem" }}>
-            <h1
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                letterSpacing: "-0.02em",
-                color: "#f5f0eb",
-                marginBottom: 4,
-                margin: 0,
-              }}
-            >
+            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em", color: "#f5f0eb", margin: 0 }}>
               Your Documents
             </h1>
-            <p
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 11,
-                color: "#6b5d52",
-                marginTop: 4,
-              }}
-            >
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#6b5d52", marginTop: 4 }}>
               {totalDocs} documents{timeAgo ? ` · Generated ${timeAgo}` : ""}
             </p>
+            {/* Assumed-input signal — quiet text, no loud badge (signal hierarchy).
+                Reuses the existing tradeoff_weights_assumed flag. */}
+            {inputsAssumed && (
+              <p
+                data-testid="documents-inputs-assumed"
+                title="Some inputs were inferred — refine your survey responses to improve accuracy."
+                style={{ fontSize: 11, color: "#a89a8c", marginTop: 6 }}
+              >
+                Inputs partly assumed — some details were inferred.
+              </p>
+            )}
           </header>
 
-          {/* Generation progress — only shown while generating */}
+          {/* Generation progress — only while generating */}
           {isGenerating && (
             <div
               role="status"
@@ -231,25 +223,11 @@ export default function DocumentsPage() {
               <span style={{ fontSize: 12, color: "#a89a8c", flex: 1 }}>
                 Generating {currentlyGeneratingDoc?.title ?? ""}…
               </span>
-              <span
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 11,
-                  color: "#6b5d52",
-                  flexShrink: 0,
-                }}
-              >
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#6b5d52", flexShrink: 0 }}>
                 {completedCount} of {totalDocs}
               </span>
               <div
-                style={{
-                  width: 80,
-                  height: 2,
-                  background: "rgba(200,180,160,0.08)",
-                  borderRadius: 9999,
-                  overflow: "hidden",
-                  flexShrink: 0,
-                }}
+                style={{ width: 80, height: 2, background: "rgba(200,180,160,0.08)", borderRadius: 9999, overflow: "hidden", flexShrink: 0 }}
                 aria-hidden="true"
               >
                 <div
@@ -268,22 +246,19 @@ export default function DocumentsPage() {
 
           {/* Document list */}
           <section aria-label="Generated documents">
-            <div
-              style={{
-                border: "1px solid rgba(200,180,160,0.08)",
-                borderRadius: 8,
-                overflow: "hidden",
-                marginBottom: "1.5rem",
-              }}
-            >
+            <div style={{ border: "1px solid rgba(200,180,160,0.08)", borderRadius: 8, overflow: "hidden", marginBottom: "1.5rem" }}>
               {docs.map((doc, idx) => {
-                const isComplete = doc.stage && doc.stage.progress === 100;
-                const isPending = !isComplete;
+                const state = docStateOf(doc.stage);
+                const isComplete = state === "complete";
+                const isRowGenerating = state === "generating";
+                const rowPending = doc.stage ? pendingStageId === doc.stage.id : false;
 
                 return (
                   <div
                     key={doc.stageNumber}
-                    aria-busy={isPending ? true : undefined}
+                    aria-busy={isComplete ? undefined : true}
+                    data-testid={`doc-row-${doc.stageNumber}`}
+                    data-doc-state={state}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -291,7 +266,9 @@ export default function DocumentsPage() {
                       padding: "14px 18px 14px 16px",
                       borderBottom: idx < docs.length - 1 ? "1px solid rgba(200,180,160,0.06)" : "none",
                       borderLeft: isComplete ? "2px solid #f0b65e" : "2px solid transparent",
-                      transition: "background 0.12s",
+                      // Not-generated rows are visibly de-emphasized vs ready ones.
+                      opacity: state === "not-generated" ? 0.55 : 1,
+                      transition: "background 0.12s, opacity 0.2s",
                       cursor: isComplete ? "pointer" : "default",
                     }}
                     onMouseEnter={(e) => {
@@ -301,20 +278,13 @@ export default function DocumentsPage() {
                       e.currentTarget.style.background = "transparent";
                     }}
                     onClick={() => {
-                      if (isComplete && doc.stage) {
-                        setLocation(`/document/${projectId}/${doc.stage.id}`);
-                      }
+                      if (isComplete && doc.stage) setLocation(`/document/${projectId}/${doc.stage.id}`);
                     }}
                   >
-                    {/* Icon */}
-                    <span
-                      aria-hidden="true"
-                      style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: "center" }}
-                    >
+                    <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: "center" }}>
                       {doc.icon}
                     </span>
 
-                    {/* Body */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
@@ -328,6 +298,8 @@ export default function DocumentsPage() {
                       >
                         {doc.title}
                       </div>
+
+                      {/* State is named in TEXT, not shimmer-only. */}
                       {isComplete ? (
                         <div
                           style={{
@@ -341,22 +313,23 @@ export default function DocumentsPage() {
                         >
                           {doc.description}
                         </div>
+                      ) : isRowGenerating ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 3 }}>
+                          <span style={SPINNER_STYLE} aria-hidden="true" />
+                          <span style={{ fontSize: 12, color: "#a89a8c" }}>Generating…</span>
+                          <span
+                            aria-hidden="true"
+                            style={{ display: "inline-block", width: 120, height: 9, borderRadius: 4, ...SHIMMER_STYLE }}
+                          />
+                        </div>
                       ) : (
-                        <div
-                          aria-hidden="true"
-                          style={{
-                            display: "inline-block",
-                            marginTop: 3,
-                            width: 220,
-                            height: 11,
-                            borderRadius: 4,
-                            ...SHIMMER_STYLE,
-                          }}
-                        />
+                        <div style={{ fontSize: 12, color: "#6b5d52", marginTop: 2 }}>
+                          {rowPending ? "Starting…" : "Not generated yet"}
+                        </div>
                       )}
                     </div>
 
-                    {/* View link */}
+                    {/* Right control: View (complete) | Generate (not-generated) | nothing (generating) */}
                     {isComplete && doc.stage ? (
                       <button
                         onClick={(e) => {
@@ -373,7 +346,6 @@ export default function DocumentsPage() {
                           flexShrink: 0,
                           padding: 0,
                           fontFamily: "inherit",
-                          textDecoration: "none",
                           transition: "color 0.15s",
                         }}
                         onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
@@ -381,17 +353,38 @@ export default function DocumentsPage() {
                       >
                         View
                       </button>
-                    ) : (
-                      <span
-                        aria-disabled="true"
+                    ) : isRowGenerating ? (
+                      <span aria-disabled="true" style={{ fontSize: 12, fontWeight: 500, color: "#6b5d52", flexShrink: 0, pointerEvents: "none" }}>
+                        View
+                      </span>
+                    ) : doc.stage ? (
+                      <button
+                        data-testid={`button-generate-${doc.stageNumber}`}
+                        disabled={!hasIntake || generateMutation.isPending}
+                        title={hasIntake ? "Generate this document" : "Complete the survey first"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerGenerate({ stageId: doc.stage!.id }, doc.stage!.id);
+                        }}
                         style={{
-                          fontSize: 12,
-                          fontWeight: 500,
-                          color: "#6b5d52",
                           flexShrink: 0,
-                          pointerEvents: "none",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          fontFamily: "inherit",
+                          padding: "5px 12px",
+                          borderRadius: 6,
+                          // Distinct enabled/disabled visual states.
+                          background: hasIntake && !generateMutation.isPending ? "#f0b65e" : "transparent",
+                          color: hasIntake && !generateMutation.isPending ? "#110f0d" : "#6b5d52",
+                          border: hasIntake && !generateMutation.isPending ? "none" : "1px solid rgba(200,180,160,0.12)",
+                          cursor: hasIntake && !generateMutation.isPending ? "pointer" : "not-allowed",
+                          transition: "background 0.15s",
                         }}
                       >
+                        {rowPending ? "Starting…" : "Generate"}
+                      </button>
+                    ) : (
+                      <span aria-disabled="true" style={{ fontSize: 12, fontWeight: 500, color: "#6b5d52", flexShrink: 0, pointerEvents: "none" }}>
                         View
                       </span>
                     )}
@@ -401,22 +394,46 @@ export default function DocumentsPage() {
             </div>
           </section>
 
+          {/* Generate-all CTA — primary action only while docs remain ungenerated. */}
+          {notGeneratedDocs.length > 0 && !isGenerating && (
+            <div style={{ marginBottom: "1.25rem" }}>
+              <button
+                data-testid="button-generate-all"
+                disabled={!hasIntake || generateMutation.isPending}
+                title={hasIntake ? "Generate all remaining documents" : "Complete the survey first"}
+                onClick={() => triggerGenerate("all", "all")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  fontFamily: "inherit",
+                  background: hasIntake && !generateMutation.isPending ? "#f0b65e" : "transparent",
+                  color: hasIntake && !generateMutation.isPending ? "#110f0d" : "#6b5d52",
+                  border: hasIntake && !generateMutation.isPending ? "none" : "1px solid rgba(200,180,160,0.12)",
+                  cursor: hasIntake && !generateMutation.isPending ? "pointer" : "not-allowed",
+                  transition: "background 0.15s",
+                }}
+              >
+                {pendingStageId === "all" ? "Starting…" : "Generate all documents"}
+              </button>
+              {!hasIntake && (
+                <p style={{ fontSize: 11, color: "#6b5d52", marginTop: 6 }}>
+                  Complete the survey to enable document generation.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Bottom actions */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingTop: "1.25rem",
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "1.25rem", flexWrap: "wrap", gap: 12 }}>
             <button
               onClick={() => {
-                if (firstIncompleteStage) {
-                  setLocation(`/stage/${firstIncompleteStage.id}`);
-                } else {
-                  setLocation(`/session/survey?projectId=${projectId}`);
-                }
+                if (firstIncompleteStage) setLocation(`/stage/${firstIncompleteStage.id}`);
+                else setLocation(`/session/survey?projectId=${projectId}`);
               }}
               style={{
                 display: "inline-flex",
@@ -446,9 +463,7 @@ export default function DocumentsPage() {
             </button>
 
             <button
-              onClick={() =>
-                setLocation(`/session/survey?projectId=${projectId}`)
-              }
+              onClick={() => setLocation(`/session/survey?projectId=${projectId}`)}
               data-testid="button-edit-survey-responses"
               style={{
                 display: "inline-flex",
@@ -479,9 +494,7 @@ export default function DocumentsPage() {
 
             {completedDocs.length > 0 && completedDocs[0].stage && (
               <button
-                onClick={() =>
-                  setLocation(`/document/${projectId}/${completedDocs[0].stage!.id}`)
-                }
+                onClick={() => setLocation(`/document/${projectId}/${completedDocs[0].stage!.id}`)}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -513,7 +526,6 @@ export default function DocumentsPage() {
             )}
           </div>
 
-          {/* Keyboard hint — shown when ≥2 docs are ready */}
           {completedDocs.length >= 2 && (
             <p
               style={{
