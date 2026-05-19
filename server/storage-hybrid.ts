@@ -32,6 +32,10 @@ interface IStorage {
   // Messages
   getMessage(id: string): Promise<Message | undefined>;
   getMessagesByStage(stageId: string): Promise<Message[]>;
+  // Deliverable history for a stage (kind='deliverable'), oldest version first.
+  // Every regenerate appends a new row; nothing is deleted, so this is the
+  // version history substrate for export + restore.
+  getDeliverablesByStage(stageId: string): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
   deleteMessagesByStage(stageId: string): Promise<void>;
 
@@ -107,7 +111,7 @@ export function updateDbActorContext(updates: DbActorContext): void {
 }
 
 // In-memory storage fallback
-class MemStorage implements IStorage {
+export class MemStorage implements IStorage {
   private projects: Map<string, Project> = new Map();
   private stages: Map<string, Stage> = new Map();
   private messages: Map<string, Message> = new Map();
@@ -282,6 +286,12 @@ class MemStorage implements IStorage {
     return Array.from(this.messages.values())
       .filter(m => m.stageId === stageId)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async getDeliverablesByStage(stageId: string): Promise<Message[]> {
+    return Array.from(this.messages.values())
+      .filter(m => m.stageId === stageId && m.kind === "deliverable")
+      .sort((a, b) => (a.version ?? 1) - (b.version ?? 1));
   }
 
   async createMessage(insertMessage: InsertMessage): Promise<Message> {
@@ -720,6 +730,14 @@ class PostgresStorage implements IStorage {
       tx.select().from(messages)
         .where(eq(messages.stageId, stageId))
         .orderBy(asc(messages.createdAt))
+    );
+  }
+
+  async getDeliverablesByStage(stageId: string): Promise<Message[]> {
+    return await this.withActor((tx) =>
+      tx.select().from(messages)
+        .where(and(eq(messages.stageId, stageId), eq(messages.kind, "deliverable")))
+        .orderBy(asc(messages.version), asc(messages.createdAt))
     );
   }
 

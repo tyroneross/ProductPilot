@@ -1000,11 +1000,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Create a message in the stage with the generated content.
           // kind='deliverable' distinguishes a final doc from conversational turns.
+          // Version bumps on every (re)generate; prior deliverable rows are
+          // retained (never deleted) so the user can view/restore earlier
+          // versions. version = count of existing deliverables + 1.
+          const priorDeliverables = await storage.getDeliverablesByStage(stage.id);
           await storage.createMessage({
             stageId: stage.id,
             role: "assistant",
             content: response.content,
             kind: "deliverable",
+            version: priorDeliverables.length + 1,
           });
 
           // Update stage progress to 100%
@@ -1747,6 +1752,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to export project" });
     }
   });
+
+  // ── Document export + version control ───────────────────────────────────
+  // Substrate: every (re)generate appends a kind='deliverable' message with an
+  // incrementing `version`; prior rows are retained. These endpoints read that
+  // history. All access is RLS-scoped via loadOwnedStage/loadOwnedProject +
+  // storage.* withActor. Restore is non-destructive (insert-only) + audited.
+
+  // Helper: latest deliverable content for a stage ("" if none yet).
+  const latestDeliverableContent = async (stageId: string): Promise<string> => {
+    const dels = await storage.getDeliverablesByStage(stageId);
+    if (dels.length > 0) return dels[dels.length - 1].content;
+    // Fallback: legacy stages whose doc was written before kind='deliverable'
+    // existed — last assistant message is the document.
+    const msgs = await storage.getMessagesByStage(stageId);
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+    return lastAssistant?.content ?? "";
+  };
+
+  const mdFilename = (base: string) =>
+    `${base.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "document"}.md`;
+
+  // Per-document markdown export (latest version of one stage's deliverable).
+  app.get("/api/projects/:projectId/stages/:stageId/document.md", async (req: any, res) => {
+    try {
+      const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+      if (!stageAccess) return;
+      const { project, stage } = stageAccess;
+      if (stage.projectId !== req.params.projectId) {
+        return res.status(404).json({ message: "Stage not found in project" });
+      }
+      const content = await latestDeliverableContent(stage.id);
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${mdFilename(`${project.name}-${stage.title}`)}"`,
+      );
+      res.status(200).send(content);
+    } catch (error) {
+      logger.error({ err: error }, "[document.md] error");
+      res.status(500).json({ message: "Failed to export document" });
+    }
+  });
+
+  // Aggregate markdown — all stages in stageNumber order, concatenated.
+  app.get("/api/projects/:projectId/documents.md", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project } = projectAccess;
+      const stages = (await storage.getStagesByProject(project.id)).sort(
+        (a, b) => a.stageNumber - b.stageNumber,
+      );
+      const sections: string[] = [`# ${project.name}\n\n${project.description}`];
+      for (const stage of stages) {
+        const content = await latestDeliverableContent(stage.id);
+        if (content.trim().length === 0) continue;
+        sections.push(`# ${stage.title}\n\n${content}`);
+      }
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${mdFilename(`${project.name}-all-documents`)}"`,
+      );
+      res.status(200).send(sections.join("\n\n---\n\n"));
+    } catch (error) {
+      logger.error({ err: error }, "[documents.md] error");
+      res.status(500).json({ message: "Failed to export documents" });
+    }
+  });
+
+  // Version list for a stage's deliverable.
+  app.get("/api/projects/:projectId/stages/:stageId/versions", async (req: any, res) => {
+    try {
+      const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+      if (!stageAccess) return;
+      const { stage } = stageAccess;
+      if (stage.projectId !== req.params.projectId) {
+        return res.status(404).json({ message: "Stage not found in project" });
+      }
+      const dels = await storage.getDeliverablesByStage(stage.id);
+      res.json(
+        dels.map((d) => ({
+          version: d.version ?? 1,
+          createdAt: d.createdAt,
+          charCount: d.content.length,
+        })),
+      );
+    } catch (error) {
+      logger.error({ err: error }, "[versions] error");
+      res.status(500).json({ message: "Failed to list versions" });
+    }
+  });
+
+  // Restore a prior version — non-destructive: copies that version's content
+  // into a NEW deliverable so it becomes the current document while history
+  // is preserved.
+  app.post(
+    "/api/projects/:projectId/stages/:stageId/versions/:version/restore",
+    async (req: any, res) => {
+      try {
+        const stageAccess = await loadOwnedStage(req, res, req.params.stageId);
+        if (!stageAccess) return;
+        const { actor, stage } = stageAccess;
+        if (stage.projectId !== req.params.projectId) {
+          return res.status(404).json({ message: "Stage not found in project" });
+        }
+        const target = Number.parseInt(req.params.version, 10);
+        if (!Number.isInteger(target) || target < 1) {
+          return res.status(400).json({ message: "Invalid version" });
+        }
+        const dels = await storage.getDeliverablesByStage(stage.id);
+        const source = dels.find((d) => (d.version ?? 1) === target);
+        if (!source) {
+          return res.status(404).json({ message: "Version not found" });
+        }
+        const restored = await storage.createMessage({
+          stageId: stage.id,
+          role: "assistant",
+          content: source.content,
+          kind: "deliverable",
+          version: dels.length + 1,
+        });
+        void storage.createAuditEvent({
+          actorType: actor.kind,
+          actorId: actor.id,
+          action: "stage.restore_version",
+          resourceType: "stage",
+          resourceId: stage.id,
+          metadata: { restoredFromVersion: target, newVersion: dels.length + 1 },
+        }).catch((e) => logger.error({ err: e }, "[audit] stage.restore_version failed"));
+        res.status(200).json({
+          restoredFromVersion: target,
+          newVersion: restored.version ?? dels.length + 1,
+        });
+      } catch (error) {
+        logger.error({ err: error }, "[restore version] error");
+        res.status(500).json({ message: "Failed to restore version" });
+      }
+    },
+  );
 
   // Admin Prompts CRUD (protected by isAdmin middleware)
   app.get("/api/admin/prompts", requireAuth, isAdmin, async (req, res) => {

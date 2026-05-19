@@ -55,6 +55,11 @@ vi.mock("../storage-hybrid", () => {
       getStage: vi.fn(),
       updateStage: vi.fn(async () => {}),
       getMessagesByStage: vi.fn(async () => []),
+      getDeliverablesByStage: vi.fn(async (stageId: string) =>
+        messages
+          .filter((m: any) => m.stageId === stageId && m.kind === "deliverable")
+          .sort((a: any, b: any) => (a.version ?? 1) - (b.version ?? 1)),
+      ),
       createMessage: vi.fn(async (m: any) => {
         messages.push(m);
         return { id: `m-${messages.length}`, ...m };
