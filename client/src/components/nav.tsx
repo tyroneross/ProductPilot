@@ -128,19 +128,22 @@ export default function Nav() {
                 alignItems: "center",
                 gap: "6px",
                 height: "36px",
-                padding: "0 14px",
-                background: "#f0b65e",
+                // Keep the hit area ≥44px tall on mobile via height + flex
+                // centering; horizontal padding preserves a comfortable target
+                // without a visual box.
+                padding: "0 10px",
+                background: "transparent",
                 border: "none",
-                borderRadius: "8px",
-                color: "#110f0d",
+                color: "#f0b65e",
                 fontSize: "13px",
-                fontWeight: 600,
+                fontWeight: 500,
                 fontFamily: "inherit",
+                textDecoration: "none",
                 cursor: "pointer",
-                transition: "background 0.15s",
+                transition: "color 0.15s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#e7a84a"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#f0b65e"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
             >
               <LogIn size={14} />
               Sign In
@@ -362,6 +365,11 @@ export default function Nav() {
         .nav-item-destructive:hover, .nav-item-destructive:focus {
           background: rgba(224,112,112,0.08) !important;
           color: #e07070 !important;
+        }
+        [data-testid="button-nav-signin"]:focus-visible {
+          outline: 2px solid rgba(240,182,94,0.5);
+          outline-offset: 2px;
+          border-radius: 4px;
         }
       `}</style>
     </nav>
