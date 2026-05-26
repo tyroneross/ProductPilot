@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { FolderKanban, Sparkles, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
+import { displayProjectName } from "@/lib/project-name";
 import Nav from "@/components/nav";
 import type { Project } from "@shared/schema";
 
@@ -281,9 +282,33 @@ export default function ProjectsPage() {
                     </div>
 
                     {/* Name + sub */}
+                    {(() => {
+                      const shownName = displayProjectName(project);
+                      const wasDerived = shownName !== project.name;
+                      return (
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 15, fontWeight: 500, color: textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {project.name}
+                        {shownName}
+                        {wasDerived && (
+                          <span
+                            data-testid={`tag-auto-title-${project.id}`}
+                            title="Title generated from your brief. You can rename this project."
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 9,
+                              fontWeight: 600,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: textMuted,
+                              border: `1px solid ${border}`,
+                              borderRadius: 4,
+                              padding: "1px 5px",
+                              verticalAlign: "middle",
+                            }}
+                          >
+                            AI
+                          </span>
+                        )}
                       </p>
                       <p style={{ fontSize: 12, color: textMuted, margin: "3px 0 0" }}>Last updated {relTime}</p>
                       {/* Mobile chip */}
@@ -291,6 +316,8 @@ export default function ProjectsPage() {
                         <PhaseChip phase={project.surveyPhase} />
                       </span>
                     </div>
+                      );
+                    })()}
 
                     {/* Desktop chip */}
                     <span className="chip-desktop"><PhaseChip phase={project.surveyPhase} /></span>
