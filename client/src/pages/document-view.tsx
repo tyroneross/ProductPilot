@@ -190,12 +190,37 @@ export default function DocumentViewPage() {
 
   const stage = stages.find((s) => s.id === stageId);
 
-  const { data: messages = [], refetch: refetchMessages, isLoading: messagesLoading } = useQuery<Message[]>({
+  const {
+    data: messages = [],
+    refetch: refetchMessages,
+    isLoading: messagesLoading,
+    isFetching: messagesFetching,
+    dataUpdatedAt: messagesDataUpdatedAt,
+  } = useQuery<Message[]>({
     queryKey: ["/api/stages", stageId, "messages"],
     enabled: !!stageId,
   });
 
   const documentContent = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
+
+  // Defect #2 root-cause guard. The flash of "Continue intake" during tab
+  // switches happens when (a) the current `messages` query has just re-keyed
+  // to a new `stageId` and (b) React Query's per-render state reports
+  // `isLoading === false` for one frame because the new observer mounts
+  // after a frame in which data is `undefined` but `isFetching` hasn't yet
+  // flipped to `true`. The original predicate at the skeleton gate only
+  // checked `messagesLoading` so a single such frame leaked through to the
+  // body and rendered the Continue-intake control because `documentContent`
+  // was "". Tracking the stage we've *actually settled on* (a non-fetching,
+  // post-mount paint) lets the gate hold the skeleton until the data for the
+  // NEW stageId has arrived, not just until the OLD query reports done.
+  const settledStageIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (stageId && !messagesFetching && messagesDataUpdatedAt > 0) {
+      settledStageIdRef.current = stageId;
+    }
+  }, [stageId, messagesFetching, messagesDataUpdatedAt]);
+  const stageDataIsStale = !!stageId && settledStageIdRef.current !== stageId;
 
   // ── Spec linter (Phase 3) ────────────────────────────────────────────
   // Only runs for adaptive-mode projects; otherwise we skip to keep noise
@@ -584,10 +609,19 @@ export default function DocumentViewPage() {
   // requested stage exists but its messages (the document body) are still
   // loading and nothing has rendered yet. This removes the empty-frame flash
   // the user saw when clicking "View".
+  // Hold the skeleton while ANY of these are true:
+  //   - project query has not resolved
+  //   - stages query is in its first fetch
+  //   - we have a stageId but we have not yet *settled* on it (the new
+  //     messages query has not produced a non-fetching paint with data for
+  //     this exact stageId). This covers tab switches even when React Query
+  //     briefly reports messagesLoading === false on the new key.
+  //   - the messages query is mid-fetch and we have no document content yet
   if (
     !project ||
     stagesLoading ||
-    (stage && messagesLoading && documentContent === "")
+    (stage && stageDataIsStale) ||
+    (stage && (messagesLoading || messagesFetching) && documentContent === "")
   ) {
     return <DocumentViewSkeleton />;
   }
@@ -797,7 +831,7 @@ export default function DocumentViewPage() {
               <Download style={{ width: 13, height: 13 }} />
               <span>{isExporting ? "Exporting…" : "Export JSON"}</span>
             </ActionButton>
-            {adaptiveIntakeIncomplete ? (
+            {adaptiveIntakeIncomplete && !messagesFetching ? (
               <ActionButton
                 onClick={() => setLocation(continueIntakeHref)}
                 disabled={false}
@@ -1071,11 +1105,11 @@ export default function DocumentViewPage() {
             }}
           >
             <p style={{ fontSize: 13, color: "#a89a8c", marginBottom: 16 }}>
-              {adaptiveIntakeIncomplete
+              {adaptiveIntakeIncomplete && !messagesFetching
                 ? "Finish the adaptive intake to generate this document."
                 : "No content has been generated for this document yet."}
             </p>
-            {adaptiveIntakeIncomplete ? (
+            {adaptiveIntakeIncomplete && !messagesFetching ? (
               <button
                 onClick={() => setLocation(continueIntakeHref)}
                 style={{
