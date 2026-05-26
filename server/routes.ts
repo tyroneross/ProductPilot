@@ -1400,6 +1400,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Open Questions (defect #1) ───────────────────────────────────────
+  //
+  //   GET  /api/projects/:projectId/open-questions
+  //     Returns the merged list of OpenQuestion entries across all stages.
+  //     Pulls structured trailers from each stage's latest assistant message
+  //     and merges onto productState.workingMemory.openQuestions[], so the
+  //     UI sees a stable list across regenerations.
+  //
+  //   POST /api/projects/:projectId/open-questions/answer
+  //     Body: { topicId, stageId?, answer }
+  //     Persists the user's answer onto productState.workingMemory and
+  //     ALSO records it on intake_questions so downstream regeneration
+  //     reads it through the same path as adaptive-intake answers.
+
+  app.get("/api/projects/:projectId/open-questions", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project } = projectAccess;
+
+      const { extractOpenQuestions, mergeOpenQuestions } = await import("./services/open-questions");
+      const { hydrateProductState } = await import("./services/intake-controller");
+      const productState = hydrateProductState(project.productState);
+      const existing = Array.isArray((productState.workingMemory as Record<string, unknown>)?.openQuestions)
+        ? ((productState.workingMemory as { openQuestions?: unknown[] }).openQuestions as Array<Record<string, unknown>>)
+        : [];
+
+      // Pull each stage's most recent assistant deliverable.
+      const stagesForProject = await storage.getStagesByProject(project.id);
+      let incoming: ReturnType<typeof extractOpenQuestions> = [];
+      for (const stage of stagesForProject) {
+        const stageMessages = await storage.getMessagesByStage(stage.id);
+        const latestAssistant = [...stageMessages].reverse().find((m) => m.role === "assistant");
+        if (!latestAssistant) continue;
+        const extracted = extractOpenQuestions({
+          stageId: stage.id,
+          stageNumber: stage.stageNumber,
+          content: latestAssistant.content,
+        });
+        incoming = incoming.concat(extracted);
+      }
+
+      const merged = mergeOpenQuestions(existing as never, incoming);
+
+      // Persist the freshened list (so the UI is consistent across reloads).
+      productState.workingMemory = {
+        ...(productState.workingMemory as Record<string, unknown>),
+        openQuestions: merged,
+      };
+      await storage.updateProject(project.id, { productState });
+
+      res.json({ openQuestions: merged });
+    } catch (error) {
+      logger.error({ err: error }, "[open-questions:get] error");
+      res.status(500).json({ message: "Failed to load open questions" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/open-questions/answer", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+
+      const body = z.object({
+        topicId: z.string().min(1).max(200),
+        stageId: z.string().optional(),
+        answer: z.string().min(1).max(500),
+      }).parse(req.body);
+
+      const { applyAnswer } = await import("./services/open-questions");
+      const { hydrateProductState } = await import("./services/intake-controller");
+      const productState = hydrateProductState(project.productState);
+      const list = Array.isArray((productState.workingMemory as Record<string, unknown>)?.openQuestions)
+        ? ((productState.workingMemory as { openQuestions?: unknown[] }).openQuestions as Array<Record<string, unknown>>)
+        : [];
+
+      const { list: updatedList, found } = applyAnswer(list as never, {
+        topicId: body.topicId,
+        stageId: body.stageId,
+        answer: body.answer,
+      });
+
+      if (!found) {
+        return res.status(404).json({ message: "Open question not found", code: "topic_not_found" });
+      }
+
+      productState.workingMemory = {
+        ...(productState.workingMemory as Record<string, unknown>),
+        openQuestions: updatedList,
+      };
+
+      // Mirror onto intake_questions so downstream document-generation prompts
+      // read the answer through the same path adaptive-intake answers travel.
+      const existing = await storage.getIntakeQuestionsByProject(project.id);
+      const step = existing.length + 1;
+      const questionText = list.find((row: any) => row.topicId === body.topicId)?.prompt ?? `OpenQ ${body.topicId}`;
+      const intakeRow = await storage.createIntakeQuestion({
+        projectId: project.id,
+        step,
+        method: null,
+        questionText: String(questionText),
+        answerText: body.answer,
+        metadata: { source: "open_questions_inline", topicId: body.topicId, stageId: body.stageId ?? null },
+        answeredAt: new Date(),
+      });
+
+      // Also append to workingMemory.intakeAnswers so the next regeneration
+      // sees it without a separate read path.
+      const intakeAnswers = Array.isArray((productState.workingMemory as Record<string, unknown>)?.intakeAnswers)
+        ? ((productState.workingMemory as { intakeAnswers?: unknown[] }).intakeAnswers as unknown[])
+        : [];
+      intakeAnswers.push({
+        step,
+        method: null,
+        question: questionText,
+        answer: body.answer,
+        metadata: { source: "open_questions_inline", topicId: body.topicId, stageId: body.stageId ?? null },
+      });
+      productState.workingMemory = {
+        ...(productState.workingMemory as Record<string, unknown>),
+        intakeAnswers,
+      };
+
+      const updated = await storage.updateProject(project.id, { productState });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "open_questions.answer",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: {
+          topicId: body.topicId,
+          stageId: body.stageId ?? null,
+          intakeQuestionId: intakeRow.id,
+        },
+      }).catch((e) => logger.error({ err: e }, "[audit] open-questions.answer failed"));
+
+      res.json({
+        openQuestions: (updated?.productState as { workingMemory?: { openQuestions?: unknown[] } } | null)?.workingMemory?.openQuestions ?? updatedList,
+        intakeQuestion: intakeRow,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid open-question answer", errors: error.issues });
+      }
+      logger.error({ err: error }, "[open-questions:answer] error");
+      res.status(500).json({ message: "Failed to record open-question answer" });
+    }
+  });
+
   // POST /api/projects/:projectId/intake/finalize
   //
   // Phase 4: terminal step accepts an OPTIONAL tradeoffWeights body — the 100-point

@@ -223,7 +223,22 @@ Acceptance criteria:
 - A solo builder can paste the schema.sql block into \`psql\` and get a working database.
 - A builder can paste the TypeScript Types block into a shared/types.ts and use them in both frontend and backend without modification.
 - For every user flow in Stage 3, at least one API contract here names the endpoint(s) that serve it.
-- No hand-waving. No "the backend should handle X" — every backend concern has an endpoint or is in Open Questions.`,
+- No hand-waving. No "the backend should handle X" — every backend concern has an endpoint or is in Open Questions.
+
+Structured Open Questions trailer (REQUIRED in deliverable mode):
+After the Assumptions & Open Questions markdown section, append a single HTML comment with structured JSON so the UI can render inline-answer affordances:
+
+<!-- open-questions: [{"topicId":"...","prompt":"...","answerKind":"text|choice","answerChips":["…","…"],"feedsField":"architecture.<dot.path>"}] -->
+
+Rules for the trailer:
+- One entry per genuinely unresolved decision in the markdown section above.
+- topicId: short kebab-case stable id ("auth-provider", "persistence", "tenancy").
+- prompt: the question text, ≤200 chars, identical to the markdown bullet when possible.
+- answerKind: "choice" when there are 2-5 well-defined options; "text" otherwise.
+- answerChips: present iff answerKind === "choice"; each ≤120 chars.
+- feedsField (optional): dotted path naming the spec slice the answer updates.
+- Always valid JSON. No trailing commas. No comments inside the JSON.
+- Omit the trailer entirely if there are no open questions.`,
     isUnlocked: true,
     keyInsights: [
       "System components defined",
@@ -306,7 +321,19 @@ One fenced \`\`\`prompt block instructing the coding tool to:
 Acceptance criteria:
 - A builder pastes Prompt 1, then Prompt 2, then each Backend and Frontend prompt in sequence, then Prompt 5, then Prompt 6 — and has a running, deployed product without opening Stages 3 or 4 again.
 - Every file path, type name, endpoint, env var, and package name traces directly to a Stage 3 or Stage 4 artifact.
-- No prompt contains a placeholder the human must resolve. Anything unknown is in Stage 4's Open Questions — surface it there, not silently in a prompt.`,
+- No prompt contains a placeholder the human must resolve. Anything unknown is in Stage 4's Open Questions — surface it there, not silently in a prompt.
+
+Structured Missing Information trailer (REQUIRED in deliverable mode):
+If any prompt would carry a placeholder (an unknown that prevents direct paste-and-run), surface it under a "## Missing Information Needed" markdown section AND append:
+
+<!-- open-questions: [{"topicId":"...","prompt":"...","answerKind":"text|choice","answerChips":["…","…"],"feedsField":"coding-prompts.<dot.path>"}] -->
+
+Rules for the trailer:
+- One entry per missing piece of information.
+- topicId: kebab-case ("seed-data", "test-runner", "deploy-platform").
+- prompt: the question, ≤200 chars.
+- answerKind: "choice" when 2-5 known options; "text" otherwise.
+- Always valid JSON. Omit the trailer entirely when no info is missing.`,
     isUnlocked: true,
     keyInsights: [
       "System instructions optimized",

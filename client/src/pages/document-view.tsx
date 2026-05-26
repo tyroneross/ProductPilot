@@ -54,7 +54,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Project, Stage, Message } from "@shared/schema";
+import type { Project, Stage, Message, OpenQuestion } from "@shared/schema";
+import OpenQuestionRow from "@/components/open-question-row";
 
 const DOC_TYPES = [
   {
@@ -202,6 +203,17 @@ export default function DocumentViewPage() {
   });
 
   const documentContent = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
+
+  // Defect #1 — surface inline-answer rows for any structured Open Questions
+  // the LLM emitted in this stage's doc. The endpoint returns the merged list
+  // across all stages; we filter to the current stage here.
+  const { data: openQuestionsResp } = useQuery<{ openQuestions: OpenQuestion[] }>({
+    queryKey: ["/api/projects", projectId, "open-questions"],
+    enabled: !!projectId && !!documentContent,
+  });
+  const openQuestionsForStage = (openQuestionsResp?.openQuestions ?? []).filter(
+    (q) => q.stageId === stageId,
+  );
 
   // Defect #2 root-cause guard. The flash of "Continue intake" during tab
   // switches happens when (a) the current `messages` query has just re-keyed
@@ -1071,29 +1083,56 @@ export default function DocumentViewPage() {
             </p>
           </div>
         ) : documentContent ? (
-          <div
-            style={{
-              background: "#1a1714",
-              borderRadius: 8,
-              border: "1px solid rgba(200,180,160,0.08)",
-              padding: "32px 36px",
-            }}
-          >
-            <div
-              className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e] prose-p:text-[#c8b4a0] prose-li:text-[#c8b4a0]"
-              style={{ fontSize: 14, lineHeight: 1.7 }}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p>{highlightAssumed(children)}</p>,
-                  li: ({ children }) => <li>{highlightAssumed(children)}</li>,
+          <>
+            {/* Defect #1 — Open Questions callout. Renders above the markdown body
+                so the user can answer in place before re-reading the doc. */}
+            {projectId && openQuestionsForStage.length > 0 && (
+              <div
+                data-testid="open-questions-panel"
+                style={{
+                  background: "#1a1714",
+                  borderRadius: 8,
+                  border: "1px solid rgba(240,182,94,0.22)",
+                  padding: "14px 16px",
+                  marginBottom: 16,
                 }}
               >
-                {documentContent}
-              </ReactMarkdown>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#f0b65e", margin: "0 0 10px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {openQuestionsForStage.filter((q) => !q.answeredValue).length === 0
+                    ? "All open questions answered"
+                    : `${openQuestionsForStage.filter((q) => !q.answeredValue).length} open question${openQuestionsForStage.filter((q) => !q.answeredValue).length === 1 ? "" : "s"} for this section`}
+                </p>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {openQuestionsForStage.map((q) => (
+                    <OpenQuestionRow key={q.topicId} projectId={projectId} question={q} />
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div
+              style={{
+                background: "#1a1714",
+                borderRadius: 8,
+                border: "1px solid rgba(200,180,160,0.08)",
+                padding: "32px 36px",
+              }}
+            >
+              <div
+                className="prose prose-sm max-w-none prose-invert prose-a:text-[#f0b65e] prose-headings:text-[#f5f0eb] prose-code:text-[#f0b65e] prose-p:text-[#c8b4a0] prose-li:text-[#c8b4a0]"
+                style={{ fontSize: 14, lineHeight: 1.7 }}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p>{highlightAssumed(children)}</p>,
+                    li: ({ children }) => <li>{highlightAssumed(children)}</li>,
+                  }}
+                >
+                  {documentContent}
+                </ReactMarkdown>
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           <div
             style={{

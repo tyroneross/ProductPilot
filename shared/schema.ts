@@ -565,6 +565,27 @@ export const NonGoalSchema = z.object({
   because: z.string().default(""),
 });
 
+// OpenQuestion — typed contract for inline-answer affordances on generated
+// docs. Defect #1. Stored in productState.workingMemory.openQuestions[] so
+// no Drizzle migration is needed; LLM doc-generation prompts emit an HTML-
+// comment trailer with structured questions that the server parses and
+// merges; the UI renders text or chip-group inputs depending on answerKind.
+// `feedsField` is a free-form dotted-path pointer (e.g. "architecture.persistence")
+// so downstream regeneration can act on the answer.
+export const OpenQuestionKind = z.enum(["text", "choice"]);
+export const OpenQuestionSchema = z.object({
+  topicId: z.string().min(1),
+  prompt: z.string().min(1).max(500),
+  stageId: z.string().optional(),
+  stageNumber: z.number().int().optional(),
+  answerKind: OpenQuestionKind.default("text"),
+  answerChips: z.array(z.string().min(1).max(120)).max(8).optional(),
+  feedsField: z.string().optional(),
+  answeredValue: z.string().max(500).optional(),
+  answeredAt: z.string().optional(),
+});
+export type OpenQuestion = z.infer<typeof OpenQuestionSchema>;
+
 // PlatformTarget — declared per-spec so the Phase 3 linter can apply
 // platform-appropriate test-framework rules. Default 'web' for backward
 // compatibility with specs authored before the field landed.
