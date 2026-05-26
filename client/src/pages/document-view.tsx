@@ -576,17 +576,27 @@ export default function DocumentViewPage() {
   };
 
   // Loading: project still fetching, OR stages still fetching.
-  // Empty: project loaded, stages loaded, but the requested stageId is not in
-  // the project's stage set (fresh project before docs generation, or a stale
-  // / mistyped URL). Show a friendly empty state so the page isn't a silent
-  // infinite spinner.
-  // Show the Warm Craft skeleton while project/stages are fetching OR while the
-  // requested stage exists but its messages (the document body) are still
-  // loading and nothing has rendered yet. This removes the empty-frame flash
-  // the user saw when clicking "View".
+  // Tab-switch transient: URL `stageId` has changed but the matched `stage`
+  // hasn't resolved against `stages` yet, OR the stages array hasn't been
+  // refetched. Without this guard, the render falls through to the empty-state
+  // branch below and briefly flashes "Continue intake" / "No document for this
+  // stage" before the new stage's messages arrive — root cause of the
+  // double-flash users see when switching tabs.
+  // Empty: project loaded, stages loaded, the URL stageId exists in the array
+  // but the stage genuinely has no doc yet. That falls through to the empty
+  // state below (real empty, not transient).
+  // Show the Warm Craft skeleton while:
+  //   - project still fetching, OR
+  //   - stages still fetching, OR
+  //   - we have a stageId in the URL but no matching stage object yet
+  //     (refetch in-flight; matched-stage will resolve on next render), OR
+  //   - the matched stage exists but its messages are still loading AND we
+  //     have no document content to show.
+  const stageIdMissing = !!stageId && !stage;
   if (
     !project ||
     stagesLoading ||
+    stageIdMissing ||
     (stage && messagesLoading && documentContent === "")
   ) {
     return <DocumentViewSkeleton />;
