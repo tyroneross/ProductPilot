@@ -24,6 +24,7 @@ vi.mock("../services/ai", () => {
 
 import { aiService } from "../services/ai";
 import {
+  computeRequiredStanceCategories,
   deriveCandidateUnknowns,
   deterministicMethodRoute,
   nextStep,
@@ -94,11 +95,60 @@ describe("deriveCandidateUnknowns", () => {
     expect(out.find((c) => c.topic === "primary_persona_and_trigger")).toBeDefined();
   });
 
-  it("flags stance_because_* for missing categories", () => {
+  it("flags stance_because_privacy_data + complexity for thin specs (cost gated on infra signal)", () => {
+    // Defect #5 (2026-05-26 UX punch list): cost was being asked before the
+    // product was even defined. After computeRequiredStanceCategories, a thin
+    // spec with no integrations and no apiContracts does NOT flag cost; the
+    // controller will surface it later, once the user has named integrations
+    // or external APIs.
     const out = deriveCandidateUnknowns({ productState: baseState, spec: thinSpec() });
     expect(out.some((c) => c.topic === "stance_because_privacy_data")).toBe(true);
     expect(out.some((c) => c.topic === "stance_because_complexity")).toBe(true);
+    expect(out.some((c) => c.topic === "stance_because_cost")).toBe(false);
+  });
+
+  it("flags stance_because_cost only when integrations or apiContracts are present", () => {
+    const specWithIntegration = SpecSchema.parse({
+      id: "spec-with-integration",
+      productName: "TestProduct",
+      productDescription: "Spec that names an external integration.",
+      integrations: [
+        {
+          id: "i1",
+          name: "Stripe",
+          purpose: "Accept payments",
+        },
+      ],
+    });
+    const out = deriveCandidateUnknowns({ productState: baseState, spec: specWithIntegration });
     expect(out.some((c) => c.topic === "stance_because_cost")).toBe(true);
+  });
+});
+
+describe("computeRequiredStanceCategories", () => {
+  it("returns privacy_data + complexity for specs with no infra signal", () => {
+    const result = computeRequiredStanceCategories({ integrations: [], apiContracts: [] });
+    expect(result).toEqual(["privacy_data", "complexity"]);
+  });
+
+  it("adds cost when integrations are non-empty", () => {
+    const result = computeRequiredStanceCategories({
+      integrations: [
+        { id: "i1", name: "Stripe", purpose: "Payments" },
+      ],
+      apiContracts: [],
+    });
+    expect(result).toContain("cost");
+  });
+
+  it("adds cost when apiContracts are non-empty", () => {
+    const result = computeRequiredStanceCategories({
+      integrations: [],
+      apiContracts: [
+        { id: "a1", method: "GET", path: "/api/x", featureIds: [] },
+      ],
+    });
+    expect(result).toContain("cost");
   });
 
   it("does NOT flag persona gaps when personas are populated with triggers + exclusions", () => {

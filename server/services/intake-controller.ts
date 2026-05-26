@@ -259,9 +259,33 @@ export function readAskedJtbdSlots(productState: ProductState): JtbdSlot[] {
  * This is the cheap pre-filter that means the blocking-scorer sees ~3-5 candidates
  * per call instead of a fishing expedition.
  */
+/**
+ * Decide which stance-because categories are required for THIS spec.
+ *
+ * Defect #5 of the 2026-05-26 UX punch list: cost was hard-required, so the
+ * intake-controller asked about it before the product was even defined.
+ * Resolution: privacy_data and complexity are always required (every product
+ * needs an explicit position on these). Cost is only required when the spec
+ * has an infra-heavy or paid-API signal — `integrations.length > 0` or
+ * `apiContracts.length > 0`. Greenfield/thin specs without those signals do
+ * NOT get asked about cost in the early intake; the question can still be
+ * surfaced later once the user has named features/integrations.
+ *
+ * This is intentionally conservative: any signal of integration or external
+ * API flips cost back on, so the user is never surprised by an unfunded
+ * dependency at finalize-time.
+ */
+export function computeRequiredStanceCategories(
+  spec: Pick<Spec, "integrations" | "apiContracts">,
+): ReadonlyArray<"privacy_data" | "complexity" | "cost"> {
+  const base: ReadonlyArray<"privacy_data" | "complexity"> = ["privacy_data", "complexity"];
+  const hasInfraSignal = spec.integrations.length > 0 || spec.apiContracts.length > 0;
+  return hasInfraSignal ? [...base, "cost"] : base;
+}
+
 export function deriveCandidateUnknowns(state: {
   productState: ProductState;
-  spec: Pick<Spec, "personas" | "scenarios" | "needs" | "features" | "adrs" | "nonGoals">;
+  spec: Pick<Spec, "personas" | "scenarios" | "needs" | "features" | "adrs" | "nonGoals" | "integrations" | "apiContracts">;
 }): Array<{ topic: string; why_it_matters: string }> {
   const { productState, spec } = state;
   const out: Array<{ topic: string; why_it_matters: string }> = [];
@@ -292,9 +316,16 @@ export function deriveCandidateUnknowns(state: {
     });
   }
 
-  // Stance because-clauses (PRD-Builder Q3)
+  // Stance because-clauses (PRD-Builder Q3).
+  //
+  // Defect #5 of the 2026-05-26 UX punch list: cost was being asked before the
+  // product was even defined. The fix: privacy_data and complexity stay
+  // required (every product needs a stance on these), but cost only becomes
+  // required when the inferred scope contains an infra-heavy or paid-API
+  // signal. Greenfield specs without integrations/apiContracts no longer get
+  // asked about cost first.
   const stance = productState.stanceBecauseClauses ?? [];
-  const requiredCategories = ["privacy_data", "complexity", "cost"] as const;
+  const requiredCategories = computeRequiredStanceCategories(spec);
   const missingStance = requiredCategories.filter(
     (cat) => !stance.some((s) => s.category === cat && s.because && s.because.trim() !== ""),
   );
