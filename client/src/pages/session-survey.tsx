@@ -19,6 +19,7 @@ import { SaveDialog } from "./session-survey/SaveDialog";
 import { PromptsDialog } from "./session-survey/PromptsDialog";
 import { AddEditPromptDialog } from "./session-survey/AddEditPromptDialog";
 import { ConfirmGenerateDialog } from "./session-survey/ConfirmGenerateDialog";
+import IntakeProgressPane from "@/components/intake-progress-pane";
 
 export default function SessionSurveyPage() {
   const [, setLocation] = useLocation();
@@ -1871,13 +1872,57 @@ export default function SessionSurveyPage() {
 
       <main
         style={{ flex: 1, display: "flex", flexDirection: "column" }}
-        className={surveyPhase !== "survey" ? "flex-1 flex flex-col max-w-4xl w-full mx-auto" : ""}
+        className={surveyPhase !== "survey" ? "flex-1 flex flex-col max-w-5xl w-full mx-auto" : ""}
       >
-        {surveyPhase === "discovery" ? renderDiscoveryPhase() : renderSurveyPhase()}
+        {surveyPhase === "discovery" ? (
+          <div className="intake-discovery-layout">
+            <div className="intake-discovery-main">{renderDiscoveryPhase()}</div>
+            {project && (
+              <div className="intake-discovery-pane" data-testid="intake-progress-pane-wrap">
+                <IntakeProgressPane
+                  intakeAnswers={
+                    Array.isArray((project.productState as { workingMemory?: { intakeAnswers?: unknown[] } } | null | undefined)?.workingMemory?.intakeAnswers)
+                      ? ((project.productState as { workingMemory?: { intakeAnswers?: unknown[] } })!.workingMemory!.intakeAnswers as Array<{
+                          metadata?: { extracts_into?: { spec_path?: string | null }; topic?: string | null; spec_path?: string | null };
+                        }>)
+                      : []
+                  }
+                  currentSpecPath={
+                    (project.productState as { workingMemory?: { current_question?: { spec_path?: string | null } } } | null | undefined)
+                      ?.workingMemory?.current_question?.spec_path ?? null
+                  }
+                  currentTopic={
+                    (project.productState as { workingMemory?: { current_question?: { topic?: string | null } } } | null | undefined)
+                      ?.workingMemory?.current_question?.topic ?? null
+                  }
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          renderSurveyPhase()
+        )}
       </main>
 
       {/* Responsive CSS for survey wizard */}
       <style>{`
+        .intake-discovery-layout {
+          flex: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 280px;
+          gap: 24px;
+          padding: 16px 24px 0;
+          align-items: stretch;
+        }
+        .intake-discovery-main { display: flex; flex-direction: column; min-width: 0; }
+        .intake-discovery-pane { position: sticky; top: 88px; align-self: flex-start; }
+        @media (max-width: 767px) {
+          .intake-discovery-layout {
+            grid-template-columns: minmax(0, 1fr);
+            padding: 8px 16px 0;
+          }
+          .intake-discovery-pane { display: none; }
+        }
         @media (max-width: 768px) {
           .survey-sidebar {
             position: fixed !important;
