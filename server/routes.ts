@@ -1462,6 +1462,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         existingSpec: null,
       });
 
+      // Defect #6b — derive a meaningful project title from the same brief
+      // signal the documents will render against. We only overwrite the
+      // stored name when (a) the existing name still looks like the
+      // timestamp/draft default AND (b) the user has not previously renamed
+      // (working memory marker). The derivation marker is persisted so the
+      // list page can show an "AI" tag without comparing two strings.
+      let derivedTitle: Awaited<ReturnType<typeof import("./services/title-generator").deriveProjectTitle>> = null;
+      try {
+        const { deriveProjectTitle, hasEnoughSignalForTitle } = await import("./services/title-generator");
+        const userRenamed = Boolean(
+          (productState.workingMemory as Record<string, unknown> | undefined)?.titleRenamedByUser,
+        );
+        if (!userRenamed && hasEnoughSignalForTitle({
+          storedName: project.name,
+          description: project.description,
+          minimumDetails: project.minimumDetails,
+          productState,
+          spec,
+        })) {
+          derivedTitle = deriveProjectTitle({
+            storedName: project.name,
+            description: project.description,
+            minimumDetails: project.minimumDetails,
+            productState,
+            spec,
+          });
+          if (derivedTitle && derivedTitle.name !== project.name) {
+            productState.workingMemory = {
+              ...(productState.workingMemory as Record<string, unknown>),
+              titleDerivation: {
+                source: derivedTitle.source,
+                derivedAt: derivedTitle.derivedAt,
+                fromName: project.name,
+              },
+            };
+            await storage.updateProject(project.id, {
+              name: derivedTitle.name,
+              productState,
+            });
+          }
+        }
+      } catch (titleErr) {
+        // Title derivation is best-effort — never block finalize.
+        logger.warn({ err: titleErr }, "[intake/finalize] title derivation failed");
+      }
+
       void storage.createAuditEvent({
         actorType: actor.kind,
         actorId: actor.id,
@@ -1474,13 +1520,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
           weightsApplied,
           weightsAssumed,
           tradeoffWeights: productState.tradeoffWeights ?? null,
+          titleDerived: derivedTitle ? derivedTitle.source : null,
         },
       }).catch((e) => logger.error({ err: e }, "[audit] intake.finalize failed"));
 
-      res.json({ spec, renderedMarkdown, productState, weightsAssumed });
+      res.json({ spec, renderedMarkdown, productState, weightsAssumed, derivedTitle });
     } catch (error) {
       logger.error({ err: error }, "[intake/finalize] error");
       res.status(500).json({ message: "Failed to finalize intake" });
+    }
+  });
+
+  // POST /api/projects/:projectId/derive-title
+  //
+  // Defect #6b. Idempotent endpoint that re-runs title derivation against
+  // current productState/spec. Returns the derived title without persisting
+  // when ?dryRun=1; otherwise persists when the result differs and the user
+  // hasn't manually renamed. Used by the UI to refresh a project's title
+  // without forcing a full intake finalize.
+  app.post("/api/projects/:projectId/derive-title", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project } = projectAccess;
+      const { hydrateProductState, finalize } = await import("./services/intake-controller");
+      const { deriveProjectTitle, hasEnoughSignalForTitle } = await import("./services/title-generator");
+
+      const productState = hydrateProductState(project.productState);
+      const userRenamed = Boolean(
+        (productState.workingMemory as Record<string, unknown> | undefined)?.titleRenamedByUser,
+      );
+
+      // Build a best-effort spec from current state so persona-derived titles
+      // work even mid-intake.
+      let spec: Awaited<ReturnType<typeof finalize>>["spec"] | null = null;
+      try {
+        const finalized = finalize({
+          projectId: project.id,
+          productName: project.name,
+          productDescription: project.description,
+          productState,
+          existingSpec: null,
+        });
+        spec = finalized.spec;
+      } catch {
+        spec = null;
+      }
+
+      if (!hasEnoughSignalForTitle({
+        storedName: project.name,
+        description: project.description,
+        minimumDetails: project.minimumDetails,
+        productState,
+        spec,
+      })) {
+        return res.json({ derivedTitle: null, persisted: false, reason: "not_enough_signal" });
+      }
+
+      const derived = deriveProjectTitle({
+        storedName: project.name,
+        description: project.description,
+        minimumDetails: project.minimumDetails,
+        productState,
+        spec,
+      });
+
+      const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+      if (!derived) {
+        return res.json({ derivedTitle: null, persisted: false, reason: "no_signal_resolved" });
+      }
+      if (userRenamed) {
+        return res.json({ derivedTitle: derived, persisted: false, reason: "user_renamed" });
+      }
+      if (derived.name === project.name) {
+        return res.json({ derivedTitle: derived, persisted: false, reason: "unchanged" });
+      }
+      if (dryRun) {
+        return res.json({ derivedTitle: derived, persisted: false, reason: "dry_run" });
+      }
+
+      productState.workingMemory = {
+        ...(productState.workingMemory as Record<string, unknown>),
+        titleDerivation: {
+          source: derived.source,
+          derivedAt: derived.derivedAt,
+          fromName: project.name,
+        },
+      };
+      const updated = await storage.updateProject(project.id, {
+        name: derived.name,
+        productState,
+      });
+      res.json({ derivedTitle: derived, persisted: true, project: updated });
+    } catch (error) {
+      logger.error({ err: error }, "[derive-title] error");
+      res.status(500).json({ message: "Failed to derive title" });
+    }
+  });
+
+  // POST /api/projects/:projectId/rename
+  //
+  // User-driven rename. Persists the new name AND sets
+  // productState.workingMemory.titleRenamedByUser=true so future
+  // intake/finalize and derive-title calls don't overwrite it.
+  app.post("/api/projects/:projectId/rename", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project } = projectAccess;
+
+      const parsed = z
+        .object({ name: z.string().trim().min(1).max(80) })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid name", errors: parsed.error.issues });
+      }
+
+      const { hydrateProductState } = await import("./services/intake-controller");
+      const productState = hydrateProductState(project.productState);
+      productState.workingMemory = {
+        ...(productState.workingMemory as Record<string, unknown>),
+        titleRenamedByUser: true,
+        titleRenamedAt: new Date().toISOString(),
+      };
+
+      const updated = await storage.updateProject(project.id, {
+        name: parsed.data.name,
+        productState,
+      });
+      res.json({ project: updated });
+    } catch (error) {
+      logger.error({ err: error }, "[rename] error");
+      res.status(500).json({ message: "Failed to rename project" });
     }
   });
 

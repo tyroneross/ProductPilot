@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { FolderKanban, Sparkles, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
+import { FolderKanban, Sparkles, ChevronRight, MoreHorizontal, Trash2, Pencil, Check, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { displayProjectName } from "@/lib/project-name";
@@ -75,6 +75,9 @@ export default function ProjectsPage() {
   const queryClient = useQueryClient();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string>("");
+  const [renameSavingId, setRenameSavingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
 
   useEffect(() => {
@@ -95,6 +98,34 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  function startRename(project: Project) {
+    setRenamingId(project.id);
+    setRenameValue(displayProjectName(project));
+    setOpenMenuId(null);
+  }
+
+  function cancelRename() {
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
+  async function commitRename(id: string) {
+    const next = renameValue.trim();
+    if (next.length === 0) return;
+    setRenameSavingId(id);
+    try {
+      await apiRequest("POST", `/api/projects/${id}/rename`, { name: next });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      setRenamingId(null);
+      setRenameValue("");
+    } catch {
+      // leave the input open so the user can retry; the API surfaces a toast
+      // via the global queryClient error handler.
+    } finally {
+      setRenameSavingId(null);
     }
   }
 
@@ -154,6 +185,7 @@ export default function ProjectsPage() {
           }
           .project-row:hover { background: rgba(200,180,160,0.04) !important; }
           .delete-btn:hover { background: rgba(229,115,115,0.08) !important; }
+          .rename-btn:hover { background: rgba(200,180,160,0.06) !important; }
           .menu-btn:hover { color: ${textSecondary} !important; }
         `}</style>
 
@@ -284,32 +316,123 @@ export default function ProjectsPage() {
                     {/* Name + sub */}
                     {(() => {
                       const shownName = displayProjectName(project);
-                      const wasDerived = shownName !== project.name;
+                      // Project rows whose stored name was overwritten by the
+                      // server's title-derivation pass carry a marker in
+                      // productState.workingMemory.titleDerivation. The
+                      // client also falls back to comparing displayed vs raw
+                      // for legacy rows where the helper still computes the
+                      // displayed value.
+                      const derivationMarker =
+                        (project.productState as { workingMemory?: { titleDerivation?: unknown; titleRenamedByUser?: unknown } } | null | undefined)
+                          ?.workingMemory?.titleDerivation;
+                      const userRenamed = Boolean(
+                        (project.productState as { workingMemory?: { titleRenamedByUser?: unknown } } | null | undefined)
+                          ?.workingMemory?.titleRenamedByUser,
+                      );
+                      const wasDerived = !userRenamed && (!!derivationMarker || shownName !== project.name);
+                      const isRenamingRow = renamingId === project.id;
+                      const isSavingRow = renameSavingId === project.id;
                       return (
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 15, fontWeight: 500, color: textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {shownName}
-                        {wasDerived && (
-                          <span
-                            data-testid={`tag-auto-title-${project.id}`}
-                            title="Title generated from your brief. You can rename this project."
+                      {isRenamingRow ? (
+                        <div
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitRename(project.id);
+                              if (e.key === "Escape") cancelRename();
+                            }}
+                            maxLength={80}
+                            data-testid={`input-rename-${project.id}`}
                             style={{
-                              marginLeft: 8,
-                              fontSize: 9,
-                              fontWeight: 600,
-                              letterSpacing: "0.08em",
-                              textTransform: "uppercase",
-                              color: textMuted,
+                              flex: 1,
+                              fontFamily: "inherit",
+                              fontSize: 14,
+                              padding: "6px 10px",
+                              minHeight: 32,
+                              borderRadius: 6,
                               border: `1px solid ${border}`,
-                              borderRadius: 4,
-                              padding: "1px 5px",
-                              verticalAlign: "middle",
+                              background: bg,
+                              color: textPrimary,
+                              outline: "none",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => commitRename(project.id)}
+                            disabled={renameValue.trim().length === 0 || isSavingRow}
+                            data-testid={`button-rename-confirm-${project.id}`}
+                            aria-label="Save name"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minHeight: 32,
+                              minWidth: 32,
+                              padding: "0 8px",
+                              borderRadius: 6,
+                              border: `1px solid ${renameValue.trim().length === 0 ? border : "rgba(240,182,94,0.4)"}`,
+                              background: renameValue.trim().length === 0 ? "transparent" : accent,
+                              color: renameValue.trim().length === 0 ? textMuted : "#110f0d",
+                              fontFamily: "inherit",
+                              fontSize: 12,
+                              cursor: renameValue.trim().length === 0 ? "not-allowed" : "pointer",
                             }}
                           >
-                            AI
-                          </span>
-                        )}
-                      </p>
+                            <Check size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelRename}
+                            data-testid={`button-rename-cancel-${project.id}`}
+                            aria-label="Cancel rename"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minHeight: 32,
+                              minWidth: 32,
+                              padding: "0 8px",
+                              borderRadius: 6,
+                              border: `1px solid ${border}`,
+                              background: "transparent",
+                              color: textMuted,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: 15, fontWeight: 500, color: textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {shownName}
+                          {wasDerived && (
+                            <span
+                              data-testid={`tag-auto-title-${project.id}`}
+                              title="Title generated from your brief. Use the menu to rename."
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 9,
+                                fontWeight: 600,
+                                letterSpacing: "0.08em",
+                                textTransform: "uppercase",
+                                color: textMuted,
+                                border: `1px solid ${border}`,
+                                borderRadius: 4,
+                                padding: "1px 5px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              AI
+                            </span>
+                          )}
+                        </p>
+                      )}
                       <p style={{ fontSize: 12, color: textMuted, margin: "3px 0 0" }}>Last updated {relTime}</p>
                       {/* Mobile chip */}
                       <span className="chip-mobile" style={{ marginTop: 6 }}>
@@ -346,6 +469,15 @@ export default function ProjectsPage() {
                     <>
                       <div style={{ position: "fixed", inset: 0, zIndex: 9 }} onClick={() => setOpenMenuId(null)} />
                       <div style={{ position: "absolute", right: 32, top: 12, zIndex: 10, background: surface, border: `1px solid ${border}`, borderRadius: 8, padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", minWidth: 140 }}>
+                        <button
+                          className="rename-btn"
+                          onClick={(e) => { e.stopPropagation(); startRename(project); }}
+                          data-testid={`button-rename-${project.id}`}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: textPrimary, textAlign: "left", transition: "background 0.15s" }}
+                        >
+                          <Pencil size={13} />
+                          Rename
+                        </button>
                         <button
                           className="delete-btn"
                           onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
