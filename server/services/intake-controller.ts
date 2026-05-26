@@ -644,6 +644,39 @@ export function ensureTradeoffWeights(state: ProductState): {
 }
 
 /**
+ * Defect #3 — explicit user choice to fill the brief with AI-inferred values.
+ * Marks the productState so:
+ *   - downstream doc-generation prompts know to flag inferred fields with
+ *     `[ASSUMED]` tags (already supported by highlightAssumed)
+ *   - the doc-view banner switches from "Continue intake" nags to a per-
+ *     section "N assumed values — review or refine" message
+ *
+ * Pure (no DB). Caller persists. Returns count of intakeAnswers as a
+ * convenience so the route can include it in the response payload (it is
+ * the same threshold used by the disabled-button gating on the client).
+ */
+export function finalizeWithAssumptions(state: ProductState): {
+  productState: ProductState;
+  intakeAnswerCount: number;
+  finalizedAt: string;
+} {
+  const finalizedAt = new Date().toISOString();
+  const wm = (state.workingMemory ?? {}) as Record<string, unknown>;
+  const intakeAnswerCount = Array.isArray(wm.intakeAnswers) ? (wm.intakeAnswers as unknown[]).length : 0;
+  const next: ProductState = ProductStateSchema.parse({
+    ...state,
+    workingMemory: {
+      ...wm,
+      user_chose_assumption_fill: true,
+      assumption_fill_at: finalizedAt,
+      // existing intake-progress nudges read this flag to stop firing.
+      adaptive_intake_finalized: true,
+    },
+  });
+  return { productState: next, intakeAnswerCount, finalizedAt };
+}
+
+/**
  * Phase 4 — apply a validated tradeoff-weight allocation to productState.
  * Pure: returns a NEW productState; caller persists. Throws ZodError on invalid
  * input so the route layer can return 400 with field-level detail.

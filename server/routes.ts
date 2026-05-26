@@ -1400,6 +1400,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/projects/:projectId/finalize-with-assumptions
+  //
+  // Defect #3. Records the explicit user choice to "fill remaining sections
+  // with flagged AI assumptions" so the doc generators stop blocking on
+  // intake completeness and downstream renderers tag inferred fields.
+  app.post("/api/projects/:projectId/finalize-with-assumptions", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project, actor } = projectAccess;
+      if (!requireAdaptiveMode(project, res)) return;
+
+      const { hydrateProductState, finalizeWithAssumptions } = await import("./services/intake-controller");
+      const current = hydrateProductState(project.productState);
+      const { productState, intakeAnswerCount, finalizedAt } = finalizeWithAssumptions(current);
+
+      const updated = await storage.updateProject(project.id, { productState });
+
+      void storage.createAuditEvent({
+        actorType: actor.kind,
+        actorId: actor.id,
+        action: "intake.finalize_with_assumptions",
+        resourceType: "project",
+        resourceId: project.id,
+        metadata: { intakeAnswerCount, finalizedAt },
+      }).catch((e) => logger.error({ err: e }, "[audit] finalize_with_assumptions failed"));
+
+      res.json({
+        productState: updated?.productState ?? productState,
+        intakeAnswerCount,
+        finalizedAt,
+      });
+    } catch (error) {
+      logger.error({ err: error }, "[finalize-with-assumptions] error");
+      res.status(500).json({ message: "Failed to finalize with assumptions" });
+    }
+  });
+
   // ── Open Questions (defect #1) ───────────────────────────────────────
   //
   //   GET  /api/projects/:projectId/open-questions

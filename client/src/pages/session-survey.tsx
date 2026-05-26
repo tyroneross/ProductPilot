@@ -657,6 +657,34 @@ export default function SessionSurveyPage() {
   const discoveryProgress = Math.min(userMessages.length, TOTAL_DISCOVERY_QUESTIONS);
   const discoveryProgressPercent = Math.round((discoveryProgress / TOTAL_DISCOVERY_QUESTIONS) * 100);
 
+  // Defect #3 — "enough info" explicit choice. Active once we have >=3
+  // user answers (same threshold as canGenerateSurvey). Fires
+  // POST /api/projects/:id/finalize-with-assumptions then navigates to the
+  // docs page so the user can review what got inferred.
+  const finalizeWithAssumptionsMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("No project");
+      const res = await apiRequest("POST", `/api/projects/${projectId}/finalize-with-assumptions`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId] });
+      toast({
+        title: "Filling remaining sections",
+        description: "Inferred values are flagged so you can review and refine them.",
+      });
+      if (projectId) setLocation(`/documents/${projectId}`);
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't finalize",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+  const canFinalizeWithAssumptions = userMessages.length >= 3 && !!projectId;
+
   const currentSection = surveyDefinition?.sections?.[currentSectionIndex];
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
 
@@ -863,26 +891,48 @@ export default function SessionSurveyPage() {
         {canGenerateSurvey && (
           <div className="mb-4 p-4 bg-surface-secondary rounded-lg border border-accent">
             <p className="text-description text-contrast-high mb-3">
-              Great progress! You've answered enough questions. Ready to generate your personalized survey?
+              You've answered enough to start. Keep refining for a sharper spec, or fill remaining sections with AI assumptions (each flagged so you can review and refine).
             </p>
-            <Button
-              onClick={handleGenerateSurvey}
-              disabled={generateSurveyMutation.isPending}
-              className="btn-primary"
-              data-testid="button-generate-survey"
-            >
-              {generateSurveyMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating Survey...
-                </>
-              ) : (
-                <>
-                  Generate Survey
-                  <ChevronRight className="w-4 h-4 ml-2" />
-                </>
-              )}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={handleGenerateSurvey}
+                disabled={generateSurveyMutation.isPending || finalizeWithAssumptionsMutation.isPending}
+                className="btn-primary"
+                data-testid="button-generate-survey"
+              >
+                {generateSurveyMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generating Survey...
+                  </>
+                ) : (
+                  <>
+                    Continue refining
+                    <ChevronRight className="w-4 h-4 ml-2" />
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => finalizeWithAssumptionsMutation.mutate()}
+                disabled={!canFinalizeWithAssumptions || finalizeWithAssumptionsMutation.isPending || generateSurveyMutation.isPending}
+                variant="outline"
+                data-testid="button-fill-with-assumptions"
+                title={
+                  canFinalizeWithAssumptions
+                    ? "Generate all remaining sections; AI-inferred fields are flagged so you can refine them."
+                    : "Answer at least 3 questions before filling remaining sections."
+                }
+              >
+                {finalizeWithAssumptionsMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Filling…
+                  </>
+                ) : (
+                  "Fill remaining with assumptions"
+                )}
+              </Button>
+            </div>
           </div>
         )}
 

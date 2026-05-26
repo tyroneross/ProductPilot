@@ -293,6 +293,21 @@ export default function DocumentViewPage() {
       ?.workingMemory?.tradeoff_weights_assumed,
   );
 
+  // Defect #3 — the user explicitly chose "fill remaining sections with AI
+  // assumptions". Each [ASSUMED] tag in the rendered markdown is already
+  // surfaced by highlightAssumed; this flag drives a per-section banner
+  // that replaces the global "Brief is light" nag with "N assumed values —
+  // review or refine".
+  const userChoseAssumptionFill = Boolean(
+    (project?.productState as { workingMemory?: { user_chose_assumption_fill?: boolean } } | null | undefined)
+      ?.workingMemory?.user_chose_assumption_fill,
+  );
+  const assumedCountForStage = (() => {
+    if (!documentContent) return 0;
+    const matches = documentContent.match(/\[ASSUMED\]/g);
+    return matches ? matches.length : 0;
+  })();
+
   // Build ordered list of docs with their stage data
   const orderedDocs = DOC_TYPES.map((dt) => ({
     ...dt,
@@ -951,6 +966,51 @@ export default function DocumentViewPage() {
           padding: "32px 24px 80px",
         }}
       >
+        {/* Defect #3 — per-section assumption banner. Replaces the generic
+            "Brief is light" nag with a section-scoped, count-driven message
+            after the user opts into "fill remaining with assumptions". The
+            count comes from [ASSUMED] markers the doc generator emitted. */}
+        {userChoseAssumptionFill && assumedCountForStage > 0 && stage && (
+          <div
+            data-testid="section-assumptions-banner"
+            style={{
+              background: "#1a1714",
+              borderRadius: 8,
+              border: "1px solid rgba(240,182,94,0.22)",
+              padding: "10px 14px",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 13,
+              color: "#c8b4a0",
+            }}
+          >
+            <Info style={{ width: 14, height: 14, color: "#f0b65e", flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>
+              {assumedCountForStage} assumed value{assumedCountForStage === 1 ? "" : "s"} in {stage.title}. Review or refine — each is flagged inline.
+            </span>
+            <button
+              onClick={() => setLocation(continueIntakeHref)}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(240,182,94,0.4)",
+                color: "#f0b65e",
+                borderRadius: 6,
+                padding: "5px 10px",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+              data-testid="button-refine-intake"
+            >
+              Refine
+            </button>
+          </div>
+        )}
+
         {/* Spec linter panel — adaptive-mode only. Surfaces unwaived blockers, warnings, info */}
         {tradeoffWeightsAssumed && (
           <div
