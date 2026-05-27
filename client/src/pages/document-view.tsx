@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -56,6 +56,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Project, Stage, Message, OpenQuestion } from "@shared/schema";
 import OpenQuestionRow from "@/components/open-question-row";
+import { CrossFade } from "@/components/cross-fade";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 const DOC_TYPES = [
   {
@@ -319,13 +321,28 @@ export default function DocumentViewPage() {
   const prevDoc = currentIndex > 0 ? orderedDocs[currentIndex - 1] : null;
   const nextDoc = currentIndex >= 0 && currentIndex < orderedDocs.length - 1 ? orderedDocs[currentIndex + 1] : null;
 
+  const reducedMotion = useReducedMotion();
+
   const navigateToDoc = useCallback(
     (doc: typeof orderedDocs[number]) => {
-      if (doc.stage && doc.stage.progress === 100) {
-        setLocation(`/document/${projectId}/${doc.stage.id}`);
+      if (!doc.stage || doc.stage.progress !== 100) return;
+      const go = () => setLocation(`/document/${projectId}/${doc.stage!.id}`);
+      // Progressive enhancement: when document.startViewTransition exists
+      // (Chrome/Edge 111+; Safari 18.2+), wrap the route swap so the
+      // browser snapshots before/after and cross-fades them. CrossFade
+      // continues to handle the per-stage content fade as a fallback in
+      // browsers without the API. We deliberately don't use the API for
+      // reduced-motion users — startViewTransition still animates.
+      const docAny = typeof document !== "undefined" ? (document as Document & {
+        startViewTransition?: (cb: () => void) => { finished: Promise<void> };
+      }) : undefined;
+      if (!reducedMotion && docAny && typeof docAny.startViewTransition === "function") {
+        docAny.startViewTransition(go);
+      } else {
+        go();
       }
     },
-    [projectId, setLocation]
+    [projectId, setLocation, reducedMotion]
   );
 
   // Scroll active tab into view on mount / stage change — important on mobile viewports
@@ -339,6 +356,24 @@ export default function DocumentViewPage() {
       });
     }
   }, [stageId]);
+
+  // Sliding underline indicator. Tracks the active tab's left/width so a
+  // single bar can translate + grow between tabs instead of the per-button
+  // borderBottom snapping. Measured in useLayoutEffect to land in the same
+  // frame as the new active state (avoids a flash of "no underline").
+  const [underline, setUnderline] = useState<{ left: number; width: number; ready: boolean }>(
+    { left: 0, width: 0, ready: false },
+  );
+  useLayoutEffect(() => {
+    const btn = activeTabRef.current;
+    const list = tablistRef.current;
+    if (!btn || !list) return;
+    // offsetLeft is relative to the offsetParent. tablistRef is the parent;
+    // ensure it's `position: relative` (set in the style block below). The
+    // underline lives inside the scrollable tablist so it scrolls naturally
+    // with the tabs.
+    setUnderline({ left: btn.offsetLeft, width: btn.offsetWidth, ready: true });
+  }, [stageId, stages.length]);
 
   // J/K keyboard navigation
   useEffect(() => {
@@ -745,6 +780,7 @@ export default function DocumentViewPage() {
           {/* Back to docs list */}
           <button
             onClick={() => setLocation(`/documents/${projectId}`)}
+            className="transition-colors duration-150"
             style={{
               display: "flex",
               alignItems: "center",
@@ -757,7 +793,6 @@ export default function DocumentViewPage() {
               color: "#a89a8c",
               cursor: "pointer",
               flexShrink: 0,
-              transition: "color 0.15s, border-color 0.15s",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = "#f5f0eb";
@@ -882,7 +917,10 @@ export default function DocumentViewPage() {
           </div>
         </div>
 
-        {/* Artifact stepper — horizontal scroll on narrow screens */}
+        {/* Artifact stepper — horizontal scroll on narrow screens.
+            position:relative so the sliding-underline indicator (absolutely
+            positioned at the end of this list) anchors to the scroll content
+            and translates with the active tab instead of snapping. */}
         <div
           ref={tablistRef}
           role="tablist"
@@ -895,6 +933,7 @@ export default function DocumentViewPage() {
             gap: 0,
             overflowX: "auto",
             scrollbarWidth: "none",
+            position: "relative",
           }}
         >
           {orderedDocs.map((doc, idx) => {
@@ -916,15 +955,20 @@ export default function DocumentViewPage() {
                 aria-disabled={!isReady}
                 title={!isReady ? tipForIncomplete : undefined}
                 onClick={() => navigateToDoc(doc)}
+                className="transition-colors duration-150"
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 5,
                   padding: "9px 12px",
                   border: "none",
-                  borderBottom: isActive
-                    ? "2px solid #f0b65e"
-                    : "2px solid transparent",
+                  // Layout reserves 2px below each tab for the sliding-underline
+                  // indicator (rendered as an absolutely-positioned bar inside
+                  // the tablist, see end of orderedDocs.map). Keeping a
+                  // transparent border-bottom preserves the previous per-tab
+                  // height so removing this and adding the bar is a no-op for
+                  // layout.
+                  borderBottom: "2px solid transparent",
                   background: "transparent",
                   color: isActive
                     ? "#f5f0eb"
@@ -936,7 +980,6 @@ export default function DocumentViewPage() {
                   fontSize: 12,
                   fontWeight: isActive ? 500 : 400,
                   whiteSpace: "nowrap",
-                  transition: "color 0.15s",
                   flexShrink: 0,
                   marginBottom: -1,
                 }}
@@ -953,10 +996,40 @@ export default function DocumentViewPage() {
               </button>
             );
           })}
+          {/* Sliding underline indicator. Single bar that translates between
+              the active tab positions (measured via offsetLeft / offsetWidth
+              in the useLayoutEffect above). Snaps when prefers-reduced-motion
+              is set — the JS check skips the 200ms transform/width transition
+              and the CSS media block strips any residual transition. */}
+          <span
+            aria-hidden="true"
+            data-testid="active-tab-underline"
+            style={{
+              position: "absolute",
+              left: 0,
+              bottom: 0,
+              height: 2,
+              width: underline.width,
+              background: "#f0b65e",
+              transform: `translateX(${underline.left}px)`,
+              transition: reducedMotion
+                ? "none"
+                : "transform 200ms ease, width 200ms ease",
+              opacity: underline.ready ? 1 : 0,
+              pointerEvents: "none",
+            }}
+          />
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main content
+          ─────────────
+          Wrapped in CrossFade so a tab switch fades the outgoing stage's
+          content out (~150ms) and the incoming stage's content in (~150ms)
+          instead of snapping. CrossFade honors prefers-reduced-motion and
+          snaps when the user has expressed that preference. The skeleton
+          path (DocumentViewSkeleton, see early return above) still owns the
+          "data not yet ready" window — this fade is content-to-content only. */}
       <main
         style={{
           flex: 1,
@@ -966,6 +1039,7 @@ export default function DocumentViewPage() {
           padding: "32px 24px 80px",
         }}
       >
+      <CrossFade keyId={stage.id} duration={150}>
         {/* Defect #3 — per-section assumption banner. Replaces the generic
             "Brief is light" nag with a section-scoped, count-driven message
             after the user opts into "fill remaining with assumptions". The
@@ -1249,6 +1323,7 @@ export default function DocumentViewPage() {
             )}
           </div>
         )}
+      </CrossFade>
       </main>
 
       {/* J/K keyboard nav footer — quiet hint */}
@@ -1466,6 +1541,7 @@ function ActionButton({
       disabled={disabled}
       aria-label={ariaLabel}
       data-testid={testId}
+      className="transition-colors duration-150"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -1479,7 +1555,6 @@ function ActionButton({
         fontFamily: "inherit",
         fontSize: 12,
         cursor: disabled ? "not-allowed" : "pointer",
-        transition: "color 0.15s, border-color 0.15s",
         whiteSpace: "nowrap",
       }}
       onMouseEnter={(e) => {
