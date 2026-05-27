@@ -95,4 +95,30 @@
   .progress-ring {
     transition: stroke-dashoffset 0.3s ease;
   }
+
+  /* Carve-outs: progress / loading indicators stay because they signal active work. */
+  .motion-essential,
+  .progress-ring,
+  [data-motion="essential"] {
+    transition-duration: revert !important;
+    animation-duration: revert !important;
+  }
+}
+
+/*
+ * prefers-reduced-motion: reduce
+ * Strips non-essential transitions and animations app-wide. Elements that
+ * genuinely communicate state via motion (progress rings, loading spinners,
+ * anything with .motion-essential or data-motion="essential") keep theirs
+ * via the carve-out above.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
