@@ -1247,12 +1247,12 @@ export default function SessionSurveyPage() {
               return (
                 <div
                   key={idx}
+                  className="transition-[width,background-color] duration-200"
                   style={{
                     width: state === "active" ? 18 : 6,
                     height: 6,
                     borderRadius: state === "active" ? 3 : "50%",
                     background: state === "completed" ? "rgba(240,182,94,0.4)" : state === "active" ? "#f0b65e" : "rgba(200,180,160,0.16)",
-                    transition: "width 0.2s, background 0.2s",
                   }}
                 />
               );
@@ -1348,12 +1348,12 @@ export default function SessionSurveyPage() {
                             }}
                           >
                             <span
+                              className="transition-[background-color,box-shadow] duration-200"
                               style={{
                                 width: 8, height: 8, borderRadius: "50%",
                                 background: isDone ? "#f0b65e" : isCurrent ? "#f0b65e" : "rgba(200,180,160,0.15)",
                                 boxShadow: isCurrent ? "0 0 0 4px rgba(240,182,94,0.14)" : "none",
                                 flexShrink: 0,
-                                transition: "background 0.2s, box-shadow 0.2s",
                               }}
                               aria-hidden="true"
                             />
@@ -1400,12 +1400,12 @@ export default function SessionSurveyPage() {
                       </div>
                       <div style={{ height: 4, background: "rgba(200,180,160,0.08)", borderRadius: 99, overflow: "hidden" }}>
                         <div
+                          className="transition-[width] duration-500"
                           style={{
                             height: "100%",
                             width: `${genProgressPercent}%`,
                             background: "#f0b65e",
                             borderRadius: 99,
-                            transition: "width 0.5s ease",
                           }}
                         />
                       </div>

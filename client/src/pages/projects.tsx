@@ -18,8 +18,9 @@ const ctaStyle: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", justifyContent: "center",
   background: accent, color: "#110f0d", fontFamily: "inherit",
   fontSize: "14px", fontWeight: 600, border: "none", borderRadius: "8px",
-  cursor: "pointer", transition: "background 0.15s",
+  cursor: "pointer",
 };
+const ctaClass = "transition-colors duration-150";
 
 function PhaseChip({ phase }: { phase: string | null | undefined }) {
   const label = phase === "survey" ? "Survey" : phase === "complete" ? "Complete" : "Discovery";
@@ -149,10 +150,10 @@ export default function ProjectsPage() {
             <button
               onClick={() => setLocation("/details")}
               data-testid="button-new-product"
+              className={`hidden-mobile ${ctaClass}`}
               style={{ ...ctaStyle, height: 40, padding: "0 18px" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
-              className="hidden-mobile"
             >
               Start new product
             </button>
@@ -163,7 +164,7 @@ export default function ProjectsPage() {
         {(isLoading || sorted.length > 0) && (
           <button
             onClick={() => setLocation("/details")}
-            className="show-mobile"
+            className={`show-mobile ${ctaClass}`}
             style={{ ...ctaStyle, width: "100%", height: 48, fontSize: 15, borderRadius: 10, marginBottom: 28 }}
           >
             Start new product
@@ -229,6 +230,7 @@ export default function ProjectsPage() {
             <button
               onClick={() => setLocation("/details")}
               data-testid="button-resume-draft"
+              className={ctaClass}
               style={{ ...ctaStyle, height: 36, padding: "0 14px", fontSize: 13 }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
@@ -239,6 +241,7 @@ export default function ProjectsPage() {
               onClick={() => { clearDraft(); setDraft(null); }}
               data-testid="button-discard-draft"
               aria-label="Discard draft"
+              className="transition-colors duration-150"
               style={{
                 height: 36,
                 padding: "0 12px",
@@ -249,7 +252,6 @@ export default function ProjectsPage() {
                 fontSize: 13,
                 fontFamily: "inherit",
                 cursor: "pointer",
-                transition: "color 0.15s, border-color 0.15s",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = "#e57373";
@@ -281,6 +283,7 @@ export default function ProjectsPage() {
             <button
               onClick={() => setLocation("/details")}
               data-testid="button-start-first-product"
+              className={ctaClass}
               style={{ ...ctaStyle, height: 44, padding: "0 24px" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
@@ -298,15 +301,15 @@ export default function ProjectsPage() {
               const menuOpen = openMenuId === project.id;
 
               return (
-                <div key={project.id} style={{ position: "relative", borderTop: `1px solid ${border}`, opacity: deletingId === project.id ? 0.4 : 1, transition: "opacity 0.2s" }}>
+                <div key={project.id} className="transition-opacity duration-200" style={{ position: "relative", borderTop: `1px solid ${border}`, opacity: deletingId === project.id ? 0.4 : 1 }}>
                   <div
                     role="button"
                     tabIndex={0}
-                    className="project-row"
+                    className="project-row transition-colors duration-150"
                     data-testid={`row-project-${project.id}`}
                     onClick={() => { if (!menuOpen) setLocation(`/documents/${project.id}`); }}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLocation(`/documents/${project.id}`); }}
-                    style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", cursor: "pointer", minHeight: 60, userSelect: "none", borderRadius: 6, transition: "background 0.15s" }}
+                    style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", cursor: "pointer", minHeight: 60, userSelect: "none", borderRadius: 6 }}
                   >
                     {/* Icon */}
                     <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(240,182,94,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -448,7 +451,7 @@ export default function ProjectsPage() {
                     {/* Ellipsis */}
                     <button
                       aria-label="Project options"
-                      className="menu-btn"
+                      className="menu-btn transition-colors duration-150"
                       data-testid={`button-project-options-${project.id}`}
                       onClick={(e) => { e.stopPropagation(); setOpenMenuId(menuOpen ? null : project.id); }}
                       // 44x44 satisfies WCAG 2.5.8 AAA target-size on mobile and matches
@@ -456,7 +459,7 @@ export default function ProjectsPage() {
                       // the larger click area (padding fills the rest), so dense list rows
                       // don't visually shift; the regression IBR mobile-viewport audit flagged
                       // a 32x32 bounding box.
-                      style={{ background: "none", border: "none", cursor: "pointer", color: textMuted, padding: 4, borderRadius: 4, display: "flex", alignItems: "center", minHeight: 44, minWidth: 44, justifyContent: "center", transition: "color 0.15s" }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: textMuted, padding: 4, borderRadius: 4, display: "flex", alignItems: "center", minHeight: 44, minWidth: 44, justifyContent: "center" }}
                     >
                       <MoreHorizontal size={16} />
                     </button>
@@ -470,19 +473,19 @@ export default function ProjectsPage() {
                       <div style={{ position: "fixed", inset: 0, zIndex: 9 }} onClick={() => setOpenMenuId(null)} />
                       <div style={{ position: "absolute", right: 32, top: 12, zIndex: 10, background: surface, border: `1px solid ${border}`, borderRadius: 8, padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", minWidth: 140 }}>
                         <button
-                          className="rename-btn"
+                          className="rename-btn transition-colors duration-150"
                           onClick={(e) => { e.stopPropagation(); startRename(project); }}
                           data-testid={`button-rename-${project.id}`}
-                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: textPrimary, textAlign: "left", transition: "background 0.15s" }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: textPrimary, textAlign: "left" }}
                         >
                           <Pencil size={13} />
                           Rename
                         </button>
                         <button
-                          className="delete-btn"
+                          className="delete-btn transition-colors duration-150"
                           onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
                           disabled={deletingId === project.id}
-                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e57373", textAlign: "left", transition: "background 0.15s" }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e57373", textAlign: "left" }}
                         >
                           <Trash2 size={13} />
                           Delete
