@@ -42,6 +42,7 @@ Emit a Spec JSON augmenting the prior spec with:
 - integrations[] — third-party services with explicit purpose + authMode.
 - tests[] — at least one acceptance test per P0 Need. needIds[] required.
 - adrs[] — capture architecture decisions with low reversibility (e.g. "modular monolith vs microservices", "Postgres + Drizzle"). For each ADR, the cites[] array MUST contain at least one entry that names either a tradeoff axis ("speed_to_alpha", "scalability", "ux_polish", "maintainability", "cost", "security", "unacceptable_tradeoff:<axis>") OR a stance because-clause id ("stance:<id>"). Empty cites[] on a low-reversibility ADR is rejected by the linter.
+- agentSystem — when platformTarget is "agent-system" or the product is an agent/copilot/plugin/tool-using AI workflow, populate mission, systemBoundary, builderScale (skill | plugin | agent | human), architecturePattern, autonomyLevel, stateOwner, stopCondition, toolContracts, memoryPolicy/researchProtocol, uiProtocol, guardrails, and evaluations. Use the simplest viable topology; do not default to agent or multi-agent unless the requirements force it.
 
 CITATION FORMAT (REQUIRED — every ADR rationale)
 Render each ADR's rationale string as: "Rationale: <one sentence>. Cites: <axis or stance-id>=<value or excerpt>; <next>." Examples:
@@ -54,6 +55,7 @@ CONSTRAINTS
 - Every P0 Need must have at least one Test.
 - Every DataPoint with pii=true must have a non-empty handlingNote (sentence describing storage, retention, encryption-at-rest, redaction in logs).
 - Every low-reversibility ADR cites[] is non-empty AND lists at least one tradeoff axis OR one stance-clause id (see CITATION FORMAT).
+- For agentSystem: builderScale is explicit; every tool has a permission tier; T4/T5 tools require human approval; guardrails and evaluations are explicit; memory/research source policy preserves provenance and uncertainty.
 - If a recommended decision conflicts with the user's unacceptable_tradeoff, surface it as a Risk with mitigation — do not silently proceed.
 
 OUTPUT FORMAT
@@ -61,6 +63,7 @@ Respond with ONLY valid JSON matching SpecSchema. Carry forward existing fields.
 
 ACCEPTANCE CRITERIA
 - A coding agent could open Claude Code and stub out the API surface from apiContracts[] without re-asking.
+- An agent builder could implement the agent harness from agentSystem without guessing tool permissions, autonomy, memory, guardrails, or eval gates.
 - A reviewer reading only the cites[] clauses can reconstruct which weight or stance drove each architecture decision.
 - The architecture stage outputs differ measurably between two profiles with different weight allocations on the same product idea (Phase 4 fixture eval).`;
 

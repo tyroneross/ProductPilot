@@ -1,7 +1,7 @@
 /**
  * Phase 5 — agent-handoff platform-specific test scaffolding.
  *
- * One test per platform (web, vite-spa, ios, macos, claude-plugin). Each
+ * One test per platform (web, vite-spa, ios, macos, claude-plugin, agent-system). Each
  * asserts that the test scaffolding section emits the right framework
  * instruction + the right Need→Test mapping shape for that platform.
  *
@@ -138,5 +138,15 @@ describe("agent-handoff platform scaffolding", () => {
       baseProductState,
     );
     expect(out).toContain("no validatorRefs declared (linter warning)");
+  });
+
+  it("agent-system → references golden tasks and safety evals", () => {
+    const out = generateHandoff(
+      buildSpecForPlatform("agent-system", "golden task eval fixture"),
+      baseProductState,
+    );
+    expect(out).toContain("## Test scaffolding — agent-system (golden tasks + safety evals)");
+    expect(out).toContain("tool-permission fixtures");
+    expect(out).toContain("golden task / safety eval");
   });
 });

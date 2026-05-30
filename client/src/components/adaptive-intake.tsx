@@ -25,7 +25,7 @@ import { useEffect, useState } from "react";
 // Keeping a separate copy avoids importing server-side code into the client bundle.
 // ---------------------------------------------------------------------------
 
-export type IntakeMethod = "jtbd" | "qfd" | "pugh";
+export type IntakeMethod = "jtbd" | "qfd" | "pugh" | "agent";
 
 export interface IntakeQuestion {
   text: string;
@@ -34,7 +34,7 @@ export interface IntakeQuestion {
   rule_fired: string;
   // Slot-aware topic (jtbd rev 3+, 2026-05-03). One of:
   // persona | trigger | exclusions | outcome | jobs | non_goals | priority.
-  // Optional for forward-compat with QFD/Pugh.
+  // Optional for forward-compat with QFD/Pugh/agent.
   topic?: string;
   extracts_into: { spec_path: string; kind: string; merge_strategy: string };
   payload?: Record<string, unknown>;

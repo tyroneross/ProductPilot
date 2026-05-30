@@ -8,9 +8,9 @@
  *   - finalize:    convert productState into a SpecDraft (Stage 1 Brief shape) and render to Markdown.
  *
  * Internal sub-calls (each on Haiku via aiService.generateStructuredOutput):
- *   - methodRouter        →  pick jtbd | qfd | pugh
+ *   - methodRouter        →  pick jtbd | qfd | pugh | agent
  *   - blockingScorer      →  score candidate unknowns 0–15; ASK if ≥ 6, else INFER
- *   - method-specific gen →  produce the question (jtbd / qfd / pugh)
+ *   - method-specific gen →  produce the question (jtbd / qfd / pugh / agent)
  *   - safeDefaultsInferer →  produce labeled-assumption defaults for low-stakes unknowns
  *
  * Security (plan §"Security gates", Phase 2):
@@ -23,16 +23,23 @@
  */
 
 import {
+  AgentSystemSchema,
   ProductStateSchema,
   SpecSchema,
   TradeoffWeightsSchema,
   TRADEOFF_AXES,
+  type AgentArchitecturePattern,
+  type AgentAutonomyLevel,
+  type AgentBuilderScale,
+  type AgentSystem,
+  type AgentToolPermissionTier,
   type ProductState,
   type Spec,
   type TradeoffAxis,
   type TradeoffWeights,
 } from "@shared/schema";
 import {
+  agentMethodPrompt,
   blockingScorerPrompt,
   jtbdMethodPrompt,
   methodRouterPrompt,
@@ -48,7 +55,7 @@ import { renderBrief } from "./spec-renderer";
 // Public types — exported so the route layer + tests share one shape.
 // ---------------------------------------------------------------------------
 
-export type IntakeMethod = "jtbd" | "qfd" | "pugh";
+export type IntakeMethod = "jtbd" | "qfd" | "pugh" | "agent";
 
 export type IntakeAction =
   | { action: "ask"; question: IntakeQuestion; method: IntakeMethod; scoring: BlockingScore[] }
@@ -232,6 +239,7 @@ export function jtbdSlotForCandidate(input: {
 function isKnownNonJtbdTopic(topic: string): boolean {
   if (topic.startsWith("stance_because_")) return true;
   if (topic.startsWith("pending_architecture_decisions:")) return true;
+  if (topic.startsWith("agent_")) return true;
   return false;
 }
 
@@ -285,7 +293,20 @@ export function computeRequiredStanceCategories(
 
 export function deriveCandidateUnknowns(state: {
   productState: ProductState;
-  spec: Pick<Spec, "personas" | "scenarios" | "needs" | "features" | "adrs" | "nonGoals" | "integrations" | "apiContracts">;
+  spec: Pick<Spec,
+    | "productName"
+    | "productDescription"
+    | "platformTarget"
+    | "personas"
+    | "scenarios"
+    | "needs"
+    | "features"
+    | "adrs"
+    | "nonGoals"
+    | "integrations"
+    | "apiContracts"
+    | "agentSystem"
+  >;
 }): Array<{ topic: string; why_it_matters: string }> {
   const { productState, spec } = state;
   const out: Array<{ topic: string; why_it_matters: string }> = [];
@@ -361,7 +382,119 @@ export function deriveCandidateUnknowns(state: {
     });
   }
 
+  out.push(...deriveAgentCandidateUnknowns({ productState, spec }));
+
   return out;
+}
+
+function deriveAgentCandidateUnknowns(state: {
+  productState: ProductState;
+  spec: Pick<Spec, "productName" | "productDescription" | "platformTarget" | "agentSystem" | "integrations" | "apiContracts">;
+}): Array<{ topic: string; why_it_matters: string }> {
+  const { productState, spec } = state;
+  if (!hasAgenticSignal({ productState, spec })) return [];
+
+  const agent = mergeAgentSystems(spec.agentSystem, productState.agentProfile);
+  const out: Array<{ topic: string; why_it_matters: string }> = [];
+
+  const boundaryEmpty =
+    !agent.mission?.trim() &&
+    agent.systemBoundary.inScope.length === 0 &&
+    agent.systemBoundary.outOfScope.length === 0;
+  if (boundaryEmpty) {
+    out.push({
+      topic: "agent_system_boundary",
+      why_it_matters:
+        "Agent products need an explicit mission and boundary so the builder knows what the agent may decide, do, or refuse.",
+    });
+  }
+
+  if (!agent.builderScale) {
+    out.push({
+      topic: "agent_delivery_scale",
+      why_it_matters:
+        "Decision Doctor feasibility framing asks whether the right build scale is a skill, plugin, agent, or human workflow before adding runtime complexity.",
+    });
+  }
+
+  if (!agent.autonomyLevel || agent.humanCheckpoints.length === 0) {
+    out.push({
+      topic: "agent_autonomy_and_checkpoints",
+      why_it_matters:
+        "Tool-using agents need an autonomy level and human checkpoints before ProductPilot can generate safe implementation guidance.",
+    });
+  }
+
+  if (agent.toolContracts.length === 0 && (spec.integrations.length > 0 || /tool|api|mcp|plugin|browser|search|write|send|deploy|file/i.test(agent.mission ?? spec.productDescription))) {
+    out.push({
+      topic: "agent_tool_permissions",
+      why_it_matters:
+        "Agent tools require contracts for allowed actions, side effects, approval, audit, and rollback.",
+    });
+  }
+
+  if (!agent.memoryPolicy?.trim() || !agent.researchProtocol?.sourcePolicy?.trim()) {
+    out.push({
+      topic: "agent_memory_and_sources",
+      why_it_matters:
+        "Agent memory and research sources create privacy, retention, provenance, and confidence obligations.",
+    });
+  }
+
+  if (!agent.architecturePattern || !agent.stateOwner?.trim() || !agent.stopCondition?.trim()) {
+    out.push({
+      topic: "agent_flow_topology",
+      why_it_matters:
+        "The handoff needs the simplest viable flow topology, state owner, stop condition, and retry policy before implementation.",
+    });
+  }
+
+  if (agent.guardrails.length === 0) {
+    out.push({
+      topic: "agent_guardrails",
+      why_it_matters:
+        "Agent specs need explicit guardrails for prompt injection, sensitive data, excessive agency, and unsafe side effects.",
+    });
+  }
+
+  if (agent.evaluations.length === 0) {
+    out.push({
+      topic: "agent_evaluation_readiness",
+      why_it_matters:
+        "Agent handoff should include golden tasks or scorecards so usefulness and safety are verifiable.",
+    });
+  }
+
+  const needsUiResearchProtocol = /research|survey|interview|user research|ux|ui|interface|dashboard|chat|copilot|assistant/i.test(
+    `${spec.productDescription} ${agent.mission ?? ""}`,
+  );
+  if (needsUiResearchProtocol && (!agent.uiProtocol?.archetype || !agent.researchProtocol?.evidenceStandard)) {
+    out.push({
+      topic: "agent_ui_research_protocol",
+      why_it_matters:
+        "Agent products need the right control surface and research evidence policy so questions stay responsive to the user's context.",
+    });
+  }
+
+  return out;
+}
+
+function isAgentTopic(topic: string | null | undefined): boolean {
+  return typeof topic === "string" && topic.startsWith("agent_");
+}
+
+function hasAgenticSignal(state: {
+  productState: ProductState;
+  spec: Pick<Spec, "productName" | "productDescription" | "platformTarget" | "agentSystem">;
+}): boolean {
+  const { productState, spec } = state;
+  if (spec.platformTarget === "agent-system") return true;
+  if (spec.agentSystem || productState.agentProfile) return true;
+  const answers = Array.isArray(productState.workingMemory?.intakeAnswers)
+    ? productState.workingMemory.intakeAnswers.map((row: any) => `${row?.question ?? ""} ${row?.answer ?? ""}`).join(" ")
+    : "";
+  const haystack = `${spec.productName} ${spec.productDescription} ${answers}`.toLowerCase();
+  return /\b(agent|agents|copilot|assistant|autonomous|automation|workflow automator|tool-using|tool using|multi-agent|multi agent|mcp|plugin|research assistant|browser agent|coding agent)\b/.test(haystack);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,10 +509,20 @@ export function deriveCandidateUnknowns(state: {
  */
 export function deterministicMethodRoute(state: {
   productState: ProductState;
-  spec: Pick<Spec, "personas" | "needs" | "features" | "adrs">;
+  spec: Pick<Spec, "productName" | "productDescription" | "platformTarget" | "personas" | "needs" | "features" | "adrs" | "agentSystem">;
   candidates: Array<{ topic: string }>;
 }): IntakeMethod | null {
   const { spec, productState } = state;
+
+  // Rule 0: agent harness gaps outrank generic app methods. Without this,
+  // agent products with thin personas would always be pulled back into JTBD
+  // and never ask about autonomy, tools, memory, or evals.
+  if (
+    state.candidates.some((c) => isAgentTopic(c.topic)) ||
+    (spec.platformTarget === "agent-system" && hasAgenticSignal({ productState, spec }))
+  ) {
+    return "agent";
+  }
 
   // Rule 1: personas empty or all triggers empty → jtbd.
   if (
@@ -456,7 +599,9 @@ export async function callMethodRouter(
   const result = await runStructuredHaiku(methodRouterPrompt.content, payload, opts);
   // Defensive parse — if the LLM returns garbage we fall back to jtbd (the safest choice).
   if (!result || typeof result !== "object") return { method: "jtbd", reason: "router-fallback: empty response" };
-  const method = ["jtbd", "qfd", "pugh"].includes(result.method) ? result.method : "jtbd";
+  const method: IntakeMethod = ["jtbd", "qfd", "pugh", "agent"].includes(result.method)
+    ? (result.method as IntakeMethod)
+    : "jtbd";
   return { method, reason: typeof result.reason === "string" ? result.reason : "router-fallback: no reason" };
 }
 
@@ -521,6 +666,7 @@ export async function callMethodGenerator(
     jtbd: jtbdMethodPrompt,
     qfd: qfdMethodPrompt,
     pugh: pughMethodPrompt,
+    agent: agentMethodPrompt,
   };
   const result = await runStructuredHaiku(moduleByMethod[method].content, payload, opts);
   if (!result || typeof result !== "object") {
@@ -550,6 +696,16 @@ export async function callMethodGenerator(
 }
 
 function fallbackQuestion(method: IntakeMethod): IntakeQuestion {
+  if (method === "agent") {
+    return {
+      text: "Should this be a skill, plugin, agent, or human-in-the-loop workflow before we add agent runtime complexity?",
+      chips: ["Skill: deterministic helper", "Plugin: packaged tool surface", "Agent: uses tools and state", "Human workflow with AI drafting"],
+      intent: "Agent fallback when LLM response was malformed.",
+      rule_fired: "fallback",
+      topic: "agent_delivery_scale",
+      extracts_into: { spec_path: "agentSystem.builderScale", kind: "agent_contract", merge_strategy: "merge_agent_profile" },
+    };
+  }
   if (method === "qfd") {
     return {
       text: "Which feature most directly serves your highest-priority user need?",
@@ -813,7 +969,9 @@ export async function nextStep(input: NextStepInput): Promise<IntakeAction> {
 
   if (top && top.blocking >= BLOCKING_THRESHOLD) {
     // Decide method (deterministic first, LLM tiebreak).
-    let method = deterministicMethodRoute({ productState, spec, candidates });
+    let method: IntakeMethod | null = isAgentTopic(top.topic)
+      ? "agent"
+      : deterministicMethodRoute({ productState, spec, candidates });
     if (!method) {
       const router = await callMethodRouter(
         { productState, spec, blockingTopUnknowns: scoring.slice(0, 3) },
@@ -1029,9 +1187,11 @@ function promoteAnswerIntoState(state: ProductState, answer: IntakeAnswerInput):
   const intakeSpec = readIntakeSpec(state);
   let didPromote = false;
 
+  if (isAgentTopic(topic) || specPath?.startsWith("agentSystem.")) {
+    didPromote = promoteAgentAnswer(state, answer, { topic, specPath, text });
   // Stance "because" clauses — topic carries the category.
   // (e.g. topic="stance_because_privacy_data" → category=privacy_data)
-  if (topic && topic.startsWith("stance_because_")) {
+  } else if (topic && topic.startsWith("stance_because_")) {
     const category = topic.slice("stance_because_".length);
     if (["privacy_data", "complexity", "cost", "category"].includes(category)) {
       const stance = [...(state.stanceBecauseClauses ?? [])];
@@ -1153,6 +1313,236 @@ function promoteAnswerIntoState(state: ProductState, answer: IntakeAnswerInput):
   state.workingMemory.promotedSteps = [...promoted, dedupKey];
 }
 
+function promoteAgentAnswer(
+  state: ProductState,
+  answer: IntakeAnswerInput,
+  input: { topic: string | null; specPath: string | null; text: string },
+): boolean {
+  const profile = AgentSystemSchema.parse(state.agentProfile ?? {});
+  const topic = normalizeAgentTopic(input.topic, input.specPath);
+  const text = input.text.trim();
+  const traceRef = `intake:${answer.step}`;
+
+  profile.traceabilityRefs = uniqueStrings([...(profile.traceabilityRefs ?? []), traceRef]);
+
+  if (topic === "agent_delivery_scale") {
+    profile.builderScale = inferBuilderScale(text);
+  } else if (topic === "agent_system_boundary") {
+    if (!profile.mission) profile.mission = text;
+    profile.systemBoundary = {
+      inScope: uniqueStrings([...(profile.systemBoundary?.inScope ?? []), text]),
+      outOfScope: profile.systemBoundary?.outOfScope ?? [],
+    };
+  } else if (topic === "agent_autonomy_and_checkpoints") {
+    profile.autonomyLevel = profile.autonomyLevel ?? inferAutonomyLevel(text);
+    profile.humanCheckpoints = uniqueStrings([...(profile.humanCheckpoints ?? []), text]);
+  } else if (topic === "agent_tool_permissions") {
+    const tier = inferToolPermissionTier(text);
+    profile.toolContracts = [
+      ...(profile.toolContracts ?? []),
+      {
+        id: `tool-${answer.step}`,
+        name: inferToolName(text, answer.step),
+        purpose: text,
+        permissionTier: tier,
+        allowedActions: [text],
+        forbiddenActions: inferForbiddenActions(text),
+        dataAccess: inferDataAccess(text),
+        sideEffects: inferSideEffects(text),
+        requiresHumanApproval: requiresApproval(text, tier),
+        auditLog: "Record tool name, input summary, output summary, approval state, and error state.",
+        rollbackPlan: /write|update|delete|deploy|send|purchase|spend/i.test(text)
+          ? "Define rollback before enabling this tool in production."
+          : undefined,
+        failureMode: "Stop with a visible reason when permissions, source evidence, or required input is missing.",
+      },
+    ];
+  } else if (topic === "agent_memory_and_sources") {
+    profile.memoryPolicy = text;
+    const existingResearch = profile.researchProtocol ?? {
+      citationRequired: false,
+      evidenceRefs: [],
+      openQuestions: [],
+    };
+    profile.researchProtocol = {
+      ...existingResearch,
+      evidenceRefs: existingResearch.evidenceRefs ?? [],
+      openQuestions: existingResearch.openQuestions ?? [],
+      sourcePolicy: existingResearch.sourcePolicy ?? text,
+      evidenceStandard: existingResearch.evidenceStandard ?? inferEvidenceStandard(text),
+      confidencePolicy:
+        existingResearch.confidencePolicy ??
+        "Preserve uncertainty; label assumptions and unsupported claims before acting on them.",
+      citationRequired: existingResearch.citationRequired ?? /source|cite|citation|evidence|research/i.test(text),
+    };
+  } else if (topic === "agent_flow_topology") {
+    profile.architecturePattern = profile.architecturePattern ?? inferArchitecturePattern(text);
+    profile.stateOwner = profile.stateOwner ?? text;
+    profile.stopCondition = profile.stopCondition ?? text;
+  } else if (topic === "agent_guardrails") {
+    profile.guardrails = [
+      ...(profile.guardrails ?? []),
+      {
+        id: `guardrail-${answer.step}`,
+        appliesTo: ["agent-runtime"],
+        trigger: text,
+        check: "Detect the named failure mode before the agent uses tools or returns a final answer.",
+        action: "Block, ask for human confirmation, or escalate with a visible reason.",
+        severity: /must|never|block|pii|credential|delete|send|spend|external/i.test(text) ? "block" : "warn",
+        escalation: "Ask the user when the guardrail triggers and no safe default exists.",
+      },
+    ];
+  } else if (topic === "agent_evaluation_readiness") {
+    profile.evaluations = [
+      ...(profile.evaluations ?? []),
+      {
+        id: `eval-${answer.step}`,
+        name: "Agent readiness",
+        metric: text,
+        coverageRefs: [],
+        blocking: true,
+      },
+    ];
+  } else if (topic === "agent_ui_research_protocol") {
+    profile.uiProtocol = {
+      ...(profile.uiProtocol ?? {}),
+      archetype: profile.uiProtocol?.archetype ?? inferUiArchetype(text),
+      userResearchQuestions: uniqueStrings([
+        ...(profile.uiProtocol?.userResearchQuestions ?? []),
+        text,
+      ]),
+      highRiskFailures: profile.uiProtocol?.highRiskFailures ?? [],
+    };
+    const existingResearch = profile.researchProtocol ?? {
+      citationRequired: false,
+      evidenceRefs: [],
+      openQuestions: [],
+    };
+    profile.researchProtocol = {
+      ...existingResearch,
+      citationRequired: existingResearch.citationRequired ?? false,
+      evidenceRefs: existingResearch.evidenceRefs ?? [],
+      evidenceStandard: existingResearch.evidenceStandard ?? inferEvidenceStandard(text),
+      openQuestions: uniqueStrings([
+        ...(existingResearch.openQuestions ?? []),
+        text,
+      ]),
+    };
+  } else {
+    if (!profile.mission) profile.mission = text;
+  }
+
+  state.agentProfile = AgentSystemSchema.parse(profile);
+  return true;
+}
+
+function normalizeAgentTopic(topic: string | null, specPath: string | null): string {
+  if (isAgentTopic(topic)) return topic as string;
+  if (!specPath) return "agent_system_boundary";
+  if (specPath.includes("autonomy") || specPath.includes("humanCheckpoints")) return "agent_autonomy_and_checkpoints";
+  if (specPath.includes("builderScale")) return "agent_delivery_scale";
+  if (specPath.includes("toolContracts")) return "agent_tool_permissions";
+  if (specPath.includes("memoryPolicy") || specPath.includes("researchProtocol")) return "agent_memory_and_sources";
+  if (specPath.includes("architecturePattern") || specPath.includes("stateOwner") || specPath.includes("stopCondition")) return "agent_flow_topology";
+  if (specPath.includes("guardrails")) return "agent_guardrails";
+  if (specPath.includes("evaluations")) return "agent_evaluation_readiness";
+  if (specPath.includes("uiProtocol")) return "agent_ui_research_protocol";
+  return "agent_system_boundary";
+}
+
+function inferAutonomyLevel(text: string): AgentAutonomyLevel {
+  if (/draft|suggest|recommend|no tool|read-only|read only/i.test(text)) return "draft-only";
+  if (/approval|approve|ask|human|review|confirm/i.test(text)) return "human-in-loop";
+  if (/supervised|audit|logged|reversible|sandbox/i.test(text)) return "supervised";
+  if (/autonomous|without approval|fully/i.test(text)) return "autonomous";
+  return "human-in-loop";
+}
+
+function inferBuilderScale(text: string): AgentBuilderScale {
+  if (/human|manual|operator|review workflow|workflow/i.test(text)) return "human";
+  if (/plugin|package|connector|mcp|command|skill bundle/i.test(text)) return "plugin";
+  if (/agent|autonomous|tool use|tool-using|memory|state|plan|multi[- ]agent/i.test(text)) return "agent";
+  return "skill";
+}
+
+function inferToolPermissionTier(text: string): AgentToolPermissionTier {
+  if (/no tool|no-tool|none/i.test(text)) return "T0";
+  if (/delete|deploy|purchase|spend|payment|irreversible|production/i.test(text)) return "T5";
+  if (/email|message|notify|post|send|publish|external communication/i.test(text)) return "T4";
+  if (/write|update|create|edit|commit|patch/i.test(text)) return "T3";
+  if (/search|read external|api|web|browser|fetch|research/i.test(text)) return "T2";
+  if (/read local|local file|inspect|scan local/i.test(text)) return "T1";
+  return "T2";
+}
+
+function inferArchitecturePattern(text: string): AgentArchitecturePattern {
+  if (/multi[- ]agent/i.test(text)) return "multi-agent";
+  if (/orchestrator|worker|manager/i.test(text)) return "orchestrator-worker";
+  if (/evaluator|critic|optimizer|judge/i.test(text)) return "evaluator-optimizer";
+  if (/router|route|classify/i.test(text)) return "router";
+  if (/interactive|human|chat|approve/i.test(text)) return "interactive";
+  if (/sequence|pipeline|step/i.test(text)) return "sequential";
+  if (/hybrid/i.test(text)) return "hybrid";
+  return "single-agent";
+}
+
+function inferUiArchetype(text: string): NonNullable<AgentSystem["uiProtocol"]>["archetype"] {
+  if (/chat|conversation|assistant|copilot/i.test(text)) return "ai-agent-chat";
+  if (/editor|canvas|workbench|builder/i.test(text)) return "editor-workbench";
+  if (/research|evidence|source|analysis|dataset/i.test(text)) return "data-research-tool";
+  if (/admin|ops|internal/i.test(text)) return "internal-admin";
+  if (/dashboard|metrics|saas/i.test(text)) return "saas-dashboard";
+  return "ai-agent-chat";
+}
+
+function inferToolName(text: string, step: number): string {
+  const cleaned = text
+    .replace(/[^a-z0-9\s-]/gi, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 2)
+    .slice(0, 4)
+    .join(" ");
+  return cleaned || `Tool contract ${step}`;
+}
+
+function inferForbiddenActions(text: string): string[] {
+  const forbidden: string[] = [];
+  if (!/delete/i.test(text)) forbidden.push("delete without approval");
+  if (!/spend|purchase|payment/i.test(text)) forbidden.push("spend money without approval");
+  if (!/send|email|message|notify/i.test(text)) forbidden.push("contact external people without approval");
+  return forbidden;
+}
+
+function inferDataAccess(text: string): string | undefined {
+  if (/pii|personal|email|customer|user data|credential/i.test(text)) return "Potential sensitive data; require least-privilege access and redaction.";
+  if (/research|source|web|external/i.test(text)) return "External source data; preserve provenance and confidence.";
+  if (/local|file/i.test(text)) return "Local project files only.";
+  return undefined;
+}
+
+function inferSideEffects(text: string): string[] {
+  const effects: string[] = [];
+  if (/write|update|create|edit|commit|patch/i.test(text)) effects.push("writes project state or files");
+  if (/send|email|message|notify|publish/i.test(text)) effects.push("external communication");
+  if (/delete|deploy|purchase|spend|payment/i.test(text)) effects.push("irreversible or high-impact external action");
+  return effects;
+}
+
+function requiresApproval(text: string, tier: AgentToolPermissionTier): boolean {
+  return tier === "T4" || tier === "T5" || /approval|approve|human|ask|confirm|irreversible|production/i.test(text);
+}
+
+function inferEvidenceStandard(text: string): string {
+  if (/two|2|corroborat|multiple/i.test(text)) return "Require corroboration for factual or numeric claims.";
+  if (/cite|citation|source|evidence/i.test(text)) return "Return source-backed claims with citations and confidence labels.";
+  return "Separate observed evidence, assumptions, and open questions.";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean)));
+}
+
 function ensurePersona(
   intakeSpec: PartialIntakeSpec,
   patch: { name?: string; trigger?: string; exclusions?: string[]; jobsToAppend?: string[] },
@@ -1220,15 +1610,17 @@ function splitListy(text: string): string[] {
  */
 export function effectiveSpecFor(productState: ProductState, baseSpec: Spec): Spec {
   const intakeSpec = readIntakeSpec(productState);
+  const agentProfile = productState.agentProfile;
   if (
     intakeSpec.personas.length === 0 &&
     intakeSpec.scenarios.length === 0 &&
     intakeSpec.nonGoals.length === 0 &&
-    intakeSpec.needs.length === 0
+    intakeSpec.needs.length === 0 &&
+    !agentProfile
   ) {
     return baseSpec;
   }
-  return {
+  const merged: Spec = {
     ...baseSpec,
     personas: baseSpec.personas.length > 0 ? baseSpec.personas : (intakeSpec.personas as Spec["personas"]),
     scenarios: baseSpec.scenarios.length > 0 ? baseSpec.scenarios : (intakeSpec.scenarios as Spec["scenarios"]),
@@ -1241,6 +1633,72 @@ export function effectiveSpecFor(productState: ProductState, baseSpec: Spec): Sp
       ...intakeSpec.needs.filter((n) => !baseSpec.needs.some((b) => b.id === n.id)),
     ] as Spec["needs"],
   };
+
+  if (agentProfile) {
+    merged.agentSystem = mergeAgentSystems(baseSpec.agentSystem, agentProfile);
+    if (
+      merged.platformTarget === "web" &&
+      hasAgenticSignal({ productState, spec: merged })
+    ) {
+      merged.platformTarget = "agent-system";
+    }
+  }
+
+  return SpecSchema.parse(merged);
+}
+
+function mergeAgentSystems(
+  base: AgentSystem | undefined | null,
+  incoming: AgentSystem | undefined | null,
+): AgentSystem {
+  const b = AgentSystemSchema.parse(base ?? {});
+  const i = AgentSystemSchema.parse(incoming ?? {});
+  return AgentSystemSchema.parse({
+    ...i,
+    ...b,
+    mission: b.mission ?? i.mission,
+    systemBoundary: {
+      inScope: uniqueStrings([...(b.systemBoundary?.inScope ?? []), ...(i.systemBoundary?.inScope ?? [])]),
+      outOfScope: uniqueStrings([...(b.systemBoundary?.outOfScope ?? []), ...(i.systemBoundary?.outOfScope ?? [])]),
+    },
+    modelRoutes: mergeById(b.modelRoutes, i.modelRoutes),
+    toolContracts: mergeById(b.toolContracts, i.toolContracts),
+    guardrails: mergeById(b.guardrails, i.guardrails),
+    evaluations: mergeById(b.evaluations, i.evaluations),
+    humanCheckpoints: uniqueStrings([...(b.humanCheckpoints ?? []), ...(i.humanCheckpoints ?? [])]),
+    traceabilityRefs: uniqueStrings([...(b.traceabilityRefs ?? []), ...(i.traceabilityRefs ?? [])]),
+    researchProtocol: {
+      ...(i.researchProtocol ?? {}),
+      ...(b.researchProtocol ?? {}),
+      evidenceRefs: uniqueStrings([
+        ...(b.researchProtocol?.evidenceRefs ?? []),
+        ...(i.researchProtocol?.evidenceRefs ?? []),
+      ]),
+      openQuestions: uniqueStrings([
+        ...(b.researchProtocol?.openQuestions ?? []),
+        ...(i.researchProtocol?.openQuestions ?? []),
+      ]),
+    },
+    uiProtocol: {
+      ...(i.uiProtocol ?? {}),
+      ...(b.uiProtocol ?? {}),
+      userResearchQuestions: uniqueStrings([
+        ...(b.uiProtocol?.userResearchQuestions ?? []),
+        ...(i.uiProtocol?.userResearchQuestions ?? []),
+      ]),
+      highRiskFailures: uniqueStrings([
+        ...(b.uiProtocol?.highRiskFailures ?? []),
+        ...(i.uiProtocol?.highRiskFailures ?? []),
+      ]),
+    },
+  });
+}
+
+function mergeById<T extends { id: string }>(base: T[], incoming: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of incoming) map.set(item.id, item);
+  for (const item of base) map.set(item.id, item);
+  return Array.from(map.values());
 }
 
 /**

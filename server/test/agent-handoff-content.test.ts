@@ -231,6 +231,68 @@ describe("agent-handoff content shape", () => {
     expect(out).toContain("Solo-founder ops cost is the primary blocker.");
   });
 
+  it("renders agent-system contracts when present", () => {
+    const spec = buildBaseSpec({
+      platformTarget: "agent-system",
+      agentSystem: {
+        mission: "Review research sources and draft source-backed recommendations.",
+        builderScale: "agent",
+        architecturePattern: "single-agent",
+        autonomyLevel: "human-in-loop",
+        stateOwner: "ProductPilot project state",
+        stopCondition: "Stop when every factual claim has evidence or is marked uncertain.",
+        systemBoundary: {
+          inScope: ["Read project research and draft recommendations."],
+          outOfScope: ["Do not publish or email without approval."],
+        },
+        toolContracts: [
+          {
+            id: "tool-1",
+            name: "Research search",
+            purpose: "Find source-backed evidence for claims.",
+            permissionTier: "T2",
+            allowedActions: ["Read external sources"],
+            forbiddenActions: ["Write external systems"],
+            requiresHumanApproval: false,
+          },
+        ],
+        memoryPolicy: "Persist evidence references, not raw private notes.",
+        researchProtocol: {
+          sourcePolicy: "Prefer primary sources.",
+          evidenceStandard: "Cite sources for factual claims.",
+          citationRequired: true,
+        },
+        guardrails: [
+          {
+            id: "g-1",
+            appliesTo: ["agent-runtime"],
+            trigger: "Unsupported factual claim",
+            check: "Claim has citation or uncertainty label.",
+            action: "Ask for source or mark uncertain.",
+            severity: "warn",
+          },
+        ],
+        evaluations: [
+          {
+            id: "e-1",
+            name: "Source-backed answer",
+            metric: "All factual claims have citations.",
+            blocking: true,
+          },
+        ],
+        humanCheckpoints: ["Ask before contacting external people."],
+      },
+    });
+    const out = generateHandoff(spec, buildProductState());
+    expect(out).toContain("## Agent system contract");
+    expect(out).toContain("**Build scale:** `agent`");
+    expect(out).toContain("**Topology:** `single-agent`");
+    expect(out).toContain("### Tool contracts");
+    expect(out).toContain("Research search");
+    expect(out).toContain("### Evaluation scorecard");
+    expect(out).toContain("Source-backed answer");
+  });
+
   it("ends the rendered output with a trailing newline (markdown convention)", () => {
     const out = generateHandoff(buildBaseSpec(), buildProductState());
     expect(out.endsWith("\n")).toBe(true);

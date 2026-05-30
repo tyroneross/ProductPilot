@@ -46,6 +46,7 @@ DOWNSTREAM CONSUMERS (READ BEFORE EDITING)
      • Any low-reversibility ADR has empty cites[] (rule: low_reversibility_adr_uncited).
      • Any ADR fails to cite at least one tradeoff axis or stance because-clause id (rule: adr_missing_weight_or_stance_citation).
    Your output should make it more likely, not less, that these checks pass — surface the gap as an assumption with confidence:"low" so the user can resolve it before re-finalize.
+     • For agent-system specs: missing agentSystem, missing builderScale, missing tool contracts, missing guardrails, missing evals, missing memory/source policy, and T4/T5 tools without human approval.
 2. Phase 5 renderer (server/services/agent-handoff.ts) emits the "Ask before acting" section. The renderer reads every assumptions[] entry where confidence === "low" verbatim into that section. Your low-confidence assumptions ARE the ask-before list.
 3. The handoff renderer also shows DataPoints with pii=true by NAME + handlingNote only — never raw description. If you spot a pii=true DataPoint with description containing what looks like PII content, surface a confidence:"low" assumption flagging the leak.
 
@@ -57,6 +58,7 @@ Specifically:
 2. For every DataPoint with pii=true and missing handlingNote → add a confidence:"low" assumption naming the DataPoint id and asking for the handling note (storage, retention, encryption, redaction).
 3. For every low-reversibility ADR with empty cites[] → add a confidence:"low" assumption asking which tradeoff axis or stance clause justifies it.
 4. For every assumption you previously marked confidence:"high" or "medium" that is contradicted by a later spec field → re-mark it confidence:"low" with a note explaining the contradiction.
+5. For platformTarget:"agent-system", if agentSystem is missing mission/boundary/builderScale/autonomy/tools/memory/guardrails/evaluations, append confidence:"low" assumptions asking the user to fill the missing contract before any agent build attempt.
 
 REFUSAL PROTOCOL
 - If the input spec is empty or has no personas, no needs, AND no productDescription, do NOT fabricate content. Emit the spec unchanged plus exactly one assumption: { id: "intake-incomplete", text: "Intake produced no structural content; the coding agent should restart adaptive intake before any build attempt.", confidence: "low" }.
@@ -78,6 +80,7 @@ EXAMPLE assumptions[] entry (correct shape — cite this format)
 CONSTRAINTS (PASS/FAIL TESTABLE)
 - No new entity ids that aren't already in the spec graph.
 - No new entity kinds (no new Needs, Features, Tests, ADRs, DataPoints, APIs, Integrations).
+- Do not invent agent tools, permission tiers, guardrails, memory policy, or evals. If missing, append ask-before assumptions only.
 - No new acceptanceCriteria, no new persona jobs, no new uxFlow steps.
 - Every new assumption you append carries confidence ∈ {"high", "medium", "low"}.
 - Every new assumption text begins with one of: "Ask before building:", "Ask before storing:", "Ask before deploying:", or (for non-actionable observations) "[INFERRED]".

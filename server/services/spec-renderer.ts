@@ -37,6 +37,7 @@ import type {
   UXFlow,
   Screen,
   Integration,
+  AgentSystem,
 } from "@shared/schema";
 
 // ── shared helpers ───────────────────────────────────────────────────────
@@ -231,6 +232,64 @@ function renderRisks(items: Risk[]): string {
     .join("\n");
 }
 
+function renderAgentSystem(agent: AgentSystem | undefined): string {
+  if (!agent) return "_None._";
+  const lines: string[] = [];
+  if (agent.mission) lines.push(`**Mission:** ${agent.mission}`);
+  if (agent.builderScale) lines.push(`**Build scale:** ${agent.builderScale}`);
+  if (agent.architecturePattern || agent.autonomyLevel) {
+    lines.push(
+      `**Topology:** ${agent.architecturePattern ?? "TBD"}; **Autonomy:** ${agent.autonomyLevel ?? "TBD"}`,
+    );
+  }
+  if (agent.stateOwner) lines.push(`**State owner:** ${agent.stateOwner}`);
+  if (agent.stopCondition) lines.push(`**Stop condition:** ${agent.stopCondition}`);
+  if (agent.systemBoundary.inScope.length || agent.systemBoundary.outOfScope.length) {
+    lines.push("", "### Boundary");
+    if (agent.systemBoundary.inScope.length) {
+      lines.push("**In scope:**");
+      for (const item of agent.systemBoundary.inScope) lines.push(bullet(item));
+    }
+    if (agent.systemBoundary.outOfScope.length) {
+      lines.push("**Out of scope:**");
+      for (const item of agent.systemBoundary.outOfScope) lines.push(bullet(item));
+    }
+  }
+  if (agent.toolContracts.length) {
+    lines.push("", "### Tool contracts");
+    for (const tool of agent.toolContracts) {
+      lines.push(
+        `- **${tool.id}** ${tool.name} [${tool.permissionTier}] — ${tool.purpose}${tool.requiresHumanApproval ? " (approval required)" : ""}`,
+      );
+    }
+  }
+  if (agent.memoryPolicy || agent.researchProtocol) {
+    lines.push("", "### Memory and research");
+    if (agent.memoryPolicy) lines.push(bullet(agent.memoryPolicy));
+    if (agent.researchProtocol?.sourcePolicy) lines.push(bullet(`Source policy: ${agent.researchProtocol.sourcePolicy}`));
+    if (agent.researchProtocol?.evidenceStandard) lines.push(bullet(`Evidence standard: ${agent.researchProtocol.evidenceStandard}`));
+  }
+  if (agent.uiProtocol) {
+    lines.push("", "### UI protocol");
+    if (agent.uiProtocol.archetype) lines.push(bullet(`Archetype: ${agent.uiProtocol.archetype}`));
+    if (agent.uiProtocol.designMode) lines.push(bullet(`Design mode: ${agent.uiProtocol.designMode}`));
+    for (const q of agent.uiProtocol.userResearchQuestions) lines.push(bullet(`Research question: ${q}`));
+  }
+  if (agent.guardrails.length) {
+    lines.push("", "### Guardrails");
+    for (const guardrail of agent.guardrails) {
+      lines.push(`- **${guardrail.id}** [${guardrail.severity}] ${guardrail.trigger} → ${guardrail.action}`);
+    }
+  }
+  if (agent.evaluations.length) {
+    lines.push("", "### Evals");
+    for (const evaluation of agent.evaluations) {
+      lines.push(`- **${evaluation.id}** ${evaluation.name}: ${evaluation.metric}${evaluation.blocking ? " (blocking)" : ""}`);
+    }
+  }
+  return lines.length ? lines.join("\n") : "_Agent system declared, but no details captured yet._";
+}
+
 // ── stage renderers ──────────────────────────────────────────────────────
 
 /**
@@ -351,6 +410,10 @@ export function renderUxSpec(spec: Spec): string {
     "",
     renderScreens(spec.screens),
     "",
+    heading(2, "Agent UI and research protocol"),
+    "",
+    renderAgentSystem(spec.agentSystem),
+    "",
     heading(2, "Features touched"),
     "",
     renderFeatures(spec.features),
@@ -374,6 +437,10 @@ export function renderFunctionalSpec(spec: Spec): string {
     heading(2, "API contracts"),
     "",
     renderAPIs(spec.apiContracts),
+    "",
+    heading(2, "Agent system"),
+    "",
+    renderAgentSystem(spec.agentSystem),
     "",
     heading(2, "Tests"),
     "",

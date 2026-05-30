@@ -49,6 +49,7 @@ import type {
   UXFlow,
   Screen,
   TradeoffWeights,
+  AgentSystem,
 } from "@shared/schema";
 import { TRADEOFF_AXES } from "@shared/schema";
 
@@ -80,6 +81,7 @@ export function generateHandoff(
   sections.push(renderDataModel(spec.dataPoints));
   sections.push(renderAPIContracts(spec.apiContracts));
   sections.push(renderIntegrations(spec.integrations));
+  sections.push(renderAgentSystem(spec.agentSystem));
   sections.push(renderTestScaffolding(spec));
   sections.push(renderAskBeforePolicy());
   sections.push(renderNeedsAndFeatures(spec));
@@ -105,6 +107,7 @@ export const ASK_BEFORE_POLICY_LINES: ReadonlyArray<string> = [
   "Removing a P0 Need.",
   "Making any irreversible architecture decision with low confidence.",
   "Modifying the database schema in a non-additive way.",
+  "Letting an agent use T4/T5 tools, external communication, production deploys, or destructive actions without explicit approval.",
 ];
 
 // ---------------------------------------------------------------------------
@@ -271,6 +274,88 @@ function renderIntegrations(items: Integration[]): string {
   return lines.join("\n");
 }
 
+function renderAgentSystem(agent: AgentSystem | undefined): string {
+  if (!agent) return "";
+  const lines: string[] = ["## Agent system contract"];
+
+  if (agent.mission) lines.push("", `**Mission:** ${agent.mission}`);
+  if (agent.builderScale) lines.push(`**Build scale:** \`${agent.builderScale}\``);
+  lines.push(
+    "",
+    `**Topology:** \`${agent.architecturePattern ?? "TBD"}\``,
+    `**Autonomy:** \`${agent.autonomyLevel ?? "TBD"}\``,
+  );
+  if (agent.stateOwner) lines.push(`**State owner:** ${agent.stateOwner}`);
+  if (agent.stopCondition) lines.push(`**Stop condition:** ${agent.stopCondition}`);
+
+  if (agent.systemBoundary.inScope.length || agent.systemBoundary.outOfScope.length) {
+    lines.push("", "### Boundary");
+    if (agent.systemBoundary.inScope.length) {
+      lines.push("**In scope:**");
+      for (const item of agent.systemBoundary.inScope) lines.push(`- ${item}`);
+    }
+    if (agent.systemBoundary.outOfScope.length) {
+      lines.push("**Out of scope:**");
+      for (const item of agent.systemBoundary.outOfScope) lines.push(`- ${item}`);
+    }
+  }
+
+  if (agent.toolContracts.length) {
+    lines.push("", "### Tool contracts");
+    for (const tool of agent.toolContracts) {
+      lines.push(`#### ${tool.id} — ${tool.name}`);
+      lines.push(`- Purpose: ${tool.purpose}`);
+      lines.push(`- Permission tier: \`${tool.permissionTier}\`${tool.requiresHumanApproval ? " (human approval required)" : ""}`);
+      if (tool.allowedActions.length) lines.push(`- Allowed: ${tool.allowedActions.join("; ")}`);
+      if (tool.forbiddenActions.length) lines.push(`- Forbidden: ${tool.forbiddenActions.join("; ")}`);
+      if (tool.dataAccess) lines.push(`- Data access: ${tool.dataAccess}`);
+      if (tool.sideEffects.length) lines.push(`- Side effects: ${tool.sideEffects.join("; ")}`);
+      if (tool.auditLog) lines.push(`- Audit log: ${tool.auditLog}`);
+      if (tool.rollbackPlan) lines.push(`- Rollback: ${tool.rollbackPlan}`);
+      if (tool.failureMode) lines.push(`- Failure mode: ${tool.failureMode}`);
+    }
+  }
+
+  if (agent.memoryPolicy || agent.researchProtocol) {
+    lines.push("", "### Memory, sources, and evidence");
+    if (agent.memoryPolicy) lines.push(`- Memory policy: ${agent.memoryPolicy}`);
+    if (agent.researchProtocol?.sourcePolicy) lines.push(`- Source policy: ${agent.researchProtocol.sourcePolicy}`);
+    if (agent.researchProtocol?.evidenceStandard) lines.push(`- Evidence standard: ${agent.researchProtocol.evidenceStandard}`);
+    if (agent.researchProtocol?.confidencePolicy) lines.push(`- Confidence policy: ${agent.researchProtocol.confidencePolicy}`);
+    if (agent.researchProtocol?.citationRequired) lines.push("- Citations required for factual claims.");
+  }
+
+  if (agent.uiProtocol) {
+    lines.push("", "### UI and control surface");
+    if (agent.uiProtocol.archetype) lines.push(`- UI archetype: \`${agent.uiProtocol.archetype}\``);
+    if (agent.uiProtocol.designMode) lines.push(`- Design mode: ${agent.uiProtocol.designMode}`);
+    for (const question of agent.uiProtocol.userResearchQuestions) {
+      lines.push(`- User research question: ${question}`);
+    }
+  }
+
+  if (agent.guardrails.length) {
+    lines.push("", "### Guardrails");
+    for (const guardrail of agent.guardrails) {
+      lines.push(`- **${guardrail.id}** [${guardrail.severity}] Trigger: ${guardrail.trigger}; check: ${guardrail.check}; action: ${guardrail.action}`);
+    }
+  }
+
+  if (agent.humanCheckpoints.length) {
+    lines.push("", "### Human checkpoints");
+    for (const checkpoint of agent.humanCheckpoints) lines.push(`- ${checkpoint}`);
+  }
+
+  if (agent.evaluations.length) {
+    lines.push("", "### Evaluation scorecard");
+    for (const evaluation of agent.evaluations) {
+      lines.push(`- **${evaluation.id}** ${evaluation.name}: ${evaluation.metric}${evaluation.blocking ? " (blocking)" : ""}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Per-platform test scaffolding
 //
@@ -354,6 +439,17 @@ const PLATFORM_SCAFFOLDS: Record<PlatformTarget, PlatformScaffold> = {
         : "no validatorRefs declared (linter warning)";
       return `Need \`${need.id}\` (${truncate(need.title, 50)}) → Test \`${test.id}\` → validators: ${refs}.`;
     },
+  },
+  "agent-system": {
+    heading: "agent-system (golden tasks + safety evals)",
+    runInstruction:
+      "Run the agent's golden-task suite and safety/permission evals before marking the handoff ready.",
+    fileLocation:
+      "Place eval fixtures under `evals/` or the repo's existing test directory. Include tool-permission fixtures for every T3+ tool.",
+    extraNotes:
+      "Each P0 Need should map to a golden task. Every T4/T5 tool needs an approval-path test, audit-log check, and refusal test for missing permission or source evidence.",
+    needToTest: (need, test) =>
+      `Need \`${need.id}\` (${truncate(need.title, 50)}) → Test \`${test.id}\` → run golden task / safety eval \`${test.description}\`.`,
   },
 };
 

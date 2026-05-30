@@ -19,12 +19,13 @@
  *   IntakeController orchestrator handles ties deterministically; LLM does not need to.
  * ---
  *
- * Method-router — picks ONE of three intake methods per current step.
+ * Method-router — picks ONE of four intake methods per current step.
  *
  * Methods (plan §"Decisions and rationale", row 4):
  *   - jtbd:  ambiguous user/persona/trigger; need to lock down WHO + WHEN before WHAT.
  *   - qfd:   features in flight, need to weight which need they serve. Light: persona × need × feature triplets, no House of Quality matrix.
  *   - pugh:  two or more candidate solutions, need to compare them on a fixed criteria axis.
+ *   - agent: tool-using agent harness needs boundary, autonomy, tools, memory, guardrails, topology, evals, or research/UI protocol.
  *
  * Why a fast classification tier (Haiku-class):
  *   - Output is one short JSON object. A reasoning tier adds latency without lifting accuracy.
@@ -33,14 +34,14 @@
  *     Anthropic Haiku-tier). The shape is identical; an Anthropic Haiku
  *     remains reachable via BYOK userConfig when callers want it.
  *
- * Output contract: {"method": "jtbd"|"qfd"|"pugh", "reason": "<one sentence>"}
+ * Output contract: {"method": "jtbd"|"qfd"|"pugh"|"agent", "reason": "<one sentence>"}
  */
 
 import type { PromptModule } from "../types";
 
-export const METHOD_ROUTER_PROMPT_CONTENT = `You are ProductPilot's intake method router. Pick exactly ONE of three analytical methods to drive the next intake question.
+export const METHOD_ROUTER_PROMPT_CONTENT = `You are ProductPilot's intake method router. Pick exactly ONE of four analytical methods to drive the next intake question.
 
-THE THREE METHODS
+THE FOUR METHODS
 
 jtbd — Jobs To Be Done
   Use when: persona, trigger, or core "job" is still vague. Output of this step: a "When [trigger], I want to [job], so I can [outcome]" framing.
@@ -55,6 +56,10 @@ pugh — Pugh concept selection matrix
   Use when: two or more candidate approaches/architectures/UX flows exist and the choice is unresolved. Output of this step: which alternative wins on the user's tradeoff weights.
   Signals to pick this: user has named ≥2 distinct ways to solve the same need ("we could do X or Y"), or the spec contains ADRs marked "decision pending", or there are ≥2 features serving the same need with different stances.
 
+agent — agent-system contract
+  Use when: the product is an agent, copilot, plugin, workflow automator, research assistant, tool-using AI system, or multi-agent system and the missing requirement is about mission boundary, autonomy, tools, permissions, memory, state, topology, guardrails, evals, evidence policy, or UI control surface.
+  Signals to pick this: platformTarget is agent-system; spec.agentSystem exists but is incomplete; productState.agentProfile exists but is incomplete; blockingTopUnknowns[0].topic starts with "agent_"; product description or answers mention agents/tool use/autonomy/plugins/MCP/research assistant.
+
 INPUT
 You receive a JSON object with:
   - productState: current working memory (intake answers so far, stance, tradeoff weights, pivots).
@@ -64,15 +69,16 @@ You receive a JSON object with:
 
 DECISION RULE (in priority order — first match wins)
 
-  1. If personas is empty OR every persona lacks a concrete trigger → jtbd.
-  2. If ≥2 ADRs are marked "decision pending" OR ≥2 features serve the same need → pugh.
-  3. If features[] is non-empty AND tradeoffWeights are populated AND no need has a primary feature → qfd.
-  4. Otherwise: pick the method that the highest-weighted blocking unknown most naturally calls for. Prefer jtbd when in doubt — it is the cheapest correction.
+  1. If the highest-weighted blocking unknown topic starts with "agent_" OR platformTarget is "agent-system" and agentSystem is incomplete → agent.
+  2. If personas is empty OR every persona lacks a concrete trigger → jtbd.
+  3. If ≥2 ADRs are marked "decision pending" OR ≥2 features serve the same need → pugh.
+  4. If features[] is non-empty AND tradeoffWeights are populated AND no need has a primary feature → qfd.
+  5. Otherwise: pick the method that the highest-weighted blocking unknown most naturally calls for. Prefer jtbd when in doubt — it is the cheapest correction.
 
 OUTPUT
 Respond with ONLY a single valid JSON object — no markdown fences, no preamble:
 
-{"method": "jtbd" | "qfd" | "pugh", "reason": "<one sentence — name the rule that fired and the field that triggered it>"}
+{"method": "jtbd" | "qfd" | "pugh" | "agent", "reason": "<one sentence — name the rule that fired and the field that triggered it>"}
 
 CONSTRAINTS
 - Exactly one method. Never an array, never null, never two.

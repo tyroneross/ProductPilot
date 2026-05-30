@@ -35,9 +35,10 @@ export const SampleProductSchema = z.object({
     "macos-native-app",
     "vite-spa",
     "claude-plugin",
+    "agent-system",
   ]),
   platformTarget: z
-    .enum(["web", "vite-spa", "ios", "macos", "claude-plugin"])
+    .enum(["web", "vite-spa", "ios", "macos", "claude-plugin", "agent-system"])
     .default("web"),
   initialIdea: z.string().min(10),
   simulatedDiscoveryAnswers: z.array(z.string()).min(1),

@@ -221,3 +221,97 @@ describe("spec-linter — platform: claude-plugin", () => {
     expect(issue?.severity).toBe("warn");
   });
 });
+
+describe("spec-linter — platform: agent-system", () => {
+  it("accepts golden task eval fixtures for an agent-system spec", () => {
+    const spec = specForPlatform("agent-system", {
+      agentSystem: {
+        mission: "Research and summarize source-backed recommendations.",
+        builderScale: "agent",
+        architecturePattern: "single-agent",
+        autonomyLevel: "human-in-loop",
+        stateOwner: "Project state",
+        stopCondition: "All factual claims are cited or marked uncertain.",
+        systemBoundary: {
+          inScope: ["Read source material and draft recommendations."],
+          outOfScope: ["Do not publish externally."],
+        },
+        toolContracts: [
+          {
+            id: "tool-1",
+            name: "Source search",
+            purpose: "Read external sources.",
+            permissionTier: "T2",
+            requiresHumanApproval: false,
+          },
+        ],
+        memoryPolicy: "Persist source refs only.",
+        guardrails: [
+          {
+            id: "g-1",
+            appliesTo: ["agent-runtime"],
+            trigger: "Unsupported claim",
+            check: "Claim has source or uncertainty label.",
+            action: "Ask for source.",
+            severity: "warn",
+          },
+        ],
+        evaluations: [
+          {
+            id: "e-1",
+            name: "Citation coverage",
+            metric: "Every factual claim is cited.",
+            blocking: true,
+          },
+        ],
+      },
+      tests: [
+        { id: "t-1", description: "golden task citation coverage", needIds: ["need-1"], featureIds: [], kind: "acceptance", testFramework: "golden task eval fixture", validatorRefs: [] },
+      ],
+    });
+    const result = lintSpecSync({ spec, productState: fullState });
+    expect(result.issues.find((i) => i.rule === "test_framework_platform_mismatch")).toBeUndefined();
+    expect(result.issues.find((i) => i.rule === "agent_system.evals_missing")).toBeUndefined();
+  });
+
+  it("warns when T4/T5 tools do not require approval", () => {
+    const spec = specForPlatform("agent-system", {
+      agentSystem: {
+        mission: "Send stakeholder updates.",
+        builderScale: "agent",
+        architecturePattern: "single-agent",
+        autonomyLevel: "supervised",
+        stateOwner: "Agent runtime",
+        stopCondition: "Summary sent or blocked.",
+        toolContracts: [
+          {
+            id: "tool-send",
+            name: "Email sender",
+            purpose: "Send external updates.",
+            permissionTier: "T4",
+            requiresHumanApproval: false,
+          },
+        ],
+        memoryPolicy: "No long-term memory.",
+        guardrails: [
+          {
+            id: "g-1",
+            appliesTo: ["tool-send"],
+            trigger: "External email",
+            check: "Approval exists.",
+            action: "Block without approval.",
+            severity: "block",
+          },
+        ],
+        evaluations: [
+          { id: "e-1", name: "Approval gate", metric: "Blocks email without approval.", blocking: true },
+        ],
+      },
+      tests: [
+        { id: "t-1", description: "approval gate eval", needIds: ["need-1"], featureIds: [], kind: "acceptance", testFramework: "eval fixture", validatorRefs: [] },
+      ],
+    });
+    const result = lintSpecSync({ spec, productState: fullState });
+    expect(result.issues.find((i) => i.rule === "agent_system.high_impact_tool_requires_approval")).toBeDefined();
+  });
+});

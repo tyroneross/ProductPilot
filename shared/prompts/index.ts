@@ -18,10 +18,11 @@ export { default as methodRouterPrompt } from "./intake/method-router";
 export { default as blockingScorerPrompt } from "./intake/blocking-scorer";
 export { default as safeDefaultsPrompt } from "./intake/safe-defaults";
 
-// Phase 2 — three intake methods (JTBD, lightweight QFD, Pugh).
+// Phase 2 — intake methods (JTBD, lightweight QFD, Pugh, agent-system).
 export { default as jtbdMethodPrompt } from "./methods/jtbd";
 export { default as qfdMethodPrompt } from "./methods/qfd";
 export { default as pughMethodPrompt } from "./methods/pugh";
+export { default as agentMethodPrompt } from "./methods/agent";
 
 // Phase 3 — spec linter LLM-tier prompt (deterministic checks live in
 // server/services/spec-linter.ts; this prompt covers the two fuzzy categories).

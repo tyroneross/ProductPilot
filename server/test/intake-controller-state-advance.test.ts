@@ -23,6 +23,7 @@
  *   8. topic="stance_because_privacy_data" promotes into stanceBecauseClauses.
  *   9. topic="non_goals" promotes into intakeSpec.nonGoals.
  *  10. topic="persona_exclusions" populates persona.exclusions with ≥3 items.
+ *  11. agent method answers promote into productState.agentProfile and final Spec.agentSystem.
  *
  * Strategy: pure-function tests. We don't mock the LLM — ingestAnswer is
  * deterministic and synchronous. effectiveSpecFor + deriveCandidateUnknowns
@@ -158,6 +159,46 @@ describe("ingestAnswer — spec-slice promotion", () => {
     });
   });
 
+  it("agent answer promotes into productState.agentProfile", () => {
+    const { productState } = ingestAnswer({
+      state: BASE_STATE,
+      answer: {
+        projectId: "proj-agent",
+        step: 4,
+        questionText: "Which tools can the agent use?",
+        answer: "It can search external sources, but must ask before sending email.",
+        method: "agent",
+        metadata: {
+          topic: "agent_tool_permissions",
+          extracts_into: { spec_path: "agentSystem.toolContracts" },
+        },
+      },
+    });
+
+    expect(productState.agentProfile?.toolContracts).toHaveLength(1);
+    expect(productState.agentProfile?.toolContracts[0].permissionTier).toBe("T4");
+    expect(productState.agentProfile?.toolContracts[0].requiresHumanApproval).toBe(true);
+  });
+
+  it("agent delivery-scale answer classifies skill/plugin/agent/human", () => {
+    const { productState } = ingestAnswer({
+      state: BASE_STATE,
+      answer: {
+        projectId: "proj-agent-scale",
+        step: 5,
+        questionText: "Should this be a skill, plugin, agent, or human workflow?",
+        answer: "Start as a plugin packaged tool surface, not a full autonomous agent.",
+        method: "agent",
+        metadata: {
+          topic: "agent_delivery_scale",
+          extracts_into: { spec_path: "agentSystem.builderScale" },
+        },
+      },
+    });
+
+    expect(productState.agentProfile?.builderScale).toBe("plugin");
+  });
+
   it("topic=stance_because_privacy_data promotes into stanceBecauseClauses", () => {
     const { productState } = ingestAnswer({
       state: BASE_STATE,
@@ -216,6 +257,26 @@ describe("ingestAnswer — spec-slice promotion", () => {
     const intakeSpec = readIntakeSpec(productState);
     expect(intakeSpec.personas).toHaveLength(1);
     expect(intakeSpec.personas[0].exclusions.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("agent profile finalization", () => {
+  it("effectiveSpecFor projects agentProfile into Spec.agentSystem", () => {
+    const state = ProductStateSchema.parse({
+      agentProfile: {
+        mission: "Inspect research and draft recommendations.",
+        builderScale: "agent",
+        architecturePattern: "single-agent",
+        autonomyLevel: "human-in-loop",
+        stopCondition: "Stop when factual claims have citations.",
+      },
+    });
+    const spec = effectiveSpecFor(state, SpecSchema.parse({
+      ...BASE_SPEC,
+      productDescription: "A research agent for product teams.",
+    }));
+    expect(spec.platformTarget).toBe("agent-system");
+    expect(spec.agentSystem?.mission).toContain("Inspect research");
   });
 });
 

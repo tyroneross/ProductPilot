@@ -61,8 +61,8 @@ export const SPEC_REVIEW_PROMPT_CONTENT = `You review a structured product Spec 
 
 INPUT
 A JSON object with these top-level keys:
-  - spec: the Spec graph (productName, productDescription, platformTarget, personas, scenarios, needs, features, uxFlows, screens, dataPoints, integrations, apiContracts, tests, adrs, assumptions, risks, nonGoals).
-  - productState: optional working memory (stanceBecauseClauses, pivotLog, tradeoffWeights). May be omitted on a fresh spec.
+  - spec: the Spec graph (productName, productDescription, platformTarget, personas, scenarios, needs, features, uxFlows, screens, dataPoints, integrations, apiContracts, tests, adrs, assumptions, risks, nonGoals, agentSystem).
+  - productState: optional working memory (stanceBecauseClauses, pivotLog, tradeoffWeights, agentProfile). May be omitted on a fresh spec.
 
 WHAT TO LOOK FOR (exactly two categories — do not invent a third)
 

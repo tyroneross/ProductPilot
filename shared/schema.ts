@@ -88,13 +88,13 @@ export const projects = pgTable("projects", {
 ]);
 
 // Per-question intake log. One row per question asked by IntakeController (Phase 2).
-// `metadata` carries method (JTBD/QFD/Pugh), confidence, and any inferred-vs-asked flag.
+// `metadata` carries method (JTBD/QFD/Pugh/agent), confidence, and any inferred-vs-asked flag.
 // Admin telemetry views must redact answer_text the same way `messages` already are.
 export const intakeQuestions = pgTable("intake_questions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   projectId: varchar("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   step: integer("step").notNull(),
-  method: text("method"), // 'jtbd' | 'qfd' | 'pugh' | null for free-form
+  method: text("method"), // 'jtbd' | 'qfd' | 'pugh' | 'agent' | null for free-form
   questionText: text("question_text").notNull(),
   answerText: text("answer_text"),
   metadata: jsonb("metadata"),
@@ -468,6 +468,119 @@ export const RiskSchema = z.object({
   mitigation: z.string().optional(),
 });
 
+// Agent systems need a harness spec, not only app requirements. These schemas
+// capture the Agent Builder / Prompt Builder primitives ProductPilot needs to
+// ask about and hand off: autonomy, topology, tool permissions, memory,
+// guardrails, research evidence, UI archetype, and eval coverage.
+export const AgentArchitecturePatternSchema = z.enum([
+  "single-agent",
+  "sequential",
+  "router",
+  "orchestrator-worker",
+  "evaluator-optimizer",
+  "interactive",
+  "multi-agent",
+  "hybrid",
+]);
+
+export const AgentAutonomyLevelSchema = z.enum([
+  "draft-only",
+  "human-in-loop",
+  "supervised",
+  "autonomous",
+]);
+
+export const AgentBuilderScaleSchema = z.enum(["skill", "plugin", "agent", "human"]);
+
+export const AgentToolPermissionTierSchema = z.enum(["T0", "T1", "T2", "T3", "T4", "T5"]);
+
+export const AgentToolContractSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  purpose: z.string(),
+  permissionTier: AgentToolPermissionTierSchema.default("T1"),
+  allowedActions: z.array(z.string()).default([]),
+  forbiddenActions: z.array(z.string()).default([]),
+  dataAccess: z.string().optional(),
+  sideEffects: z.array(z.string()).default([]),
+  requiresHumanApproval: z.boolean().default(false),
+  auditLog: z.string().optional(),
+  rollbackPlan: z.string().optional(),
+  failureMode: z.string().optional(),
+});
+
+export const AgentModelRouteSchema = z.object({
+  id: IdSchema,
+  purpose: z.string(),
+  provider: z.string().optional(),
+  modelTier: z.string().optional(),
+  promptContract: z.string().optional(),
+});
+
+export const AgentGuardrailSchema = z.object({
+  id: IdSchema,
+  appliesTo: z.array(z.string()).default([]),
+  trigger: z.string(),
+  check: z.string(),
+  action: z.string(),
+  severity: Severity.default("warn"),
+  escalation: z.string().optional(),
+});
+
+export const AgentEvaluationSchema = z.object({
+  id: IdSchema,
+  name: z.string(),
+  metric: z.string(),
+  coverageRefs: z.array(IdSchema).default([]),
+  blocking: z.boolean().default(false),
+});
+
+export const AgentResearchProtocolSchema = z.object({
+  sourcePolicy: z.string().optional(),
+  evidenceStandard: z.string().optional(),
+  confidencePolicy: z.string().optional(),
+  citationRequired: z.boolean().default(false),
+  evidenceRefs: z.array(z.string()).default([]),
+  openQuestions: z.array(z.string()).default([]),
+});
+
+export const AgentUiProtocolSchema = z.object({
+  archetype: z.enum([
+    "ai-agent-chat",
+    "editor-workbench",
+    "data-research-tool",
+    "saas-dashboard",
+    "internal-admin",
+    "content-publication",
+    "commerce-checkout",
+  ]).optional(),
+  designMode: z.string().optional(),
+  userResearchQuestions: z.array(z.string()).default([]),
+  highRiskFailures: z.array(z.string()).default([]),
+});
+
+export const AgentSystemSchema = z.object({
+  mission: z.string().optional(),
+  systemBoundary: z.object({
+    inScope: z.array(z.string()).default([]),
+    outOfScope: z.array(z.string()).default([]),
+  }).default({ inScope: [], outOfScope: [] }),
+  builderScale: AgentBuilderScaleSchema.optional(),
+  architecturePattern: AgentArchitecturePatternSchema.optional(),
+  autonomyLevel: AgentAutonomyLevelSchema.optional(),
+  stateOwner: z.string().optional(),
+  stopCondition: z.string().optional(),
+  modelRoutes: z.array(AgentModelRouteSchema).default([]),
+  toolContracts: z.array(AgentToolContractSchema).default([]),
+  memoryPolicy: z.string().optional(),
+  researchProtocol: AgentResearchProtocolSchema.optional(),
+  uiProtocol: AgentUiProtocolSchema.optional(),
+  guardrails: z.array(AgentGuardrailSchema).default([]),
+  evaluations: z.array(AgentEvaluationSchema).default([]),
+  humanCheckpoints: z.array(z.string()).default([]),
+  traceabilityRefs: z.array(z.string()).default([]),
+});
+
 // Stance "because" clause from PRD-Builder Q3.
 // Captures the qualitative judgment that complements numeric tradeoffWeights.
 // Both feed Phase 4 architecture prompt; weights drive priority, "because" drives philosophy.
@@ -555,6 +668,10 @@ export const ProductStateSchema = z.object({
   // the schema. Marked passthrough so Phase 1 can hydrate from existing
   // intakeAnswers/minimumDetails without losing keys we don't yet model.
   workingMemory: z.record(z.string(), z.any()).default({}),
+  // In-progress agent-system harness captured by adaptive intake. Final specs
+  // project this into Spec.agentSystem when the product is an agent, plugin, or
+  // tool-using AI workflow.
+  agentProfile: AgentSystemSchema.optional(),
 });
 
 export const NonGoalSchema = z.object({
@@ -594,12 +711,14 @@ export type OpenQuestion = z.infer<typeof OpenQuestionSchema>;
 //   ios           → Apple iOS native (XCTest or Swift Testing).
 //   macos         → Apple macOS native (XCTest or Swift Testing).
 //   claude-plugin → Claude Code plugin (plugin-builder validators reference manifest/skill/hook/command schemas).
+//   agent-system  → Tool-using agent, workflow agent, or multi-agent harness.
 export const PlatformTargetSchema = z.enum([
   "web",
   "vite-spa",
   "ios",
   "macos",
   "claude-plugin",
+  "agent-system",
 ]);
 
 // Spec — the source-of-truth structured document. Doc generation emits this
@@ -625,6 +744,7 @@ export const SpecSchema = z.object({
   assumptions: z.array(AssumptionSchema).default([]),
   risks: z.array(RiskSchema).default([]),
   nonGoals: z.array(NonGoalSchema).default([]),
+  agentSystem: AgentSystemSchema.optional(),
 });
 
 // LintIssue — Phase 3 emits a list of these from spec-linter.ts. Severity ladder:
@@ -641,7 +761,7 @@ export const LintIssueSchema = z.object({
     kind: z.enum([
       "need", "feature", "persona", "scenario", "uxflow", "screen",
       "datapoint", "integration", "api", "test", "adr", "assumption",
-      "risk", "non_goal", "stance",
+      "risk", "non_goal", "stance", "agent",
     ]),
     id: IdSchema,
   })).default([]),
@@ -673,6 +793,17 @@ export type Test = z.infer<typeof TestSchema>;
 export type ADR = z.infer<typeof ADRSchema>;
 export type Assumption = z.infer<typeof AssumptionSchema>;
 export type Risk = z.infer<typeof RiskSchema>;
+export type AgentArchitecturePattern = z.infer<typeof AgentArchitecturePatternSchema>;
+export type AgentAutonomyLevel = z.infer<typeof AgentAutonomyLevelSchema>;
+export type AgentBuilderScale = z.infer<typeof AgentBuilderScaleSchema>;
+export type AgentToolPermissionTier = z.infer<typeof AgentToolPermissionTierSchema>;
+export type AgentToolContract = z.infer<typeof AgentToolContractSchema>;
+export type AgentModelRoute = z.infer<typeof AgentModelRouteSchema>;
+export type AgentGuardrail = z.infer<typeof AgentGuardrailSchema>;
+export type AgentEvaluation = z.infer<typeof AgentEvaluationSchema>;
+export type AgentResearchProtocol = z.infer<typeof AgentResearchProtocolSchema>;
+export type AgentUiProtocol = z.infer<typeof AgentUiProtocolSchema>;
+export type AgentSystem = z.infer<typeof AgentSystemSchema>;
 export type StanceBecauseClause = z.infer<typeof StanceBecauseClauseSchema>;
 export type PivotLogEntry = z.infer<typeof PivotLogEntrySchema>;
 export type TradeoffWeights = z.infer<typeof TradeoffWeightsSchema>;

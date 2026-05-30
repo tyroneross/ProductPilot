@@ -51,6 +51,50 @@ describe("SpecSchema", () => {
     expect(parsed.dataPoints[0].pii).toBe(true);
     expect(parsed.dataPoints[0].handlingNote).toContain("Hashed");
   });
+
+  it("accepts an agent-system spec with tool contracts, guardrails, and evals", () => {
+    const parsed = SpecSchema.parse({
+      id: "spec-agent",
+      productName: "Research Agent",
+      productDescription: "A source-backed research assistant.",
+      platformTarget: "agent-system",
+      agentSystem: {
+        mission: "Draft source-backed recommendations.",
+        builderScale: "agent",
+        architecturePattern: "single-agent",
+        autonomyLevel: "human-in-loop",
+        stateOwner: "Project workspace",
+        stopCondition: "Every claim has evidence or an uncertainty label.",
+        toolContracts: [
+          {
+            id: "tool-search",
+            name: "Source search",
+            purpose: "Read external sources.",
+            permissionTier: "T2",
+          },
+        ],
+        guardrails: [
+          {
+            id: "guardrail-citation",
+            trigger: "Factual claim",
+            check: "Claim has source evidence.",
+            action: "Cite source or mark uncertain.",
+          },
+        ],
+        evaluations: [
+          {
+            id: "eval-citation",
+            name: "Citation coverage",
+            metric: "All factual claims have citations.",
+            blocking: true,
+          },
+        ],
+      },
+    });
+    expect(parsed.platformTarget).toBe("agent-system");
+    expect(parsed.agentSystem?.toolContracts[0].permissionTier).toBe("T2");
+    expect(parsed.agentSystem?.guardrails[0].severity).toBe("warn");
+  });
 });
 
 describe("ProductStateSchema", () => {
@@ -75,6 +119,23 @@ describe("ProductStateSchema", () => {
     });
     expect(parsed.stanceBecauseClauses).toHaveLength(1);
     expect(parsed.stanceBecauseClauses[0].category).toBe("privacy_data");
+  });
+
+  it("accepts an in-progress agent profile", () => {
+    const parsed = ProductStateSchema.parse({
+      agentProfile: {
+        mission: "Review user research and propose next questions.",
+        builderScale: "skill",
+        autonomyLevel: "draft-only",
+        uiProtocol: {
+          archetype: "data-research-tool",
+          userResearchQuestions: ["Which respondent segment is underrepresented?"],
+        },
+      },
+    });
+    expect(parsed.agentProfile?.mission).toContain("Review user research");
+    expect(parsed.agentProfile?.builderScale).toBe("skill");
+    expect(parsed.agentProfile?.uiProtocol?.archetype).toBe("data-research-tool");
   });
 
   it("rejects an unknown stance category", () => {

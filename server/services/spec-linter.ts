@@ -18,6 +18,7 @@
  *     web | vite-spa  → /vitest|jest|playwright/i
  *     ios | macos     → /xctest|swift testing/i
  *     claude-plugin   → /plugin-builder|manifest-validator|skill-validator|hook-validator|command-validator/i
+ *     agent-system    → /eval|golden task|fixture|vitest|pytest|playwright/i
  *
  * Severity ladder: `block` > `warn` > `info`. Only `block` gates export.
  *
@@ -184,6 +185,97 @@ const PLATFORM_RULES: Record<PlatformTarget, PlatformRules> = {
             refs: [{ kind: "test", id: test.id }],
           }));
         }
+      }
+    },
+  },
+  "agent-system": {
+    testFrameworkPattern: /eval|golden\s*task|fixture|vitest|pytest|playwright/i,
+    expectedFrameworks: "golden-task/eval fixtures, Vitest, Pytest, or Playwright",
+    extras: (spec, push) => {
+      const agent = spec.agentSystem;
+      const agentRef = [{ kind: "agent" as const, id: "agent-system" }];
+      if (!agent) {
+        push(makeIssue({
+          rule: "agent_system.contract_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "agent-system platformTarget requires spec.agentSystem with mission, autonomy, tool contracts, guardrails, and evals.",
+          refs: agentRef,
+        }));
+        return;
+      }
+      if (!agent.builderScale) {
+        push(makeIssue({
+          rule: "agent_system.builder_scale_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system should classify build scale as skill, plugin, agent, or human workflow before adding runtime complexity.",
+          refs: agentRef,
+        }));
+      }
+      if (!agent.architecturePattern || !agent.autonomyLevel || !agent.stopCondition) {
+        push(makeIssue({
+          rule: "agent_system.topology_incomplete",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system should declare architecturePattern, autonomyLevel, and stopCondition before handoff.",
+          refs: agentRef,
+        }));
+      }
+      if (agent.toolContracts.length === 0) {
+        push(makeIssue({
+          rule: "agent_system.tool_contracts_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system has no toolContracts[]. Each tool needs purpose, permission tier, side effects, approval, audit, and failure behavior.",
+          refs: agentRef,
+        }));
+      }
+      for (const tool of agent.toolContracts) {
+        if ((tool.permissionTier === "T4" || tool.permissionTier === "T5") && !tool.requiresHumanApproval) {
+          push(makeIssue({
+            rule: "agent_system.high_impact_tool_requires_approval",
+            severity: "warn",
+            waivable: true,
+            message:
+              `Tool ${tool.id} (${tool.name}) is ${tool.permissionTier} but requiresHumanApproval=false. External communication, production, destructive, or spending actions need approval.`,
+            refs: agentRef,
+          }));
+        }
+      }
+      if (!agent.memoryPolicy && !agent.researchProtocol?.sourcePolicy) {
+        push(makeIssue({
+          rule: "agent_system.memory_source_policy_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system should declare memoryPolicy or researchProtocol.sourcePolicy so retention, provenance, and uncertainty are explicit.",
+          refs: agentRef,
+        }));
+      }
+      if (agent.guardrails.length === 0) {
+        push(makeIssue({
+          rule: "agent_system.guardrails_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system has no guardrails[]. Add prompt-injection, sensitive-data, excessive-agency, and tool-side-effect controls.",
+          refs: agentRef,
+        }));
+      }
+      if (agent.evaluations.length === 0) {
+        push(makeIssue({
+          rule: "agent_system.evals_missing",
+          severity: "warn",
+          waivable: true,
+          message:
+            "Agent system has no evaluations[]. Add golden tasks or safety scorecards before coding handoff.",
+          refs: agentRef,
+        }));
       }
     },
   },
@@ -537,7 +629,7 @@ function deterministicCheck(input: LintInput): LintIssue[] {
 const ALLOWED_LLM_KINDS = new Set([
   "need", "feature", "persona", "scenario", "uxflow", "screen",
   "datapoint", "integration", "api", "test", "adr", "assumption",
-  "risk", "non_goal", "stance",
+  "risk", "non_goal", "stance", "agent",
 ]);
 
 const ALLOWED_LLM_CATEGORIES = new Set(["ambiguous_language", "unresolved_contradiction"]);

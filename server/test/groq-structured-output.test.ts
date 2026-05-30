@@ -88,7 +88,7 @@ const SCHEMAS: SchemaCase[] = [
     systemPrompt: [
       "You generate ProductPilot Spec JSON. Reply with ONLY a single valid JSON object.",
       "The object MUST include: id (string), productName (string), productDescription (string),",
-      "platformTarget (one of: web, vite-spa, ios, macos, claude-plugin),",
+      "platformTarget (one of: web, vite-spa, ios, macos, claude-plugin, agent-system),",
       "and arrays for personas, scenarios, needs, features, uxFlows, screens, dataPoints,",
       "integrations, apiContracts, tests, adrs, assumptions, risks, nonGoals.",
       "Empty arrays are allowed. No markdown fences. No commentary.",
@@ -138,7 +138,7 @@ const SCHEMAS: SchemaCase[] = [
       "You produce a JSON array of LintIssue objects (possibly empty). Each entry has:",
       "id (string), rule (string), severity (one of: block, warn, info), waivable (boolean),",
       "message (string), refs (array of {kind, id} with kind in: need, feature, persona,",
-      "scenario, uxflow, screen, datapoint, integration, api, test, adr, assumption, risk, non_goal, stance).",
+      "scenario, uxflow, screen, datapoint, integration, api, test, adr, assumption, risk, non_goal, stance, agent).",
       "Reply with ONLY the JSON array. No markdown fences. No commentary.",
     ].join(" "),
     userMessage: JSON.stringify({
@@ -158,7 +158,7 @@ const SCHEMAS: SchemaCase[] = [
     model: "llama-3.1-8b-instant",
     systemPrompt: [
       "You pick exactly one intake method. Reply with ONLY a single JSON object of shape:",
-      '{"method": "jtbd" | "qfd" | "pugh", "reason": "<one sentence>"}',
+      '{"method": "jtbd" | "qfd" | "pugh" | "agent", "reason": "<one sentence>"}',
       "No markdown fences. No commentary.",
     ].join(" "),
     userMessage: JSON.stringify({
@@ -170,7 +170,7 @@ const SCHEMAS: SchemaCase[] = [
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
       const obj = parsed as Record<string, unknown>;
       const validMethod =
-        typeof obj.method === "string" && ["jtbd", "qfd", "pugh"].includes(obj.method);
+        typeof obj.method === "string" && ["jtbd", "qfd", "pugh", "agent"].includes(obj.method);
       const validReason = typeof obj.reason === "string" && obj.reason.length > 0;
       return validMethod && validReason;
     },

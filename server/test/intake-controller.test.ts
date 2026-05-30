@@ -188,6 +188,25 @@ describe("deterministicMethodRoute", () => {
     });
     expect(method).toBe("qfd");
   });
+
+  it("returns 'agent' when the highest candidate is an agent-system gap", () => {
+    const method = deterministicMethodRoute({
+      productState: baseState,
+      spec: fullSpec(),
+      candidates: [{ topic: "agent_tool_permissions" }],
+    });
+    expect(method).toBe("agent");
+  });
+
+  it("flags agent_delivery_scale for agent-like products without build scale", () => {
+    const spec = SpecSchema.parse({
+      ...fullSpec(),
+      productDescription: "A product research agent that can inspect sources and draft recommendations.",
+      platformTarget: "agent-system",
+    });
+    const out = deriveCandidateUnknowns({ productState: baseState, spec });
+    expect(out.some((c) => c.topic === "agent_delivery_scale")).toBe(true);
+  });
 });
 
 describe("nextStep — golden flows", () => {
@@ -286,6 +305,39 @@ describe("nextStep — golden flows", () => {
     if (action.action !== "ask") return;
     expect(action.method).toBe("qfd");
     expect(action.question.chips).toHaveLength(4);
+  });
+
+  it("AGENT: agent-like spec → ASK with method=agent", async () => {
+    const agentSpec = SpecSchema.parse({
+      ...fullSpec(),
+      productDescription: "A research agent that uses tools to inspect sources and draft recommendations.",
+      platformTarget: "agent-system",
+    });
+    generateStructuredOutputMock.mockReset();
+    generateStructuredOutputMock
+      .mockResolvedValueOnce([
+        { topic: "agent_tool_permissions", evidence: 0, reversibility: 1, risk: 5, blocking: 14, decision: "ask", reason: "tool permissions missing" },
+      ])
+      .mockResolvedValueOnce({
+        method: "agent",
+        question: "Which tools can the research agent use, and what side effects require approval?",
+        chips: ["Read/search only", "Write drafts with audit log", "Ask before external actions"],
+        intent: "tool contracts need permission tiers",
+        rule_fired: "agent_tool_permissions",
+        topic: "agent_tool_permissions",
+        extracts_into: { spec_path: "agentSystem.toolContracts", kind: "agent_contract", merge_strategy: "merge_agent_profile" },
+      });
+
+    const action = await nextStep({
+      productState: baseState,
+      spec: agentSpec,
+      history: [],
+    });
+
+    expect(action.action).toBe("ask");
+    if (action.action !== "ask") return;
+    expect(action.method).toBe("agent");
+    expect(action.question.extracts_into.spec_path).toBe("agentSystem.toolContracts");
   });
 
   it("ALLOCATE_TRADEOFFS: empty candidates list, stance set, but tradeoffWeights still missing (Phase 4 gate)", async () => {

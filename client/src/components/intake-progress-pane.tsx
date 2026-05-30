@@ -35,9 +35,9 @@ function specPathToSection(specPath: string | null | undefined, topic: string | 
   const haystack = `${specPath ?? ""} ${topic ?? ""}`.toLowerCase();
   if (/persona|trigger|jobs|jtbd|icp|audience/.test(haystack)) return "north-star";
   if (/scenario|need|feature|jtbd/.test(haystack)) return "north-star";
-  if (/screen|uxflow|wireframe|primary.?action|states/.test(haystack)) return "ux";
-  if (/datapoint|integration|api|architecture|persistence|tenancy|auth/.test(haystack)) return "architecture";
-  if (/coding|prompt|test|deploy/.test(haystack)) return "coding-prompts";
+  if (/coding|prompt|test|deploy|agent_evaluation|evaluation|eval|handoff/.test(haystack)) return "coding-prompts";
+  if (/screen|uxflow|wireframe|primary.?action|states|ui.?protocol|uiprotocol|ui.?archetype|agent_ui|research_protocol/.test(haystack)) return "ux";
+  if (/datapoint|integration|api|adr|pugh|decision|cites|architecture|persistence|tenancy|auth|agent_system|agentsystem|agent_delivery|builder.?scale|agent_autonomy|agent_tool|agent_memory|agent_flow|agent_guardrail|toolcontract|toolcontracts|memorypolicy|guardrail|topology/.test(haystack)) return "architecture";
   if (/devguide|dev-guide|delivery|risk/.test(haystack)) return "dev-guide";
   return "brief";
 }

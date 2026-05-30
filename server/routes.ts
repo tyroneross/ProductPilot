@@ -1324,7 +1324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = z.object({
         questionText: z.string().min(1).max(2000),
         answer: z.string().min(1).max(8000),
-        method: z.enum(["jtbd", "qfd", "pugh"]).nullable().optional(),
+        method: z.enum(["jtbd", "qfd", "pugh", "agent"]).nullable().optional(),
         questionId: z.string().nullable().optional(),
         metadata: z.record(z.string(), z.any()).optional(),
       }).parse(req.body);
