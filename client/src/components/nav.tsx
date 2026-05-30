@@ -156,6 +156,7 @@ export default function Nav() {
             <button
               aria-label="Open menu"
               aria-haspopup="true"
+              className="focus-ring"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -274,9 +275,9 @@ export default function Nav() {
                     fontWeight: 500,
                     color: "#c8b4a0",
                     cursor: "pointer",
-                    outline: "none",
+                    /* T1-6: outline:none removed; .focus-ring restores :focus-visible on keyboard nav. */
                   }}
-                  className="nav-item"
+                  className="nav-item focus-ring"
                 >
                   <FolderKanban size={15} />
                   Projects
@@ -294,9 +295,9 @@ export default function Nav() {
                     fontWeight: 500,
                     color: "#c8b4a0",
                     cursor: "pointer",
-                    outline: "none",
+                    /* T1-6: outline:none removed; .focus-ring restores :focus-visible on keyboard nav. */
                   }}
-                  className="nav-item"
+                  className="nav-item focus-ring"
                 >
                   <Settings size={15} />
                   Settings
@@ -317,9 +318,9 @@ export default function Nav() {
                     fontWeight: 600,
                     color: "#f0b65e",
                     cursor: "pointer",
-                    outline: "none",
+                    /* T1-6: outline:none removed; .focus-ring restores :focus-visible on keyboard nav. */
                   }}
-                  className="nav-item"
+                  className="nav-item focus-ring"
                 >
                   <Plus size={15} />
                   Start Building
@@ -337,9 +338,9 @@ export default function Nav() {
                     fontWeight: 500,
                     color: "#c8b4a0",
                     cursor: "pointer",
-                    outline: "none",
+                    /* T1-6: outline:none removed; .focus-ring restores :focus-visible on keyboard nav. */
                   }}
-                  className="nav-item"
+                  className="nav-item focus-ring"
                 >
                   <FolderKanban size={15} />
                   Projects

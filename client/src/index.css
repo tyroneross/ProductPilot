@@ -96,6 +96,19 @@
     transition: stroke-dashoffset 0.3s ease;
   }
 
+  /*
+   * Focus-visible ring (T1-6 — WCAG 2.4.7).
+   * Apply via `className="focus-ring"` on any element that has `outline:none`
+   * inline (or whose default outline is suppressed by a UI library). The ring
+   * only shows on keyboard focus, never on mouse-click — :focus-visible is
+   * the right primitive.
+   */
+  .focus-ring:focus-visible {
+    outline: 2px solid rgba(240, 182, 94, 0.6);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   /* Carve-outs: progress / loading indicators stay because they signal active work. */
   .motion-essential,
   .progress-ring,

@@ -138,6 +138,7 @@ export default function OpenQuestionRow({ projectId, question, onResolved }: Pro
             placeholder="Type your answer…"
             data-testid={`open-question-input-${question.topicId}`}
             disabled={submitting}
+            className="focus-ring"
             style={{
               flex: 1,
               fontFamily: "inherit",
@@ -148,7 +149,7 @@ export default function OpenQuestionRow({ projectId, question, onResolved }: Pro
               border: `1px solid ${border}`,
               background: "#110f0d",
               color: textPrimary,
-              outline: "none",
+              // T1-6: outline:none removed; .focus-ring restores :focus-visible.
             }}
           />
           <button

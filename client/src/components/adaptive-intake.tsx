@@ -353,6 +353,7 @@ export function AdaptiveIntake({
         onChange={(e) => setDraftAnswer(e.target.value)}
         placeholder="Or write your own answer…"
         rows={3}
+        className="focus-ring"
         style={textareaStyle}
       />
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
@@ -611,12 +612,16 @@ function TradeoffAllocator({
 
 function ProgressBadge({ step, remaining, method }: { step: number; remaining: number; method: IntakeMethod }) {
   const total = step + Math.max(0, remaining - 1);
+  // T1-5: drop the user-facing "method: JTBD" jargon. Keep `method` as a data-*
+  // attribute for telemetry / e2e probes (callers still pass it; tests still
+  // assert on it via querySelector) — only the visible badge is plain progress.
   return (
     <div
       data-testid="adaptive-intake-progress"
+      data-method={method}
       style={{ color: "#a89a8c", fontSize: "11px", marginBottom: "10px", letterSpacing: "0.02em" }}
     >
-      Question {step} of ~{Math.max(total, step)} · method: {method.toUpperCase()}
+      Question {step} of ~{Math.max(total, step)}
     </div>
   );
 }
@@ -654,7 +659,8 @@ const textareaStyle: React.CSSProperties = {
   color: "#f5f0eb",
   fontFamily: "inherit",
   fontSize: "13px",
-  outline: "none",
+  // T1-6: outline:none removed; .focus-ring class on the <textarea> restores
+  // a keyboard-only :focus-visible ring (WCAG 2.4.7).
   resize: "vertical",
 };
 
