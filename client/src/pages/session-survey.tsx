@@ -386,11 +386,34 @@ export default function SessionSurveyPage() {
     },
   });
 
+  // T2-5: queue submissions that arrive before prdStage has resolved. The
+  // first AI question is rendered from client state immediately (see
+  // getFirstQuestion in renderDiscoveryPhase), so the user can read + start
+  // typing while stages are still loading; the send fires the moment
+  // prdStage.id is available.
+  const pendingSendRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prdStage?.id && pendingSendRef.current) {
+      const queued = pendingSendRef.current;
+      pendingSendRef.current = null;
+      void sendMessageStream(queued);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prdStage?.id]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputValue.trim() && !isStreaming) {
-      void sendMessageStream(inputValue.trim());
+    const trimmed = inputValue.trim();
+    if (!trimmed || isStreaming) return;
+    if (!prdStage) {
+      // Optimistic: queue and clear the input so the user gets immediate
+      // feedback that we accepted their message.
+      pendingSendRef.current = trimmed;
+      setInputValue("");
+      return;
     }
+    void sendMessageStream(trimmed);
   };
 
   const handleGenerateSurvey = () => {
@@ -968,21 +991,24 @@ export default function SessionSurveyPage() {
         )}
 
         <form onSubmit={handleSubmit} className="flex space-x-2 md:space-x-3">
+          {/* T2-5: input stays enabled even before prdStage resolves. The
+              submit handler queues the message and flushes when prdStage
+              arrives, so the first turn never blocks on a stages cold-start. */}
           <Input
             type="text"
-            placeholder="Type your answer..."
+            placeholder={prdStage ? "Type your answer..." : "Type your answer (queued until ready)…"}
             aria-label="Your answer"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             className="flex-1 min-h-[44px] text-base"
-            disabled={isStreaming || !prdStage}
+            disabled={isStreaming}
             data-testid="input-discovery-message"
             autoComplete="off"
           />
           <Button
             type="submit"
             className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
-            disabled={!inputValue.trim() || isStreaming || !prdStage}
+            disabled={!inputValue.trim() || isStreaming}
             data-testid="button-send-discovery-message"
           >
             <Send className="w-4 h-4" />
