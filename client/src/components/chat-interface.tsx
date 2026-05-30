@@ -91,7 +91,17 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
 
   return (
     <>
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-6 space-y-4">
+      {/* T2-6: live region for SR users. role=log + aria-live=polite means
+          screen readers announce new messages as they're appended, without
+          interrupting the user's current focus. aria-relevant=additions keeps
+          edits to existing nodes from re-announcing. */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto p-4 pb-6 space-y-4"
+        role="log"
+        aria-label="Conversation"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
         {messages.length === 0 ? (
           <div className="flex items-start space-x-3">
             <div className="w-8 h-8 bg-accent rounded-full flex items-center justify-center text-surface-primary text-small font-medium">
@@ -144,6 +154,13 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
                     color: message.role === "user" ? "#1a1714" : "#f5f0eb",
                   }}
                 >
+                  {/* T2-6: sr-only sender label so screen readers announce
+                      "You: ..." or "AI assistant: ..." instead of just the
+                      raw text. The visible avatar already conveys sender to
+                      sighted users; this restores parity for SR users. */}
+                  <span className="sr-only">
+                    {message.role === "user" ? "You" : "AI assistant"}:{" "}
+                  </span>
                   {htmlContent ? (
                     <div className="space-y-3">
                       <p className="text-small whitespace-pre-wrap">{message.content.replace(/```html\n[\s\S]*?\n```/, "[See wireframe preview below]")}</p>

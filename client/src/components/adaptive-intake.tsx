@@ -441,8 +441,14 @@ export function AdaptiveIntake({
   return (
     <div data-testid="adaptive-intake-ask" style={containerStyle}>
       <ProgressBadge step={step + 1} remaining={remaining} method={method} />
+      {/* T2-6: announce the new question to SR users after each answer.
+          aria-live=polite waits for the user to pause; aria-atomic=true reads
+          the whole question on each change (otherwise SR reads only the diff,
+          which can be incoherent across question rewrites). */}
       <p
         data-testid="adaptive-intake-question"
+        aria-live="polite"
+        aria-atomic="true"
         style={{ color: "#f5f0eb", fontSize: "16px", fontWeight: 500, marginBottom: "12px", lineHeight: 1.45 }}
       >
         {question.text}
