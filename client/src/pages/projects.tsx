@@ -7,6 +7,16 @@ import { apiRequest } from "@/lib/queryClient";
 import { displayProjectName } from "@/lib/project-name";
 import Nav from "@/components/nav";
 import type { Project } from "@shared/schema";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Warm Craft tokens
 const bg = "#110f0d", surface = "#1a1714", textPrimary = "#f5f0eb";
@@ -76,6 +86,10 @@ export default function ProjectsPage() {
   const queryClient = useQueryClient();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // T1-2: capture the project the user clicked Delete on, then surface a
+  // confirm dialog. Without this guard one misclick destroys all generated
+  // documents — Radix AlertDialog gives us focus trap + ESC + Cancel for free.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
   const [renameSavingId, setRenameSavingId] = useState<string | null>(null);
@@ -483,7 +497,14 @@ export default function ProjectsPage() {
                         </button>
                         <button
                           className="delete-btn transition-colors duration-150"
-                          onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // T1-2: open the confirmation dialog instead of
+                            // deleting immediately. The dialog's Action calls
+                            // handleDelete(); Cancel/ESC closes it as a no-op.
+                            setPendingDeleteId(project.id);
+                            setOpenMenuId(null);
+                          }}
                           disabled={deletingId === project.id}
                           style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e57373", textAlign: "left" }}
                         >
@@ -499,6 +520,41 @@ export default function ProjectsPage() {
           </div>
         )}
       </main>
+
+      {/* T1-2: Delete confirmation. Controlled via pendingDeleteId — open
+          when truthy, closes by clearing. The Action triggers the existing
+          handleDelete; Cancel/ESC/overlay-click are all no-ops. */}
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const p = projects.find((x) => x.id === pendingDeleteId);
+                const name = p ? displayProjectName(p) : "this project";
+                return `"${name}" and all of its generated documents will be permanently removed. This can't be undone.`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-project">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="button-confirm-delete-project"
+              style={{ background: "#e57373", color: "#110f0d" }}
+              onClick={() => {
+                const id = pendingDeleteId;
+                setPendingDeleteId(null);
+                if (id) void handleDelete(id);
+              }}
+            >
+              Delete project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
