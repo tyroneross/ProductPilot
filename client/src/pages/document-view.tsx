@@ -47,7 +47,7 @@ import Breadcrumb from "@/components/breadcrumb";
 import { displayProjectName } from "@/lib/project-name";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Info } from "lucide-react";
+import { ArrowLeft, RefreshCw, FileText, Code, Layout, ListTodo, Palette, Copy, Check, Download, ChevronLeft, ChevronRight, AlertTriangle, ShieldAlert, Info, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -172,6 +172,10 @@ export default function DocumentViewPage() {
   const [isCopyingHandoff, setIsCopyingHandoff] = useState(false);
   const [isDownloadingDoc, setIsDownloadingDoc] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  // T2-3: overflow menu for History / Export JSON / Download all — moves
+  // those three off the primary action bar so the eye lands on Copy /
+  // Download .md / Copy-for-Claude-Code / Regenerate first.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<
     Array<{ version: number; createdAt: string; charCount: number }> | null
@@ -742,7 +746,28 @@ export default function DocumentViewPage() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "#110f0d", color: "#f5f0eb", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* T2-3: bump touch targets to 44px on phones (WCAG 2.5.5). */
+        @media (max-width: 640px) {
+          .action-button { min-height: 44px !important; }
+        }
+        .more-menu {
+          position: absolute;
+          top: calc(100% + 4px);
+          right: 0;
+          z-index: 30;
+          background: #1a1714;
+          border: 1px solid rgba(200,180,160,0.18);
+          border-radius: 8px;
+          padding: 4px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          min-width: 180px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+      `}</style>
       <Nav />
 
       {/* Sticky header */}
@@ -834,20 +859,108 @@ export default function DocumentViewPage() {
             </div>
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {/* T2-3: tiered action bar. Primary = the one action this view
+              optimizes for (handoff if the platform supports it; otherwise
+              Continue intake / Regenerate). Secondary = peer actions (Copy,
+              Download .md). Overflow (More) = History, Export JSON,
+              Download all — actions the user rarely needs on the hot path. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <ActionButton
               onClick={handleCopy}
+              variant="secondary"
               data-testid="button-copy-document"
               aria-label={copied ? "Copied" : "Copy document"}
             >
               {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
               <span>{copied ? "Copied" : "Copy"}</span>
             </ActionButton>
-            {isHandoffPlatform && (
+            <ActionButton
+              onClick={handleDownloadDoc}
+              disabled={isDownloadingDoc}
+              variant="secondary"
+              data-testid="button-download-doc"
+              aria-label="Download this document as markdown"
+            >
+              <Download style={{ width: 13, height: 13 }} />
+              <span>{isDownloadingDoc ? "Saving…" : "Download .md"}</span>
+            </ActionButton>
+
+            {/* Overflow dropdown — three actions tucked behind one button to
+                cut Hick's-law load from 7 visible affordances down to 3. */}
+            <div style={{ position: "relative" }}>
+              <ActionButton
+                onClick={() => setMoreOpen((v) => !v)}
+                variant="secondary"
+                data-testid="button-more-actions"
+                aria-label="More document actions"
+              >
+                <MoreHorizontal style={{ width: 13, height: 13 }} />
+                <span>More</span>
+              </ActionButton>
+              {moreOpen && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    onClick={() => setMoreOpen(false)}
+                    aria-hidden="true"
+                  />
+                  <div className="more-menu" role="menu">
+                    <ActionButton
+                      onClick={() => { setMoreOpen(false); openHistory(); }}
+                      variant="ghost"
+                      data-testid="button-version-history"
+                      aria-label="View version history"
+                    >
+                      <ListTodo style={{ width: 13, height: 13 }} />
+                      <span>History</span>
+                    </ActionButton>
+                    <ActionButton
+                      onClick={() => { setMoreOpen(false); handleDownloadAll(); }}
+                      disabled={isDownloadingAll}
+                      variant="ghost"
+                      data-testid="button-download-all-md"
+                      aria-label="Download all documents as one markdown file"
+                    >
+                      <Download style={{ width: 13, height: 13 }} />
+                      <span>{isDownloadingAll ? "Saving…" : "Download all"}</span>
+                    </ActionButton>
+                    <ActionButton
+                      onClick={() => { setMoreOpen(false); handleExport(); }}
+                      disabled={isExporting}
+                      variant="ghost"
+                      data-testid="button-export-all"
+                      aria-label="Export all documents as JSON"
+                    >
+                      <Download style={{ width: 13, height: 13 }} />
+                      <span>{isExporting ? "Exporting…" : "Export JSON"}</span>
+                    </ActionButton>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Primary action — exactly one. Selection order:
+                  1. Adaptive intake incomplete → Continue intake (must finish
+                     before handoff makes sense).
+                  2. Handoff platform → Copy for Claude Code (the whole point
+                     of generating these docs).
+                  3. Otherwise → Regenerate. */}
+            {adaptiveIntakeIncomplete && !messagesFetching ? (
+              <ActionButton
+                onClick={() => setLocation(continueIntakeHref)}
+                disabled={false}
+                variant="primary"
+                data-testid="button-continue-intake"
+                aria-label="Continue adaptive intake"
+              >
+                <ArrowLeft style={{ width: 13, height: 13 }} />
+                <span>Continue intake</span>
+              </ActionButton>
+            ) : isHandoffPlatform ? (
               <ActionButton
                 onClick={handleCopyHandoff}
                 disabled={handoffDisabled}
+                variant="primary"
                 data-testid="button-copy-handoff"
                 aria-label={isCopyingHandoff ? "Preparing handoff…" : "Copy for Claude Code"}
               >
@@ -856,57 +969,11 @@ export default function DocumentViewPage() {
                   {isCopyingHandoff ? "Copying…" : handoffCopied ? "Copied" : "Copy for Claude Code"}
                 </span>
               </ActionButton>
-            )}
-            <ActionButton
-              onClick={handleDownloadDoc}
-              disabled={isDownloadingDoc}
-              data-testid="button-download-doc"
-              aria-label="Download this document as markdown"
-            >
-              <Download style={{ width: 13, height: 13 }} />
-              <span>{isDownloadingDoc ? "Saving…" : "Download .md"}</span>
-            </ActionButton>
-            <ActionButton
-              onClick={handleDownloadAll}
-              disabled={isDownloadingAll}
-              data-testid="button-download-all-md"
-              aria-label="Download all documents as one markdown file"
-            >
-              <Download style={{ width: 13, height: 13 }} />
-              <span>{isDownloadingAll ? "Saving…" : "Download all"}</span>
-            </ActionButton>
-            <ActionButton
-              onClick={openHistory}
-              disabled={false}
-              data-testid="button-version-history"
-              aria-label="View version history"
-            >
-              <ListTodo style={{ width: 13, height: 13 }} />
-              <span>History</span>
-            </ActionButton>
-            <ActionButton
-              onClick={handleExport}
-              disabled={isExporting}
-              data-testid="button-export-all"
-              aria-label="Export all documents as JSON"
-            >
-              <Download style={{ width: 13, height: 13 }} />
-              <span>{isExporting ? "Exporting…" : "Export JSON"}</span>
-            </ActionButton>
-            {adaptiveIntakeIncomplete && !messagesFetching ? (
-              <ActionButton
-                onClick={() => setLocation(continueIntakeHref)}
-                disabled={false}
-                data-testid="button-continue-intake"
-                aria-label="Continue adaptive intake"
-              >
-                <ArrowLeft style={{ width: 13, height: 13 }} />
-                <span>Continue intake</span>
-              </ActionButton>
             ) : (
               <ActionButton
                 onClick={() => setShowRegenerateDialog(true)}
                 disabled={isRegenerating}
+                variant="primary"
                 data-testid="button-regenerate-document"
                 aria-label="Regenerate document"
               >
@@ -1521,52 +1588,90 @@ export default function DocumentViewPage() {
   );
 }
 
-// Small inline action button component — keeps header DRY
+// Small inline action button component — keeps header DRY.
+//
+// T2-3: three tiers establish visual hierarchy (Fitts × signal-to-noise).
+//   primary   — filled accent. Used for the single most-important action
+//               (handoff > regenerate) so the eye lands on it first.
+//   secondary — outline (the previous default). Useful peer actions: Copy,
+//               Download .md.
+//   ghost     — borderless menu item. Used inside the overflow dropdown.
+// Min-height: 36px desktop, 44px mobile (Fitts / WCAG touch-target).
 function ActionButton({
   children,
   onClick,
   disabled = false,
+  variant = "secondary",
   "aria-label": ariaLabel,
   "data-testid": testId,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  variant?: "primary" | "secondary" | "ghost";
   "aria-label"?: string;
   "data-testid"?: string;
 }) {
+  const isPrimary = variant === "primary";
+  const isGhost = variant === "ghost";
+
+  const baseBg = isPrimary ? "#f0b65e" : "transparent";
+  const baseColor = isPrimary ? "#15110d" : disabled ? "#3d3228" : "#a89a8c";
+  const baseBorder = isGhost
+    ? "1px solid transparent"
+    : isPrimary
+      ? "1px solid #f0b65e"
+      : "1px solid rgba(200,180,160,0.12)";
+
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
       data-testid={testId}
-      className="transition-colors duration-150"
+      className="action-button focus-ring transition-colors duration-150"
+      data-variant={variant}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 5,
-        padding: "5px 10px",
-        height: 30,
-        border: "1px solid rgba(200,180,160,0.12)",
-        borderRadius: 5,
-        background: "transparent",
-        color: disabled ? "#3d3228" : "#a89a8c",
+        padding: "0 12px",
+        minHeight: 36,
+        border: baseBorder,
+        borderRadius: 6,
+        background: baseBg,
+        color: baseColor,
         fontFamily: "inherit",
         fontSize: 12,
+        fontWeight: isPrimary ? 600 : 500,
         cursor: disabled ? "not-allowed" : "pointer",
         whiteSpace: "nowrap",
+        opacity: disabled ? 0.5 : 1,
       }}
       onMouseEnter={(e) => {
-        if (!disabled) {
+        if (disabled) return;
+        if (isPrimary) {
+          e.currentTarget.style.background = "#d4a04e";
+        } else {
           e.currentTarget.style.color = "#f5f0eb";
-          e.currentTarget.style.borderColor = "rgba(200,180,160,0.25)";
+          if (!isGhost) {
+            e.currentTarget.style.borderColor = "rgba(200,180,160,0.25)";
+          } else {
+            e.currentTarget.style.background = "rgba(200,180,160,0.06)";
+          }
         }
       }}
       onMouseLeave={(e) => {
-        if (!disabled) {
+        if (disabled) return;
+        if (isPrimary) {
+          e.currentTarget.style.background = "#f0b65e";
+        } else {
           e.currentTarget.style.color = "#a89a8c";
-          e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+          if (!isGhost) {
+            e.currentTarget.style.borderColor = "rgba(200,180,160,0.12)";
+          } else {
+            e.currentTarget.style.background = "transparent";
+          }
         }
       }}
     >
