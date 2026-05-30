@@ -594,6 +594,9 @@ function TradeoffAllocator({
 
   const total = axes.reduce((sum, a) => sum + (values[a] ?? 0), 0);
   const valid = total === 100;
+  // T2-8: live budget. Positive remaining = "you have N points left to
+  // allocate"; negative = "you're N points over — reduce somewhere".
+  const remaining = 100 - total;
 
   function setAxis(axis: TradeoffAxis, raw: string) {
     // Keep entries integer in [0, 100]; reject negative and non-numeric.
@@ -630,13 +633,56 @@ function TradeoffAllocator({
 
   return (
     <div data-testid="adaptive-intake-allocator" style={containerStyle}>
-      <p style={{ color: "#f5f0eb", fontSize: "14px", fontWeight: 500, marginBottom: "6px" }}>
-        Allocate 100 points across the six tradeoffs
-      </p>
+      {/* T2-8: sticky budget header. Stays at the top of the panel as the
+          user adjusts sliders, so they always see how many points are left.
+          aria-live=polite announces the running total to SR users. */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          marginBottom: "10px",
+          gap: 12,
+        }}
+      >
+        <p style={{ color: "#f5f0eb", fontSize: "14px", fontWeight: 500, margin: 0 }}>
+          Allocate 100 points across these tradeoffs
+        </p>
+        <span
+          data-testid="adaptive-intake-allocator-remaining"
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            color: valid ? "#9bd06f" : remaining > 0 ? "#f0b65e" : "#f0a06e",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {valid
+            ? "All 100 allocated ✓"
+            : remaining > 0
+              ? `${remaining} left`
+              : `${Math.abs(remaining)} over`}
+        </span>
+      </div>
       <p style={{ color: "#a89a8c", fontSize: "12px", marginBottom: "14px" }}>
         {reason}
       </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      {/* T2-8: fieldset/legend gives SR users a single "Tradeoff weights, 6
+          sliders" container instead of 6 unrelated number inputs. */}
+      <fieldset
+        style={{
+          border: "none",
+          padding: 0,
+          margin: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        <legend className="sr-only">Tradeoff weights — six sliders, must sum to 100</legend>
         {axes.map((axis) => (
           <div
             key={axis}
@@ -668,6 +714,7 @@ function TradeoffAllocator({
               step={1}
               value={values[axis] ?? 0}
               onChange={(e) => setAxis(axis, e.target.value)}
+              className="focus-ring"
               style={{
                 ...numericInputStyle,
                 width: "56px",
@@ -675,8 +722,10 @@ function TradeoffAllocator({
             />
           </div>
         ))}
-      </div>
+      </fieldset>
 
+      {/* T2-8: keep the explicit total band for clarity on small screens
+          where the header counter may be off-axis from the active slider. */}
       <div
         data-testid="adaptive-intake-allocator-total"
         style={{
@@ -692,10 +741,10 @@ function TradeoffAllocator({
         Total: {total} / 100 {valid ? "✓" : "(must equal 100)"}
       </div>
 
-      <div style={{ marginTop: "16px" }}>
-        <p style={{ color: "#f5f0eb", fontSize: "13px", fontWeight: 500, marginBottom: "8px" }}>
+      <fieldset style={{ border: "none", padding: 0, margin: "16px 0 0 0" }}>
+        <legend style={{ color: "#f5f0eb", fontSize: "13px", fontWeight: 500, padding: 0, marginBottom: "8px" }}>
           Unacceptable tradeoff (the one axis you refuse to compromise)
-        </p>
+        </legend>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
           {axes.map((axis) => {
             const selected = unacceptable === axis;
@@ -713,12 +762,13 @@ function TradeoffAllocator({
             );
           })}
         </div>
-      </div>
+      </fieldset>
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
         <button
           type="button"
           data-testid="adaptive-intake-allocator-submit"
+          className="focus-ring"
           onClick={submit}
           disabled={!valid || submitting}
           style={{
