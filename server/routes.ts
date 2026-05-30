@@ -1075,19 +1075,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const failed = stageResults.filter(r => !r.ok) as Array<{ ok: false; stageId: string; stageTitle: string; error: string }>;
       const succeeded = stageResults.filter(r => r.ok);
 
+      // T1-4: reset progress to 0 on every failed stage so its tab renders
+      // "not ready" rather than carrying a stale percentage from an earlier
+      // pass. Fire-and-forget — a write failure here would only affect the
+      // visible progress bar, not the partial-success response.
+      for (const f of failed) {
+        void storage.updateStage(f.stageId, { progress: 0 })
+          .catch((e) => logger.warn({ err: e, stageId: f.stageId }, "[T1-4] failed to reset stage progress"));
+      }
+
       // All stages failed — surface the first error so the client can show it.
       if (succeeded.length === 0 && failed.length > 0) {
         return res.status(502).json({
           message: `Doc generation failed: ${failed[0].error}`,
-          failed: failed.map(f => ({ stageTitle: f.stageTitle, error: f.error })),
+          failed: failed.map(f => ({ stageId: f.stageId, stageTitle: f.stageTitle, error: f.error })),
         });
       }
 
+      // T1-4: partial success. Surface failures explicitly so the client can
+      // render a persistent warning + per-stage retry instead of a misleading
+      // "all done" toast. `failures[]` carries stageId for retry targeting.
       res.json({
         message: "Documentation generated successfully",
         succeeded: succeeded.length,
         failed: failed.length,
-        ...(failed.length > 0 ? { failures: failed.map(f => ({ stageTitle: f.stageTitle, error: f.error })) } : {}),
+        ...(failed.length > 0
+          ? { failures: failed.map(f => ({ stageId: f.stageId, stageTitle: f.stageTitle, error: f.error })) }
+          : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

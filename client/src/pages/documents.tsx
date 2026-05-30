@@ -47,6 +47,12 @@ export default function DocumentsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [pendingStageId, setPendingStageId] = useState<string | "all" | null>(null);
+  // T1-4: partial-failure banner state. When generate-docs returns
+  // { failed > 0 }, capture each failing stage so we can render a persistent
+  // warning + per-stage Retry. Cleared by retry success or manual dismiss.
+  const [partialFailure, setPartialFailure] = useState<
+    { stageId: string; stageTitle: string; error: string }[] | null
+  >(null);
 
   const { data: project } = useQuery<Project>({
     queryKey: ["/api/projects", projectId],
@@ -124,9 +130,31 @@ export default function DocumentsPage() {
       );
       return res.json();
     },
-    onSuccess: () => {
-      // The 3s stages poll picks up progress once invalidated.
+    // T1-4: inspect the response. The server returns { succeeded, failed,
+    // failures[] } on partial success (200 OK with failed > 0). A naive
+    // success toast misleads — surface a persistent banner instead and let
+    // the user retry the stages that actually failed.
+    onSuccess: (data: { succeeded?: number; failed?: number; failures?: { stageId: string; stageTitle: string; error: string }[] }, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
+      const failed = Array.isArray(data?.failures) ? data.failures : [];
+      if (failed.length > 0) {
+        setPartialFailure(failed);
+        toast({
+          title: `${failed.length} document${failed.length === 1 ? "" : "s"} couldn't be generated`,
+          description: failed.map((f) => f.stageTitle).join(", "),
+          variant: "destructive",
+        });
+      } else {
+        // Full success — if we were retrying a specific stage, clear that
+        // stage from the partial-failure list. Full-all success clears all.
+        if (variables === "all") {
+          setPartialFailure(null);
+        } else if (variables && typeof variables === "object" && "stageId" in variables) {
+          setPartialFailure((prev) =>
+            prev ? prev.filter((f) => f.stageId !== variables.stageId) : null,
+          );
+        }
+      }
     },
     onError: (err: unknown) => {
       const description =
@@ -202,6 +230,93 @@ export default function DocumentsPage() {
               </p>
             )}
           </header>
+
+          {/* T1-4: persistent partial-failure banner. Names every failing
+              document + offers per-stage retry. Never auto-dismisses — only
+              clears when retries succeed or the user clicks Dismiss. */}
+          {partialFailure && partialFailure.length > 0 && (
+            <div
+              role="alert"
+              aria-live="polite"
+              data-testid="docs-partial-failure-banner"
+              style={{
+                marginBottom: "1.5rem",
+                padding: "12px 14px",
+                background: "rgba(229, 115, 115, 0.08)",
+                border: "1px solid rgba(229, 115, 115, 0.4)",
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                <strong style={{ color: "#e57373", fontSize: 13 }}>
+                  {partialFailure.length === 1
+                    ? "1 document didn't generate"
+                    : `${partialFailure.length} documents didn't generate`}
+                </strong>
+                <button
+                  type="button"
+                  onClick={() => setPartialFailure(null)}
+                  className="focus-ring"
+                  data-testid="button-dismiss-partial-failure"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#a89a8c",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+              <p style={{ color: "#a89a8c", fontSize: 12, margin: "0 0 10px 0", lineHeight: 1.5 }}>
+                The other documents are ready. You can hand off as-is or retry the missing ones below.
+              </p>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                {partialFailure.map((f) => (
+                  <li
+                    key={f.stageId}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      fontSize: 12,
+                    }}
+                  >
+                    <span style={{ color: "#f5f0eb", flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 500 }}>{f.stageTitle}</span>
+                      <span style={{ color: "#6b5d52", marginLeft: 8 }}>
+                        {f.error.length > 80 ? `${f.error.slice(0, 80)}…` : f.error}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="focus-ring"
+                      onClick={() => triggerGenerate({ stageId: f.stageId }, f.stageId)}
+                      disabled={generateMutation.isPending && pendingStageId === f.stageId}
+                      data-testid={`button-retry-stage-${f.stageId}`}
+                      style={{
+                        padding: "4px 10px",
+                        background: "transparent",
+                        border: "1px solid rgba(240,182,94,0.4)",
+                        borderRadius: 6,
+                        color: "#f0b65e",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {generateMutation.isPending && pendingStageId === f.stageId ? "Retrying…" : "Retry"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Generation progress — only while generating */}
           {isGenerating && (
