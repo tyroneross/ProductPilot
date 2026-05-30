@@ -32,6 +32,16 @@ const ctaStyle: React.CSSProperties = {
 };
 const ctaClass = "transition-colors duration-150";
 
+// T2-1: route to the right resume point based on surveyPhase. A project
+// stuck in "survey" lands back in /session/survey?projectId=... (the page
+// already reads projectId from query and resumes). Discovery/complete go
+// to /documents — doc-view renders a "Continue intake" CTA when the
+// adaptive intake isn't done.
+function destForProject(p: Project): string {
+  if (p.surveyPhase === "survey") return `/session/survey?projectId=${p.id}`;
+  return `/documents/${p.id}`;
+}
+
 function PhaseChip({ phase }: { phase: string | null | undefined }) {
   const label = phase === "survey" ? "Survey" : phase === "complete" ? "Complete" : "Discovery";
   const done = phase === "complete";
@@ -94,6 +104,11 @@ export default function ProjectsPage() {
   const [renameValue, setRenameValue] = useState<string>("");
   const [renameSavingId, setRenameSavingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
+  // T2-7: client-side fuzzy filter on display name. The list is recency-only
+  // by design; power users with 10+ projects can't scan all of them, so the
+  // filter is a name-substring match (case-insensitive, trimmed). Empty
+  // filter shows everything sorted.
+  const [query, setQuery] = useState<string>("");
 
   useEffect(() => {
     setDraft(readDraft());
@@ -104,6 +119,14 @@ export default function ProjectsPage() {
   });
 
   const sorted = [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  // T2-7: derived filtered list. We render `visible` everywhere the page
+  // used to render `sorted` (other than the sorted.length empty-state which
+  // is preserved — the "no projects yet" affordance stays attached to
+  // having zero projects, not zero matches).
+  const trimmedQuery = query.trim().toLowerCase();
+  const visible = trimmedQuery
+    ? sorted.filter((p) => displayProjectName(p).toLowerCase().includes(trimmedQuery))
+    : sorted;
 
   async function handleDelete(id: string) {
     setDeletingId(id);
@@ -307,10 +330,62 @@ export default function ProjectsPage() {
           </div>
         )}
 
+        {/* T2-7: project filter. Only show the input when the user actually
+            has projects to filter through. Threshold of 3+ keeps the input
+            from being noise on a near-empty list. */}
+        {!isLoading && sorted.length >= 3 && (
+          <div style={{ marginBottom: 12 }}>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${sorted.length} project${sorted.length === 1 ? "" : "s"}…`}
+              aria-label="Search projects by name"
+              data-testid="input-projects-filter"
+              className="focus-ring"
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                background: "#110f0d",
+                border: `1px solid ${border}`,
+                borderRadius: 8,
+                color: textPrimary,
+                fontFamily: "inherit",
+                fontSize: 13,
+              }}
+            />
+          </div>
+        )}
+
+        {/* T2-7: no-matches state — keeps the filter input visible so the
+            user can clear/correct without losing context. */}
+        {!isLoading && sorted.length > 0 && visible.length === 0 && (
+          <div data-testid="projects-no-matches" style={{ padding: "24px 4px", color: textSecondary, fontSize: 13 }}>
+            No projects match "{query.trim()}".
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="focus-ring"
+              style={{
+                marginLeft: 8,
+                background: "transparent",
+                border: "none",
+                color: accent,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 13,
+                textDecoration: "underline",
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
+
         {/* Project list */}
-        {!isLoading && sorted.length > 0 && (
+        {!isLoading && visible.length > 0 && (
           <div>
-            {sorted.map((project) => {
+            {visible.map((project) => {
               const relTime = formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true });
               const menuOpen = openMenuId === project.id;
 
@@ -321,8 +396,8 @@ export default function ProjectsPage() {
                     tabIndex={0}
                     className="project-row transition-colors duration-150"
                     data-testid={`row-project-${project.id}`}
-                    onClick={() => { if (!menuOpen) setLocation(`/documents/${project.id}`); }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLocation(`/documents/${project.id}`); }}
+                    onClick={() => { if (!menuOpen) setLocation(destForProject(project)); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLocation(destForProject(project)); }}
                     style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", cursor: "pointer", minHeight: 60, userSelect: "none", borderRadius: 6 }}
                   >
                     {/* Icon */}
