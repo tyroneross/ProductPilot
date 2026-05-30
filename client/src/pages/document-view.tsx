@@ -657,20 +657,38 @@ export default function DocumentViewPage() {
         description: `${stage.title} has been regenerated with ${detailLevel} level.`,
       });
     } catch (err) {
-      // apiRequest throws Error(`${status}: ${body}`). Body may be JSON ({message:...}) or plain text.
+      // apiRequest throws Error(`${status}: ${body}`). Body may be JSON
+      // ({message, errorCode, retryAfterSeconds}) or plain text.
+      // T2-4: prefer the classified message + use errorCode to pick the toast title.
       const raw = err instanceof Error ? err.message : String(err);
       const colon = raw.indexOf(": ");
       const status = colon > 0 ? raw.slice(0, colon) : "";
       const body = colon > 0 ? raw.slice(colon + 2) : raw;
       let serverMessage = body;
+      let errorCode: string | null = null;
       try {
         const parsed = JSON.parse(body);
         if (parsed && typeof parsed.message === "string") serverMessage = parsed.message;
+        if (parsed && typeof parsed.errorCode === "string") errorCode = parsed.errorCode;
       } catch {
         // body wasn't JSON — fall through with the raw text
       }
+      const title =
+        status === "400"
+          ? "Can't generate yet"
+          : errorCode === "rate_limit"
+            ? "Rate-limited by the provider"
+            : errorCode === "invalid_key"
+              ? "API key problem"
+              : errorCode === "provider_unavailable"
+                ? "Provider unavailable"
+                : errorCode === "timeout"
+                  ? "Request timed out"
+                  : errorCode === "context_too_large"
+                    ? "Request too large"
+                    : "Regeneration failed";
       toast({
-        title: status === "400" ? "Can't generate yet" : "Regeneration failed",
+        title,
         description: serverMessage || "Please try again.",
         variant: "destructive",
       });

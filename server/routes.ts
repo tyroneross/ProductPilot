@@ -3,7 +3,7 @@ import { logger } from "./lib/logger";
 import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
 import { runWithDbActorContext, storage, updateDbActorContext } from "./storage-hybrid";
-import { aiService, type AIMessage, type LLMConfig } from "./services/ai";
+import { aiService, classifyLlmError, type AIMessage, type LLMConfig } from "./services/ai";
 import {
   insertProjectSchema,
   insertMessageSchema,
@@ -1066,13 +1066,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           return { ok: true as const, stageId: stage.id, stageTitle: stage.title };
         } catch (stageError) {
-          const message = stageError instanceof Error ? stageError.message : String(stageError);
-          logger.error({ err: stageError, stageTitle: stage.title, stageNumber: stage.stageNumber }, "Error generating docs for stage");
-          return { ok: false as const, stageId: stage.id, stageTitle: stage.title, error: message };
+          // T2-4: classify the error so the client can render actionable copy
+          // (rate-limit countdown, invalid-key suggestion, etc.) instead of a
+          // raw SDK message.
+          const provider = (userConfig?.provider === "anthropic" ? "anthropic" : "groq") as "anthropic" | "groq";
+          const classified = classifyLlmError(stageError, provider);
+          logger.error(
+            { err: stageError, classification: classified.code, stageTitle: stage.title, stageNumber: stage.stageNumber },
+            "Error generating docs for stage",
+          );
+          return {
+            ok: false as const,
+            stageId: stage.id,
+            stageTitle: stage.title,
+            error: classified.message,
+            errorCode: classified.code,
+            retryAfterSeconds: classified.retryAfterSeconds,
+          };
         }
       }));
 
-      const failed = stageResults.filter(r => !r.ok) as Array<{ ok: false; stageId: string; stageTitle: string; error: string }>;
+      const failed = stageResults.filter(r => !r.ok) as Array<{ ok: false; stageId: string; stageTitle: string; error: string; errorCode?: string; retryAfterSeconds?: number | null }>;
       const succeeded = stageResults.filter(r => r.ok);
 
       // T1-4: reset progress to 0 on every failed stage so its tab renders
@@ -1085,22 +1099,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // All stages failed — surface the first error so the client can show it.
+      // T2-4: include the classified errorCode + retryAfterSeconds so the
+      // client can render rate-limit countdowns, invalid-key remediation, etc.
       if (succeeded.length === 0 && failed.length > 0) {
         return res.status(502).json({
           message: `Doc generation failed: ${failed[0].error}`,
-          failed: failed.map(f => ({ stageId: f.stageId, stageTitle: f.stageTitle, error: f.error })),
+          errorCode: failed[0].errorCode ?? "unknown",
+          retryAfterSeconds: failed[0].retryAfterSeconds ?? null,
+          failed: failed.map(f => ({
+            stageId: f.stageId,
+            stageTitle: f.stageTitle,
+            error: f.error,
+            errorCode: f.errorCode ?? "unknown",
+            retryAfterSeconds: f.retryAfterSeconds ?? null,
+          })),
         });
       }
 
-      // T1-4: partial success. Surface failures explicitly so the client can
-      // render a persistent warning + per-stage retry instead of a misleading
-      // "all done" toast. `failures[]` carries stageId for retry targeting.
+      // T1-4 + T2-4: partial success. Surface failures explicitly so the
+      // client can render a persistent warning + per-stage retry with
+      // actionable copy keyed on errorCode.
       res.json({
         message: "Documentation generated successfully",
         succeeded: succeeded.length,
         failed: failed.length,
         ...(failed.length > 0
-          ? { failures: failed.map(f => ({ stageId: f.stageId, stageTitle: f.stageTitle, error: f.error })) }
+          ? {
+              failures: failed.map(f => ({
+                stageId: f.stageId,
+                stageTitle: f.stageTitle,
+                error: f.error,
+                errorCode: f.errorCode ?? "unknown",
+                retryAfterSeconds: f.retryAfterSeconds ?? null,
+              })),
+            }
           : {}),
       });
     } catch (error) {

@@ -51,7 +51,13 @@ export default function DocumentsPage() {
   // { failed > 0 }, capture each failing stage so we can render a persistent
   // warning + per-stage Retry. Cleared by retry success or manual dismiss.
   const [partialFailure, setPartialFailure] = useState<
-    { stageId: string; stageTitle: string; error: string }[] | null
+    {
+      stageId: string;
+      stageTitle: string;
+      error: string;
+      errorCode?: string;
+      retryAfterSeconds?: number | null;
+    }[] | null
   >(null);
 
   const { data: project } = useQuery<Project>({
@@ -134,7 +140,7 @@ export default function DocumentsPage() {
     // failures[] } on partial success (200 OK with failed > 0). A naive
     // success toast misleads — surface a persistent banner instead and let
     // the user retry the stages that actually failed.
-    onSuccess: (data: { succeeded?: number; failed?: number; failures?: { stageId: string; stageTitle: string; error: string }[] }, variables) => {
+    onSuccess: (data: { succeeded?: number; failed?: number; failures?: { stageId: string; stageTitle: string; error: string; errorCode?: string; retryAfterSeconds?: number | null }[] }, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "stages"] });
       const failed = Array.isArray(data?.failures) ? data.failures : [];
       if (failed.length > 0) {

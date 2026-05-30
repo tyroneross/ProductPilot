@@ -31,6 +31,111 @@ export const MODEL_COST_RATES: Record<string, { input: number; output: number; c
   "openai/gpt-oss-safeguard-20b":{ input: 0.075, output: 0.30  },
 };
 
+// T2-4: classify LLM SDK errors into a small taxonomy the client can route
+// to actionable copy. Returns { code, message, retryAfterSeconds? }. Both
+// Anthropic and Groq SDKs throw errors with a numeric .status, sometimes a
+// .headers map, and a .message that may or may not be machine-grep-friendly.
+// We never lose the original message — it goes into `details`.
+export type LlmErrorCode =
+  | "rate_limit"
+  | "invalid_key"
+  | "provider_unavailable"
+  | "timeout"
+  | "context_too_large"
+  | "unknown";
+
+export interface ClassifiedLlmError {
+  code: LlmErrorCode;
+  message: string;
+  retryAfterSeconds: number | null;
+  details: string;
+  status: number | null;
+}
+
+export function classifyLlmError(err: unknown, provider: "anthropic" | "groq"): ClassifiedLlmError {
+  const e = err as { status?: unknown; message?: unknown; headers?: Record<string, unknown> } | null | undefined;
+  const status = typeof e?.status === "number" ? e.status : null;
+  const rawMessage = typeof e?.message === "string" ? e.message : "";
+  const lower = rawMessage.toLowerCase();
+
+  // Retry-After can arrive as a header (string seconds, or HTTP date) or as a
+  // top-level field; both Groq and Anthropic use seconds for rate-limit.
+  let retryAfterSeconds: number | null = null;
+  const retryRaw = (e?.headers?.["retry-after"] ?? e?.headers?.["Retry-After"]) as string | undefined;
+  if (typeof retryRaw === "string") {
+    const asInt = parseInt(retryRaw, 10);
+    if (Number.isFinite(asInt)) retryAfterSeconds = asInt;
+  }
+
+  // 401/403/key wording → invalid key. Never quote the key in the message.
+  if (status === 401 || status === 403 || /invalid api key|authentication|unauthorized|no .* key/i.test(rawMessage)) {
+    return {
+      code: "invalid_key",
+      message:
+        provider === "anthropic"
+          ? "Your Anthropic API key is missing or invalid. Update it in Settings, or remove your key to fall back to the platform default."
+          : "Your Groq API key is missing or invalid. Update it in Settings, or remove your key to fall back to the platform default.",
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  // 429 → rate limit. Surface retry-after when present.
+  if (status === 429 || /rate limit|too many requests|quota/i.test(lower)) {
+    const wait = retryAfterSeconds ? `Try again in ${retryAfterSeconds}s.` : "Try again in a minute.";
+    return {
+      code: "rate_limit",
+      message: `${provider === "anthropic" ? "Anthropic" : "Groq"} is rate-limiting requests. ${wait}`,
+      retryAfterSeconds,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  // Context length / token limit.
+  if (status === 400 && /context|maximum.*token|prompt is too long|too many tokens/i.test(lower)) {
+    return {
+      code: "context_too_large",
+      message: "Your request is larger than the model's context window. Try generating one document at a time, or shorten the survey responses.",
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  // Timeout / abort.
+  if (/timeout|timed out|aborted/i.test(lower)) {
+    return {
+      code: "timeout",
+      message: `The ${provider === "anthropic" ? "Anthropic" : "Groq"} request timed out. The provider may be slow — try again.`,
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  // 5xx or network — provider unavailable.
+  if ((typeof status === "number" && status >= 500) || /ECONNREFUSED|ENOTFOUND|fetch failed|service unavailable|bad gateway/i.test(lower)) {
+    return {
+      code: "provider_unavailable",
+      message: `${provider === "anthropic" ? "Anthropic" : "Groq"} is unavailable right now. Try again in a few minutes, or switch providers in Settings.`,
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  return {
+    code: "unknown",
+    message:
+      "The model couldn't finish your request. Try again — if it keeps failing, switch providers in Settings.",
+    retryAfterSeconds: null,
+    details: rawMessage,
+    status,
+  };
+}
+
 function computeCostUsd(
   model: string,
   inputTokens: number,
