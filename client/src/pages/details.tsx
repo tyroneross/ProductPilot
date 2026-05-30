@@ -297,11 +297,11 @@ export default function DetailsPage() {
             projectId={adaptiveProjectId}
             onComplete={() => setLocation(`/documents/${adaptiveProjectId}`)}
             onCancel={() => setLocation("/projects")}
-            onChallengeAssumption={(a) => {
-              toast({
-                title: "Challenged assumption",
-                description: `${a.topic} — let's revisit this when we render the brief.`,
-              });
+            // T1-1: AdaptiveIntake now owns the challenge round-trip (renders
+            // the prompt, POSTs to /intake/answer, refreshes). This callback
+            // is informational — used purely for analytics / parent UI hints.
+            onChallengeAssumption={() => {
+              /* component handles override; nothing to do at the page level */
             }}
           />
         </div>

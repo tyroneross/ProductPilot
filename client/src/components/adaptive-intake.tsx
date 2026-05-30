@@ -135,6 +135,14 @@ export function AdaptiveIntake({
   const [draftAnswer, setDraftAnswer] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [step, setStep] = useState<number>(0);
+  // T1-1: when the user clicks Challenge on an inferred SafeDefault, we
+  // suspend the "infer" panel and surface the assumption's challenge_prompt
+  // as a real question. Submitting that answer POSTs to /intake/answer with
+  // metadata flagging the topic as user-corrected, so ingestAnswer overrides
+  // the inferred default in productState. This is the spec's "Path A" (honest
+  // wire-up) rather than "Path B" (flag-for-review). No fake button.
+  const [challenging, setChallenging] = useState<SafeDefault | null>(null);
+  const [challengeAnswer, setChallengeAnswer] = useState<string>("");
 
   async function loadNextStep() {
     setLoading(true);
@@ -191,7 +199,49 @@ export function AdaptiveIntake({
   }
 
   function challengeAssumption(assumption: SafeDefault) {
+    // T1-1: open the in-component challenge form. Caller is also notified
+    // (analytics / parent UI), but the actual override happens through the
+    // /intake/answer round-trip below — not via the parent toast.
+    setChallenging(assumption);
+    setChallengeAnswer("");
     onChallengeAssumption?.(assumption);
+  }
+
+  async function submitChallenge() {
+    if (!challenging || !challengeAnswer.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      // Use the assumption's challenge_prompt as the question text so the
+      // intake log carries a faithful record of what the user was actually
+      // re-asked. metadata.challenged_topic is the durable signal — the
+      // server's ingestAnswer can map it back to the spec slot the SafeDefault
+      // was filling.
+      await fetcher("POST", `/api/projects/${projectId}/intake/answer`, {
+        questionText: challenging.challenge_prompt || `Override the assumption: ${challenging.topic}`,
+        answer: challengeAnswer.trim(),
+        method: null,
+        metadata: {
+          challenged_topic: challenging.topic,
+          original_default: challenging.default,
+          source: "challenge_assumption",
+        },
+      });
+      setStep((s) => s + 1);
+      setChallenging(null);
+      setChallengeAnswer("");
+      // Refresh — controller may now re-ask, infer afresh, or finish.
+      await loadNextStep();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save challenge");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function cancelChallenge() {
+    setChallenging(null);
+    setChallengeAnswer("");
   }
 
   // ----- render states -----
@@ -290,6 +340,74 @@ export function AdaptiveIntake({
           }
         }}
       />
+    );
+  }
+
+  // T1-1: when the user is mid-challenge, take over the panel with a real
+  // ask form. This branch fires regardless of action.action — it's a modal
+  // state on top of the infer/ask render below.
+  if (challenging) {
+    return (
+      <div data-testid="adaptive-intake-challenge" style={containerStyle}>
+        <p style={{ color: "#a89a8c", fontSize: "11px", marginBottom: "8px", letterSpacing: "0.02em" }}>
+          Challenging assumption · {challenging.topic}
+        </p>
+        <p
+          data-testid="adaptive-intake-challenge-prompt"
+          style={{ color: "#f5f0eb", fontSize: "16px", fontWeight: 500, marginBottom: "12px", lineHeight: 1.45 }}
+        >
+          {challenging.challenge_prompt || `What would you put in place of "${String(challenging.default)}"?`}
+        </p>
+        <p style={{ color: "#6b5d52", fontSize: "11px", marginBottom: "10px" }}>
+          We assumed: <span style={{ color: "#a89a8c" }}>{String(challenging.default)}</span> · {challenging.rationale}
+        </p>
+        <textarea
+          data-testid="adaptive-intake-challenge-textarea"
+          value={challengeAnswer}
+          onChange={(e) => setChallengeAnswer(e.target.value)}
+          placeholder="Type the value you'd rather use…"
+          rows={3}
+          className="focus-ring"
+          style={textareaStyle}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: "10px" }}>
+          <button
+            type="button"
+            onClick={cancelChallenge}
+            disabled={submitting}
+            className="focus-ring"
+            data-testid="adaptive-intake-challenge-cancel"
+            style={{
+              height: "36px",
+              padding: "0 14px",
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "#a89a8c",
+              background: "transparent",
+              border: "1px solid rgba(200,180,160,0.18)",
+              borderRadius: "8px",
+              cursor: submitting ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void submitChallenge()}
+            disabled={!challengeAnswer.trim() || submitting}
+            className="focus-ring"
+            data-testid="adaptive-intake-challenge-submit"
+            style={{
+              ...primaryBtnStyle,
+              opacity: !challengeAnswer.trim() || submitting ? 0.4 : 1,
+              cursor: !challengeAnswer.trim() || submitting ? "not-allowed" : "pointer",
+            }}
+          >
+            {submitting ? "Saving…" : "Save override"}
+          </button>
+        </div>
+        {error && <p style={{ color: "#e57373", fontSize: "12px", marginTop: "8px" }}>{error}</p>}
+      </div>
     );
   }
 
