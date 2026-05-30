@@ -572,9 +572,22 @@ export default function DocumentViewPage() {
   // (which downloads a multi-stage zipless markdown). This one fetches the
   // server-rendered handoff endpoint, which gates on lint cleanliness + PII +
   // weights. Any 409 surface as an inline toast describing the gate.
+  // T2-2: surface the handoff button for all projects. The server endpoint
+  // only succeeds for adaptive mode (it synthesizes the artifact from
+  // productState), so survey-mode users see a disabled button with a
+  // tooltip explaining the upgrade path instead of the button being hidden
+  // entirely (which made the core value prop invisible to default-path
+  // users). isHandoffPlatform stays the "actually clickable" signal;
+  // handoffSupported is the "visible at all" signal.
   const isHandoffPlatform = !!project?.intakeMode && project.intakeMode === "adaptive";
+  const handoffSupported = !!project;
   const handoffDisabled =
     !projectId || !isHandoffPlatform || isCopyingHandoff;
+  const handoffTooltip = !isHandoffPlatform
+    ? "Available for projects built with adaptive intake. Start a new project from the Details page to use this."
+    : isCopyingHandoff
+      ? "Preparing handoff…"
+      : "Copies a Claude Code-ready brief to your clipboard.";
 
   const handleCopyHandoff = async () => {
     if (!projectId || handoffDisabled) return;
@@ -940,11 +953,13 @@ export default function DocumentViewPage() {
             </div>
 
             {/* Primary action — exactly one. Selection order:
-                  1. Adaptive intake incomplete → Continue intake (must finish
-                     before handoff makes sense).
-                  2. Handoff platform → Copy for Claude Code (the whole point
-                     of generating these docs).
-                  3. Otherwise → Regenerate. */}
+                  1. Adaptive intake incomplete → Continue intake.
+                  2. Otherwise → Copy for Claude Code (T2-2: visible to every
+                     user, even survey-mode; disabled+tooltip when their
+                     project can't produce a handoff so the value prop is
+                     discoverable rather than hidden).
+                  3. Regenerate becomes secondary in the more menu for
+                     non-adaptive (T2-2 fallback path). */}
             {adaptiveIntakeIncomplete && !messagesFetching ? (
               <ActionButton
                 onClick={() => setLocation(continueIntakeHref)}
@@ -956,7 +971,36 @@ export default function DocumentViewPage() {
                 <ArrowLeft style={{ width: 13, height: 13 }} />
                 <span>Continue intake</span>
               </ActionButton>
-            ) : isHandoffPlatform ? (
+            ) : !isHandoffPlatform ? (
+              // Non-adaptive: show Regenerate as the primary action and a
+              // dimmed Handoff hint after it so users see the feature exists.
+              <>
+                <ActionButton
+                  onClick={() => setShowRegenerateDialog(true)}
+                  disabled={isRegenerating}
+                  variant="primary"
+                  data-testid="button-regenerate-document"
+                  aria-label="Regenerate document"
+                >
+                  <RefreshCw style={{ width: 13, height: 13, animation: isRegenerating ? "spin 0.8s linear infinite" : "none" }} />
+                  <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
+                </ActionButton>
+                {handoffSupported && (
+                  <span title={handoffTooltip} style={{ display: "inline-flex" }}>
+                    <ActionButton
+                      onClick={() => { /* disabled — title carries the why */ }}
+                      disabled={true}
+                      variant="secondary"
+                      data-testid="button-copy-handoff-locked"
+                      aria-label="Copy for Claude Code (available with adaptive intake)"
+                    >
+                      <Code style={{ width: 13, height: 13 }} />
+                      <span>Copy for Claude Code</span>
+                    </ActionButton>
+                  </span>
+                )}
+              </>
+            ) : (
               <ActionButton
                 onClick={handleCopyHandoff}
                 disabled={handoffDisabled}
@@ -968,17 +1012,6 @@ export default function DocumentViewPage() {
                 <span>
                   {isCopyingHandoff ? "Copying…" : handoffCopied ? "Copied" : "Copy for Claude Code"}
                 </span>
-              </ActionButton>
-            ) : (
-              <ActionButton
-                onClick={() => setShowRegenerateDialog(true)}
-                disabled={isRegenerating}
-                variant="primary"
-                data-testid="button-regenerate-document"
-                aria-label="Regenerate document"
-              >
-                <RefreshCw style={{ width: 13, height: 13, animation: isRegenerating ? "spin 0.8s linear infinite" : "none" }} />
-                <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
               </ActionButton>
             )}
           </div>
