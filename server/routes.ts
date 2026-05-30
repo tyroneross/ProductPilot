@@ -2491,20 +2491,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/settings", requireAuth, async (req: any, res) => {
     try {
       const settings = await storage.getUserSettings(req.userId);
-      const result: Record<string, unknown> = settings
-        ? { ...settings }
-        : { llmProvider: 'groq', llmModel: 'openai/gpt-oss-120b', llmApiKey: null };
-      // Mask API key in response
-      const rawKey = (result.llm_api_key as string | null | undefined) || (result.llmApiKey as string | null | undefined);
-      if (rawKey) {
-        result.llmApiKeyMasked = rawKey.slice(0, 7) + '...' + rawKey.slice(-4);
-        delete result.llm_api_key;
-        delete result.llmApiKey;
-      }
-      result.platformKeysAvailable = {
-        groq: Boolean(process.env.GROQ_API_KEY),
-        anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
-        openai: Boolean(process.env.OPENAI_API_KEY),
+      // T1-3: build the response from an explicit allowlist instead of
+      // spreading the storage row. The previous shape ({...settings}, then
+      // delete llm_api_key/llmApiKey) leaks any future column rename or
+      // join-introduced key (e.g. llm_api_key_v2, llmKeyEncrypted) that
+      // matches the column-naming pattern but isn't in the delete list. The
+      // settings UI only consumes llmProvider, llmModel, llmApiKeyMasked,
+      // and platformKeysAvailable — return exactly those.
+      const s = settings as Record<string, any> | null;
+      const rawKey: string | null =
+        (typeof s?.llm_api_key === "string" && s.llm_api_key) ||
+        (typeof s?.llmApiKey === "string" && s.llmApiKey) ||
+        null;
+      const result = {
+        llmProvider: (s?.llmProvider ?? s?.llm_provider ?? "groq") as string,
+        llmModel: (s?.llmModel ?? s?.llm_model ?? "openai/gpt-oss-120b") as string,
+        llmApiKeyMasked: rawKey
+          ? `${rawKey.slice(0, 7)}...${rawKey.slice(-4)}`
+          : null,
+        platformKeysAvailable: {
+          groq: Boolean(process.env.GROQ_API_KEY),
+          anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+          openai: Boolean(process.env.OPENAI_API_KEY),
+        },
       };
       res.json(result);
     } catch (error) {
