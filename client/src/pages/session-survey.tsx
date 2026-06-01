@@ -20,6 +20,8 @@ import { PromptsDialog } from "./session-survey/PromptsDialog";
 import { AddEditPromptDialog } from "./session-survey/AddEditPromptDialog";
 import { ConfirmGenerateDialog } from "./session-survey/ConfirmGenerateDialog";
 import IntakeProgressPane from "@/components/intake-progress-pane";
+import SufficiencyRing from "@/components/sufficiency-ring";
+import { SECTIONS, type IntakeSufficiency } from "@shared/intake-sections";
 
 export default function SessionSurveyPage() {
   const [, setLocation] = useLocation();
@@ -114,6 +116,18 @@ export default function SessionSurveyPage() {
 
   const surveyDefinition = project?.surveyDefinition as SurveyDefinition | null;
   const surveyPhase = project?.surveyPhase || "discovery";
+
+  // Blocking-unknowns sufficiency — the 80/20 gate driving the discovery
+  // sufficiency ring + the generate-docs CTA. Refetched after each answer (see
+  // the effect below), never per keystroke.
+  const { data: sufficiency } = useQuery<IntakeSufficiency>({
+    queryKey: ["/api/projects", projectId, "intake", "sufficiency"],
+    enabled: !!projectId && surveyPhase === "discovery",
+    // The endpoint runs LLM calls, so refetch ONLY on explicit invalidation
+    // (once per submitted answer) — never on window focus or staleness.
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
 
   useEffect(() => {
     if (!projectId && productIdea && !draftCreated.current) {
@@ -675,11 +689,29 @@ export default function SessionSurveyPage() {
   }, [messages]);
 
   const userMessages = messages.filter((m) => m.role === "user");
-  const canGenerateSurvey = userMessages.length >= 3;
+
+  // 80/20 gate — replaces the old raw answer-count threshold. `enough` === no
+  // open intake topic still scores blocking >= 6 (computed server-side).
+  const enough = sufficiency?.enough ?? false;
+  const canGenerateSurvey = enough;
+  const sufficiencySections = sufficiency?.sections
+    ?? SECTIONS.map((s) => ({ key: s.key, label: s.short, state: "open" as const }));
+  const openCount = sufficiencySections.filter((s) => s.state === "open").length;
 
   const TOTAL_DISCOVERY_QUESTIONS = 6;
   const discoveryProgress = Math.min(userMessages.length, TOTAL_DISCOVERY_QUESTIONS);
-  const discoveryProgressPercent = Math.round((discoveryProgress / TOTAL_DISCOVERY_QUESTIONS) * 100);
+
+  // Refresh sufficiency only when the answer count actually advances — skips the
+  // mount fetch + project/phase init so the LLM-backed endpoint runs at most once
+  // per submitted answer (the initial load is covered by the query's own fetch).
+  const lastSufficiencyAnswerCount = useRef(0);
+  useEffect(() => {
+    if (userMessages.length === lastSufficiencyAnswerCount.current) return;
+    lastSufficiencyAnswerCount.current = userMessages.length;
+    if (userMessages.length > 0 && projectId && surveyPhase === "discovery") {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "intake", "sufficiency"] });
+    }
+  }, [userMessages.length, projectId, surveyPhase, queryClient]);
 
   // Defect #3 — "enough info" explicit choice. Active once we have >=3
   // user answers (same threshold as canGenerateSurvey). Fires
@@ -707,7 +739,7 @@ export default function SessionSurveyPage() {
       });
     },
   });
-  const canFinalizeWithAssumptions = userMessages.length >= 3 && !!projectId;
+  const canFinalizeWithAssumptions = enough && !!projectId;
 
   const currentSection = surveyDefinition?.sections?.[currentSectionIndex];
   const isLastSection = surveyDefinition && currentSectionIndex === surveyDefinition.sections.length - 1;
@@ -801,23 +833,28 @@ export default function SessionSurveyPage() {
     void sendMessageStream(chip);
   };
 
-  // ── Discovery phase (unchanged visual) ────────────────────────────────
+  // ── Discovery phase ───────────────────────────────────────────────────
+  // The sufficiency ring is the single coverage signal (replaces the linear bar
+  // + the old "Ready to generate specs" text — those were two cues for one fact).
   const renderDiscoveryPhase = () => (
     <div className="flex-1 flex flex-col">
-      <div className="px-6 pt-4 pb-2 bg-surface-secondary border-b border-gray-200">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-metadata text-contrast-medium" data-testid="discovery-progress-text">
-            Question {discoveryProgress} of ~{TOTAL_DISCOVERY_QUESTIONS}
-          </span>
-          <span className="text-metadata text-contrast-medium">
-            {canGenerateSurvey ? "Ready to generate specs" : `${TOTAL_DISCOVERY_QUESTIONS - discoveryProgress} more to go`}
-          </span>
-        </div>
-        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden" data-testid="discovery-progress-bar">
-          <div
-            className="h-full bg-accent transition-all duration-300 rounded-full"
-            style={{ width: `${discoveryProgressPercent}%` }}
-          />
+      {/* Sticky so the live sufficiency meter stays in view while the chat
+          scrolls (top-14 sits just below the 56px sticky nav). */}
+      <div className="sticky top-14 z-10 px-6 pt-4 pb-3 bg-surface-secondary border-b border-gray-200">
+        <div className="flex items-center gap-4">
+          <SufficiencyRing sections={sufficiencySections} enough={enough} size={56} compact />
+          <div className="flex-1 min-w-0">
+            <div className="text-metadata text-contrast-medium" data-testid="discovery-progress-text">
+              Question {discoveryProgress} of ~{TOTAL_DISCOVERY_QUESTIONS}
+            </div>
+            <div className="text-description text-contrast-high" data-testid="sufficiency-helper">
+              {enough
+                ? "Enough for solid first-draft docs"
+                : openCount > 0
+                  ? `${openCount} key ${openCount === 1 ? "section" : "sections"} still need detail`
+                  : "Keep adding detail to reach enough"}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -913,47 +950,43 @@ export default function SessionSurveyPage() {
 
       <div className="border-t border-gray-200 p-4 md:p-6 bg-surface-primary sticky bottom-0 z-10">
         {canGenerateSurvey && (
-          <div className="mb-4 p-4 bg-surface-secondary rounded-lg border border-accent">
+          <div className="mb-4 p-4 bg-surface-secondary rounded-lg border border-accent" data-testid="enough-info-panel">
             <p className="text-description text-contrast-high mb-3">
-              You've answered enough to start. Keep refining for a sharper spec, or fill remaining sections with AI assumptions (each flagged so you can review and refine).
+              You've shared enough for solid first-draft docs. Generate now — AI fills any remaining gaps, each flagged so you can review and refine — or add more detail for a sharper spec.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={handleGenerateSurvey}
-                disabled={generateSurveyMutation.isPending || finalizeWithAssumptionsMutation.isPending}
+                onClick={() => finalizeWithAssumptionsMutation.mutate()}
+                disabled={!canFinalizeWithAssumptions || finalizeWithAssumptionsMutation.isPending || generateSurveyMutation.isPending}
                 className="btn-primary"
-                data-testid="button-generate-survey"
+                data-testid="button-generate-docs"
+                title="Generate all documents now; AI-inferred fields are flagged so you can refine them."
               >
-                {generateSurveyMutation.isPending ? (
+                {finalizeWithAssumptionsMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Generating Survey...
+                    Generating…
                   </>
                 ) : (
                   <>
-                    Continue refining
+                    Generate docs
                     <ChevronRight className="w-4 h-4 ml-2" />
                   </>
                 )}
               </Button>
               <Button
-                onClick={() => finalizeWithAssumptionsMutation.mutate()}
-                disabled={!canFinalizeWithAssumptions || finalizeWithAssumptionsMutation.isPending || generateSurveyMutation.isPending}
+                onClick={handleGenerateSurvey}
+                disabled={generateSurveyMutation.isPending || finalizeWithAssumptionsMutation.isPending}
                 variant="outline"
-                data-testid="button-fill-with-assumptions"
-                title={
-                  canFinalizeWithAssumptions
-                    ? "Generate all remaining sections; AI-inferred fields are flagged so you can refine them."
-                    : "Answer at least 3 questions before filling remaining sections."
-                }
+                data-testid="button-add-more-details"
               >
-                {finalizeWithAssumptionsMutation.isPending ? (
+                {generateSurveyMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Filling…
+                    Working…
                   </>
                 ) : (
-                  "Fill remaining with assumptions"
+                  "Add more details"
                 )}
               </Button>
             </div>
@@ -994,7 +1027,9 @@ export default function SessionSurveyPage() {
           {/* T2-5: input stays enabled even before prdStage resolves. The
               submit handler queues the message and flushes when prdStage
               arrives, so the first turn never blocks on a stages cold-start. */}
+          <label htmlFor="discovery-answer-input" className="sr-only">Your answer</label>
           <Input
+            id="discovery-answer-input"
             type="text"
             placeholder={prdStage ? "Type your answer..." : "Type your answer (queued until ready)…"}
             aria-label="Your answer"
@@ -1007,7 +1042,8 @@ export default function SessionSurveyPage() {
           />
           <Button
             type="submit"
-            className="btn-primary min-h-[44px] min-w-[44px] shrink-0"
+            aria-label="Send message"
+            className="btn-primary min-h-[44px] min-w-[44px] shrink-0 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             disabled={!inputValue.trim() || isStreaming}
             data-testid="button-send-discovery-message"
           >

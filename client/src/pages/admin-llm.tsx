@@ -257,6 +257,7 @@ export default function AdminLlmPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Model</label>
               <Input
+                aria-label="Model"
                 className="h-8 text-[13px] font-mono"
                 placeholder="e.g. sonnet-4"
                 value={draft.model}
@@ -266,6 +267,7 @@ export default function AdminLlmPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Task</label>
               <Input
+                aria-label="Task"
                 className="h-8 text-[13px] font-mono"
                 placeholder="e.g. deliverable"
                 value={draft.task}
@@ -275,6 +277,7 @@ export default function AdminLlmPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Project ID</label>
               <Input
+                aria-label="Project ID"
                 className="h-8 text-[13px] font-mono"
                 placeholder="exact match"
                 value={draft.projectId}
@@ -284,6 +287,7 @@ export default function AdminLlmPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">User ID</label>
               <Input
+                aria-label="User ID"
                 className="h-8 text-[13px] font-mono"
                 placeholder="exact match"
                 value={draft.userId}

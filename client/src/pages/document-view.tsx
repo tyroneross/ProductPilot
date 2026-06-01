@@ -286,8 +286,22 @@ export default function DocumentViewPage() {
     | { workingMemory?: { intakeAnswers?: unknown[] } }
     | null
     | undefined)?.workingMemory?.intakeAnswers) ?? [];
+  // Discovery-chat projects are intakeMode 'adaptive' with zero intakeAnswers,
+  // but once the user chooses "Generate docs" (finalize sets these flags) the
+  // server generates from the discovery conversation — so the guard must clear,
+  // otherwise the documents page would wrongly show "Continue intake".
+  const discoveryFinalized = Boolean(
+    (project?.productState as
+      | { workingMemory?: { user_chose_assumption_fill?: boolean; adaptive_intake_finalized?: boolean } }
+      | null
+      | undefined)?.workingMemory?.user_chose_assumption_fill ||
+      (project?.productState as
+        | { workingMemory?: { adaptive_intake_finalized?: boolean } }
+        | null
+        | undefined)?.workingMemory?.adaptive_intake_finalized,
+  );
   const adaptiveIntakeIncomplete =
-    project?.intakeMode === "adaptive" && adaptiveIntakeAnswers.length === 0;
+    project?.intakeMode === "adaptive" && adaptiveIntakeAnswers.length === 0 && !discoveryFinalized;
   const continueIntakeHref = projectId ? `/details?projectId=${projectId}&adaptive=1` : "/details";
 
   // Tradeoff weights flagged as auto-defaulted (when finalize/export was

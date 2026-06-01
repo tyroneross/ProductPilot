@@ -1,0 +1,14 @@
+{
+  "segments": [
+    {
+      "count": 36,
+      "engagement": "2026-06-01",
+      "first_seq": 1,
+      "first_ts": "2026-06-01T06:56:41Z",
+      "last_seq": 36,
+      "last_ts": "2026-06-01T08:15:22Z",
+      "segment": "2026-06-01.jsonl"
+    }
+  ],
+  "updated_at": "2026-06-01T08:15:22Z"
+}

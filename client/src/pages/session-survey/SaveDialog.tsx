@@ -24,6 +24,7 @@ export function SaveDialog({ open, onOpenChange, projectName, setProjectName, ha
         <div className="space-y-4 py-4">
           <Input
             placeholder="Project name"
+            aria-label="Project name"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             data-testid="input-save-project-name"

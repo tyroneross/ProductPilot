@@ -50,6 +50,11 @@ import {
 import { aiService, type AIMessage, type LLMConfig } from "./ai";
 import { scrubSecretsDeep } from "../lib/secret-crypto";
 import { renderBrief } from "./spec-renderer";
+import {
+  SECTIONS,
+  type IntakeSufficiency,
+  type SectionState,
+} from "@shared/intake-sections";
 
 // ---------------------------------------------------------------------------
 // Public types — exported so the route layer + tests share one shape.
@@ -1752,4 +1757,98 @@ export function finalize(args: {
 
   const renderedMarkdown = renderBrief(augmentedSpec);
   return { spec: augmentedSpec, renderedMarkdown };
+}
+
+// ---------------------------------------------------------------------------
+// Discovery sufficiency — self-contained 80/20 gate for the discovery-chat
+// sufficiency ring. ONE LLM pass classifies each of the six doc sections
+// (covered / inferred / open) from the conversation; the `enough` gate is then
+// computed deterministically from that classification (high-value sections not
+// open AND <= 2 sections open). No dependency on the adaptive intake flow,
+// productState, or doc-generation internals — read-only assessment.
+// ---------------------------------------------------------------------------
+
+const DISCOVERY_SUFFICIENCY_PROMPT = `You assess how complete a product-discovery conversation is for generating first-draft product documents. The six document sections are:
+- brief: the core problem, who it is for, and what the product is
+- north-star: the target persona(s), their trigger / job-to-be-done, and the measurable success outcome
+- ux: the key screens, the primary user action, and the main flows
+- architecture: data, integrations / external APIs, and the key technical decisions
+- coding-prompts: enough specificity to hand off to a builder (features + acceptance)
+- dev-guide: delivery / rollout, risks, and explicit non-goals
+For EACH section return a state:
+- "covered": the conversation gives real, usable detail for this section
+- "inferred": not stated outright but reasonably inferable from what was said
+- "open": a genuine gap a builder would still need filled
+Return ONLY valid JSON mapping every section key to its state, using EXACTLY these keys:
+{"brief":"covered|inferred|open","north-star":"covered|inferred|open","ux":"covered|inferred|open","architecture":"covered|inferred|open","coding-prompts":"covered|inferred|open","dev-guide":"covered|inferred|open"}`;
+
+export async function assessDiscoverySufficiency(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  opts: LLMOptions,
+): Promise<IntakeSufficiency> {
+  const allOpen = (): IntakeSufficiency => ({
+    sections: SECTIONS.map((s) => ({ key: s.key, label: s.short, state: "open" as SectionState })),
+    enough: false,
+  });
+
+  const hasUser = messages.some(
+    (m) => m.role === "user" && typeof m.content === "string" && m.content.trim() !== "",
+  );
+  if (!hasUser) return allOpen();
+
+  const transcript = messages
+    .filter((m) => typeof m.content === "string" && m.content.trim() !== "")
+    .map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${m.content.trim()}`)
+    .join("\n");
+
+  let raw: any;
+  try {
+    raw = await aiService.generateStructuredOutput(
+      [
+        { role: "system", content: DISCOVERY_SUFFICIENCY_PROMPT },
+        { role: "user", content: transcript },
+      ],
+      "claude-haiku",
+      opts.llmConfig ?? null,
+      "classification",
+      opts.context,
+    );
+  } catch {
+    return allOpen();
+  }
+  if (!raw || typeof raw !== "object") return allOpen();
+
+  // Accept BOTH the flat { key: state } map (what the models reliably return)
+  // and the { sections: [{ key, state }] } array shape, matching keys leniently
+  // so minor key drift still routes to the right section.
+  const norm = (k: string) => k.toLowerCase().replace(/[^a-z]/g, "");
+  const sectionByNorm = new Map(SECTIONS.map((s) => [norm(s.key), s.key as string]));
+  const byKey = new Map<string, SectionState>();
+  const record = (rawKey: unknown, rawState: unknown) => {
+    if (typeof rawKey !== "string") return;
+    const key = sectionByNorm.get(norm(rawKey));
+    if (!key) return;
+    byKey.set(key, (["covered", "inferred", "open"].includes(rawState as string) ? rawState : "open") as SectionState);
+  };
+  if (Array.isArray((raw as { sections?: unknown }).sections)) {
+    for (const row of (raw as { sections: any[] }).sections) record(row?.key, row?.state);
+  } else {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) record(k, v);
+  }
+  if (byKey.size === 0) return allOpen();
+
+  const sections = SECTIONS.map((s) => ({
+    key: s.key,
+    label: s.short,
+    state: byKey.get(s.key) ?? ("open" as SectionState),
+  }));
+
+  // Deterministic gate from the per-section assessment (stable across calls even
+  // though the per-section judgment is an LLM): the high-value sections must not
+  // be open and no more than two sections may remain open.
+  const openCount = sections.filter((s) => s.state === "open").length;
+  const coreOpen = sections.some((s) => (s.key === "brief" || s.key === "north-star") && s.state === "open");
+  const enough = !coreOpen && openCount <= 2;
+
+  return { sections, enough };
 }

@@ -904,26 +904,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? productState.workingMemory!.intakeAnswers!
             : [];
           if (intakeAnswers.length === 0) {
-            return res.status(400).json({
-              message:
-                "Adaptive intake has no captured answers yet. Continue the intake flow before regenerating documents.",
-              code: "adaptive_intake_incomplete",
-            });
+            // Discovery-chat fallback: the user reached the discovery sufficiency
+            // gate without an adaptive answer log. Synthesize survey-shaped input
+            // from the PRD-stage discovery conversation (user answers paired with
+            // the assistant question that preceded them) so doc generation works
+            // from discovery alone — same prompt contract as the other sources.
+            const stagesForDocs = await storage.getStagesByProject(project.id);
+            const prdStageForDocs = stagesForDocs.find((s) => s.stageNumber === 2);
+            const discoveryMsgs = prdStageForDocs ? await storage.getMessagesByStage(prdStageForDocs.id) : [];
+            const qa: Array<{ id: string; question: string; answer: string }> = [];
+            for (let i = 0; i < discoveryMsgs.length; i++) {
+              const m = discoveryMsgs[i];
+              if (m.role !== "user" || !m.content?.trim()) continue;
+              const prevAssistant = [...discoveryMsgs.slice(0, i)].reverse().find((p) => p.role === "assistant");
+              qa.push({
+                id: `disc-q-${qa.length}`,
+                question: prevAssistant?.content?.trim() || `Discovery answer ${qa.length + 1}`,
+                answer: m.content.trim(),
+              });
+            }
+            if (qa.length === 0) {
+              return res.status(400).json({
+                message:
+                  "No intake captured yet. Add a few discovery answers before generating documents.",
+                code: "adaptive_intake_incomplete",
+              });
+            }
+            surveyDefinition = {
+              source: "discovery_chat",
+              description: "Synthesized from the PRD-stage discovery conversation.",
+              questions: qa.map((row) => ({ id: row.id, question: row.question })),
+            };
+            surveyResponses = Object.fromEntries(qa.map((row) => [row.id, row.answer]));
+          } else {
+            surveyDefinition = {
+              source: "adaptive_intake",
+              description:
+                "Synthesized from productState.workingMemory.intakeAnswers — adaptive controller-driven Q/A.",
+              questions: intakeAnswers.map((row, i) => ({
+                id: `adaptive-q-${i}`,
+                step: row.step ?? null,
+                method: row.method ?? null,
+                question: row.question ?? `Adaptive question ${i + 1}`,
+              })),
+            };
+            surveyResponses = Object.fromEntries(
+              intakeAnswers.map((row, i) => [`adaptive-q-${i}`, row.answer ?? null]),
+            );
           }
-          surveyDefinition = {
-            source: "adaptive_intake",
-            description:
-              "Synthesized from productState.workingMemory.intakeAnswers — adaptive controller-driven Q/A.",
-            questions: intakeAnswers.map((row, i) => ({
-              id: `adaptive-q-${i}`,
-              step: row.step ?? null,
-              method: row.method ?? null,
-              question: row.question ?? `Adaptive question ${i + 1}`,
-            })),
-          };
-          surveyResponses = Object.fromEntries(
-            intakeAnswers.map((row, i) => [`adaptive-q-${i}`, row.answer ?? null]),
-          );
         } else if (project.minimumDetails) {
           // Project minimumDetails into a Q/A shape so the same prompt works.
           const md = project.minimumDetails as Record<string, unknown>;
@@ -1356,6 +1384,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       logger.error({ err: error }, "[intake/next] error");
       res.status(500).json({ message: "Failed to compute next intake step" });
+    }
+  });
+
+  // GET /api/projects/:projectId/intake/sufficiency
+  // Per-section coverage + the 80/20 `enough` gate for the discovery sufficiency
+  // ring. Self-contained: assesses the discovery (PRD-stage) conversation in one
+  // LLM pass — no dependency on the adaptive intake flow or productState. Read-only.
+  // Client refetches once per submitted answer, never per keystroke.
+  app.get("/api/projects/:projectId/intake/sufficiency", async (req: any, res) => {
+    try {
+      const projectAccess = await loadOwnedProject(req, res, req.params.projectId);
+      if (!projectAccess) return;
+      const { project } = projectAccess;
+
+      const { assessDiscoverySufficiency } = await import("./services/intake-controller");
+      const llmConfig = await getLLMConfig(req);
+
+      const stages = await storage.getStagesByProject(project.id);
+      const prdStage = stages.find((s) => s.stageNumber === 2);
+      const messages = prdStage ? await storage.getMessagesByStage(prdStage.id) : [];
+      const convo = messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+      const result = await assessDiscoverySufficiency(convo, {
+        llmConfig,
+        context: { projectId: project.id },
+      });
+      res.json(result);
+    } catch (error) {
+      logger.error({ err: error }, "[intake/sufficiency] error");
+      res.status(500).json({ message: "Failed to compute intake sufficiency" });
     }
   });
 

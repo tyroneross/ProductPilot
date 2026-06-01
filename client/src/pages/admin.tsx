@@ -380,6 +380,7 @@ function PromptForm({
         <div>
           <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Target Key</label>
           <Input
+            aria-label="Target Key"
             className="h-8 text-[13px]"
             value={formData.targetKey}
             onChange={(e) => setFormData({ ...formData, targetKey: e.target.value })}
@@ -393,6 +394,7 @@ function PromptForm({
       <div>
         <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Label</label>
         <Input
+          aria-label="Label"
           className="h-8 text-[13px]"
           value={formData.label}
           onChange={(e) => setFormData({ ...formData, label: e.target.value })}
@@ -405,6 +407,7 @@ function PromptForm({
       <div>
         <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Description</label>
         <Input
+          aria-label="Description"
           className="h-8 text-[13px]"
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -433,6 +436,7 @@ function PromptForm({
         <div className="w-32">
           <label className="text-[12px] font-medium text-[#a89a8c] mb-1 block">Stage Number</label>
           <Input
+            aria-label="Stage Number"
             className="h-8 text-[13px]"
             type="number"
             min="1"
@@ -747,6 +751,7 @@ export default function AdminPage() {
         {/* Controls row */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-5">
           <Input
+            aria-label="Search prompts"
             placeholder="Search prompts…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

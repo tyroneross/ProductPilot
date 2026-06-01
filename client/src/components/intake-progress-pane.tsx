@@ -18,29 +18,10 @@
 // <768px: mobile fallback is the existing thin progress bar in session-survey.
 
 import { Info } from "lucide-react";
-
-const SECTIONS = [
-  { key: "brief", short: "Brief", title: "Stage 1 — Brief" },
-  { key: "north-star", short: "North Star", title: "Stage 2 — North Star" },
-  { key: "ux", short: "UX & Wireframes", title: "Stage 3 — UX & Wireframes" },
-  { key: "architecture", short: "Architecture", title: "Stage 4 — Architecture" },
-  { key: "coding-prompts", short: "Coding Prompts", title: "Stage 5 — Coding Prompts" },
-  { key: "dev-guide", short: "Dev Guide", title: "Stage 6 — Dev Guide" },
-] as const;
-
-// Map a controller-assigned spec_path or topic to one of the six section keys.
-// The intake-controller writes paths like "personas[0].trigger",
-// "scenarios[0].context", "architecture.persistence", etc.
-function specPathToSection(specPath: string | null | undefined, topic: string | null | undefined): string {
-  const haystack = `${specPath ?? ""} ${topic ?? ""}`.toLowerCase();
-  if (/persona|trigger|jobs|jtbd|icp|audience/.test(haystack)) return "north-star";
-  if (/scenario|need|feature|jtbd/.test(haystack)) return "north-star";
-  if (/coding|prompt|test|deploy|agent_evaluation|evaluation|eval|handoff/.test(haystack)) return "coding-prompts";
-  if (/screen|uxflow|wireframe|primary.?action|states|ui.?protocol|uiprotocol|ui.?archetype|agent_ui|research_protocol/.test(haystack)) return "ux";
-  if (/datapoint|integration|api|adr|pugh|decision|cites|architecture|persistence|tenancy|auth|agent_system|agentsystem|agent_delivery|builder.?scale|agent_autonomy|agent_tool|agent_memory|agent_flow|agent_guardrail|toolcontract|toolcontracts|memorypolicy|guardrail|topology/.test(haystack)) return "architecture";
-  if (/devguide|dev-guide|delivery|risk/.test(haystack)) return "dev-guide";
-  return "brief";
-}
+// SECTIONS + specPathToSection live in the shared contract so the server
+// assessor, this pane, and the sufficiency ring agree on the six sections and
+// the topic→section mapping with no drift.
+import { SECTIONS, specPathToSection } from "@shared/intake-sections";
 
 interface IntakeAnswerRow {
   metadata?: { extracts_into?: { spec_path?: string | null }; topic?: string | null; spec_path?: string | null };

@@ -218,6 +218,7 @@ export default function AdminAuditPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Action</label>
               <Input
+                aria-label="Action"
                 className="h-8 text-[13px]"
                 placeholder="e.g. stage.regenerate"
                 value={draft.action}
@@ -227,6 +228,7 @@ export default function AdminAuditPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Resource type</label>
               <Input
+                aria-label="Resource type"
                 className="h-8 text-[13px]"
                 placeholder="e.g. project, stage"
                 value={draft.resourceType}
@@ -236,6 +238,7 @@ export default function AdminAuditPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Actor ID</label>
               <Input
+                aria-label="Actor ID"
                 className="h-8 text-[13px] font-mono"
                 placeholder="exact match"
                 value={draft.actorId}
@@ -245,6 +248,7 @@ export default function AdminAuditPage() {
             <div>
               <label className="text-[11px] font-medium text-[#6b5d52] mb-1 block uppercase tracking-wide">Resource ID</label>
               <Input
+                aria-label="Resource ID"
                 className="h-8 text-[13px] font-mono"
                 placeholder="exact match"
                 value={draft.resourceId}
