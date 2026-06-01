@@ -523,9 +523,12 @@ export default function DetailsPage() {
                               fontSize: "12px",
                               fontWeight: 500,
                               fontFamily: "inherit",
-                              color: selected ? "#1a0f00" : "#a89a8c",
-                              background: selected ? "#f0b65e" : "transparent",
-                              border: `1px solid ${selected ? "#f0b65e" : "rgba(200,180,160,0.18)"}`,
+                              // Selected = amber tint + outline + amber text (a
+                              // lighter treatment than the solid-amber primary
+                              // CTA, so selections don't compete with it).
+                              color: selected ? "#f0b65e" : "#a89a8c",
+                              background: selected ? "rgba(240,182,94,0.16)" : "transparent",
+                              border: `1.5px solid ${selected ? "#f0b65e" : "rgba(200,180,160,0.18)"}`,
                               borderRadius: "999px",
                               cursor: "pointer",
                               whiteSpace: "nowrap",
@@ -671,7 +674,7 @@ export default function DetailsPage() {
               {isClarifying
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Thinking…</>
                 : clarifyQuestions != null && clarifyQuestions.length > 0
-                  ? (allClarifyAnswered ? "Generate docs →" : `Answer ${clarifyQuestions.length - Object.values(clarifyAnswers).filter(v => v && v.trim()).length} more →`)
+                  ? (allClarifyAnswered ? "Continue →" : `Answer ${clarifyQuestions.length - Object.values(clarifyAnswers).filter(v => v && v.trim()).length} more →`)
                   : "Continue →"}
             </button>
             <button
