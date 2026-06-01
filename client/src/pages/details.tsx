@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Info } from "lucide-react";
 import Nav from "@/components/nav";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import AdaptiveIntake from "@/components/adaptive-intake";
@@ -674,9 +675,35 @@ export default function DetailsPage() {
               {isClarifying
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Thinking…</>
                 : clarifyQuestions != null && clarifyQuestions.length > 0
-                  ? (allClarifyAnswered ? "Continue →" : `Answer ${clarifyQuestions.length - Object.values(clarifyAnswers).filter(v => v && v.trim()).length} more →`)
-                  : "Continue →"}
+                  ? (allClarifyAnswered ? "Guided Discovery →" : `Answer ${clarifyQuestions.length - Object.values(clarifyAnswers).filter(v => v && v.trim()).length} more →`)
+                  : "Guided Discovery →"}
             </button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="About Guided Discovery"
+                  data-testid="button-guided-discovery-info"
+                  className="inline-flex items-center justify-center flex-shrink-0 transition-colors"
+                  style={{ width: 40, height: 40, borderRadius: 8, background: "none", border: "1px solid rgba(200,180,160,0.18)", color: "#a89a8c", cursor: "pointer" }}
+                >
+                  <Info size={16} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="end"
+                className="w-72 text-sm"
+                style={{ background: "#1a1714", border: "1px solid rgba(200,180,160,0.18)", color: "#c8b4a0" }}
+              >
+                <p style={{ color: "#f5f0eb", fontWeight: 600, marginBottom: 6 }}>Guided Discovery</p>
+                <p style={{ color: "#a89a8c", lineHeight: 1.5 }}>
+                  A short chat that asks a few focused questions and shows a live meter
+                  that fills as you share enough for solid first-draft docs. Prefer to
+                  move fast? Use “or Skip to Docs” to generate from what you’ve written now.
+                </p>
+              </PopoverContent>
+            </Popover>
             <button
               onClick={handleBuildDocsNow}
               disabled={isGenerating}
