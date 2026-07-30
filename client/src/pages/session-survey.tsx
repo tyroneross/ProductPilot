@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, readApiError, LLM_ERROR_TITLES } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Project, Stage, Message, SurveyDefinition, SurveyResponse, CustomPrompt } from "@shared/schema";
 import { SaveDialog } from "./session-survey/SaveDialog";
@@ -560,7 +560,15 @@ export default function SessionSurveyPage() {
       });
       await checkProgress();
     } catch (error) {
-      toast({ title: "Generation failed", description: "Please try again.", variant: "destructive" });
+      // Was hardcoded to "Please try again." — which told users to retry a
+      // billing block that retrying cannot clear, and discarded the server's
+      // classified explanation entirely.
+      const { message, errorCode } = readApiError(error);
+      toast({
+        title: LLM_ERROR_TITLES[errorCode ?? ""] || "Generation failed",
+        description: message || "Please try again.",
+        variant: "destructive",
+      });
       setIsGeneratingDocs(false);
       if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
     }

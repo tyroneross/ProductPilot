@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { useState } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, readApiError, LLM_ERROR_TITLES } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Nav from "@/components/nav";
 import Breadcrumb from "@/components/breadcrumb";
@@ -163,35 +163,10 @@ export default function DocumentsPage() {
       }
     },
     onError: (err: unknown) => {
-      // apiRequest throws Error(`${status}: ${body}`) where body is usually
-      // JSON ({message, errorCode}). Rendering err.message directly put the
-      // raw provider payload in front of the user (prod, 2026-07-29). Parse
-      // out the server's classified message and pick the title from the code.
-      const raw = err instanceof Error ? err.message : String(err);
-      const colon = raw.indexOf(": ");
-      const body = colon > 0 ? raw.slice(colon + 2) : raw;
-      let description = "Please try again.";
-      let errorCode: string | null = null;
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed && typeof parsed.message === "string") description = parsed.message;
-        if (parsed && typeof parsed.errorCode === "string") errorCode = parsed.errorCode;
-      } catch {
-        // Non-JSON body. Only surface it when it is short and free of the
-        // brace/quote signature of a serialized provider error.
-        if (body && body.length < 200 && !/[{}"]/.test(body)) description = body;
-      }
-      const TITLE_BY_CODE: Record<string, string> = {
-        billing_blocked: "Generation paused — account limit reached",
-        rate_limit: "Rate-limited by the provider",
-        invalid_key: "API key problem",
-        provider_unavailable: "Provider unavailable",
-        timeout: "Request timed out",
-        context_too_large: "Request too large",
-      };
+      const { message, errorCode } = readApiError(err);
       toast({
-        title: (errorCode && TITLE_BY_CODE[errorCode]) ?? "Generation failed",
-        description,
+        title: LLM_ERROR_TITLES[errorCode ?? ""] || "Generation failed",
+        description: message || "Please try again.",
         variant: "destructive",
       });
     },

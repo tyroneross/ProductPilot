@@ -53,7 +53,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, readApiError, LLM_ERROR_TITLES } from "@/lib/queryClient";
 import type { Project, Stage, Message, OpenQuestion } from "@shared/schema";
 import OpenQuestionRow from "@/components/open-question-row";
 import { CrossFade } from "@/components/cross-fade";
@@ -671,40 +671,21 @@ export default function DocumentViewPage() {
         description: `${stage.title} has been regenerated with ${detailLevel} level.`,
       });
     } catch (err) {
-      // apiRequest throws Error(`${status}: ${body}`). Body may be JSON
-      // ({message, errorCode, retryAfterSeconds}) or plain text.
-      // T2-4: prefer the classified message + use errorCode to pick the toast title.
-      const raw = err instanceof Error ? err.message : String(err);
-      const colon = raw.indexOf(": ");
-      const status = colon > 0 ? raw.slice(0, colon) : "";
-      const body = colon > 0 ? raw.slice(colon + 2) : raw;
-      let serverMessage = body;
-      let errorCode: string | null = null;
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed && typeof parsed.message === "string") serverMessage = parsed.message;
-        if (parsed && typeof parsed.errorCode === "string") errorCode = parsed.errorCode;
-      } catch {
-        // body wasn't JSON — fall through with the raw text
-      }
+      // Read the structured ApiError fields. The previous string-slice of
+      // `err.message` looked for a `${status}: ` prefix that throwIfResNotOk
+      // does not emit, so `status` never matched "400" and the classified
+      // errorCode was never recovered.
+      const { status, message, errorCode } = readApiError(err);
       // A classified errorCode is more specific than the HTTP status, so it
-      // wins. The previous ordering let any 400 render "Can't generate yet",
-      // which reads as a user input problem even when the real cause is a
-      // provider account block the user can do nothing about.
-      const TITLE_BY_CODE: Record<string, string> = {
-        billing_blocked: "Generation paused — account limit reached",
-        rate_limit: "Rate-limited by the provider",
-        invalid_key: "API key problem",
-        provider_unavailable: "Provider unavailable",
-        timeout: "Request timed out",
-        context_too_large: "Request too large",
-      };
+      // wins. Otherwise a 400 renders "Can't generate yet", which reads as a
+      // user input problem even when the cause is a provider account block
+      // the user can do nothing about.
       const title =
-        (errorCode && TITLE_BY_CODE[errorCode]) ??
-        (status === "400" ? "Can't generate yet" : "Regeneration failed");
+        LLM_ERROR_TITLES[errorCode ?? ""] ||
+        (status === 400 ? "Can't generate yet" : "Regeneration failed");
       toast({
         title,
-        description: serverMessage || "Please try again.",
+        description: message || "Please try again.",
         variant: "destructive",
       });
     } finally {

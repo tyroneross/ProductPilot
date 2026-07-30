@@ -619,9 +619,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...existingMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))
         ];
 
+        // Hoisted so the catch below can name the provider it was talking to.
+        let userConfig: LLMConfig | null = null;
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
-          const userConfig = await getLLMConfig(req);
+          userConfig = await getLLMConfig(req);
           // Conversation stages use 'chat' tier (Groq default); stages 4+ are complex reasoning.
           const task = stage.stageNumber >= 4 ? 'complex' : 'chat';
           const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task, {
@@ -657,7 +659,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
           logger.error({ err: aiError }, "AI service error");
-          res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
+          // Classify rather than blanket-503. A hard block is not "temporarily
+          // unavailable" — telling the user to wait it out is wrong, because
+          // it never clears on its own.
+          const provider = (userConfig?.provider === "anthropic" ? "anthropic" : "groq") as "anthropic" | "groq";
+          const classified = classifyLlmError(aiError, provider);
+          res.status(classified.code === "billing_blocked" ? 502 : 503).json({
+            userMessage: message,
+            aiMessage: null,
+            message: classified.message,
+            errorCode: classified.code,
+            retryAfterSeconds: classified.retryAfterSeconds,
+          });
         }
       } else {
         res.status(201).json({ userMessage: message });
@@ -667,7 +680,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
-      res.status(500).json({ message: "Failed to create message", error: String(error) });
+      // String(error) leaked raw DB/driver internals to the browser.
+      res.status(500).json({ message: "Failed to create message" });
     }
   });
 
@@ -690,7 +704,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
-      return res.status(500).json({ message: "Failed to create message", error: String(error) });
+      // Previously included `error: String(error)`, which leaked raw DB/driver
+      // internals to the browser.
+      return res.status(500).json({ message: "Failed to create message" });
     }
 
     const { stage, project } = stageAccess;
@@ -2612,6 +2628,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch LLM call" });
     }
+  });
+
+  // GET /api/health/llm — preflight every configured platform provider.
+  //
+  // Exists because the 2026-07-29 spend-block outage was only discovered when
+  // a user reported a broken product. This issues a 1-token completion per
+  // configured provider and reports each one's classified state, so a hard
+  // block is observable without a user triggering it. Point an uptime check or
+  // a Vercel cron at this and alert on `status !== "ok"`.
+  //
+  // Unauthenticated by design (uptime checkers cannot hold a session) and
+  // therefore deliberately leaks nothing: booleans, a classification code, and
+  // fixed copy only — never the provider's raw message, which can echo user
+  // input, and never any key material.
+  app.get("/api/health/llm", async (_req, res) => {
+    const providers: Array<"groq" | "anthropic"> = [];
+    if (process.env.GROQ_API_KEY) providers.push("groq");
+    if (process.env.ANTHROPIC_API_KEY) providers.push("anthropic");
+
+    if (providers.length === 0) {
+      return res.status(503).json({ status: "unconfigured", providers: {} });
+    }
+
+    const results = await Promise.all(
+      providers.map(async (provider) => {
+        const started = Date.now();
+        try {
+          await aiService.chat(
+            [{ role: "user", content: "ping" }],
+            "claude-sonnet",
+            {
+              provider,
+              apiKey: (provider === "groq" ? process.env.GROQ_API_KEY : process.env.ANTHROPIC_API_KEY)!,
+            },
+            "classification",
+          );
+          return [provider, { ok: true, errorCode: null, latencyMs: Date.now() - started }] as const;
+        } catch (err) {
+          const classified = classifyLlmError(err, provider);
+          return [
+            provider,
+            { ok: false, errorCode: classified.code, latencyMs: Date.now() - started },
+          ] as const;
+        }
+      }),
+    );
+
+    const byProvider = Object.fromEntries(results);
+    const anyHealthy = results.some(([, r]) => r.ok);
+    const hardBlocked = results.filter(
+      ([, r]) => r.errorCode === "billing_blocked" || r.errorCode === "invalid_key",
+    );
+
+    res.status(anyHealthy ? 200 : 503).json({
+      status: anyHealthy ? (hardBlocked.length > 0 ? "degraded" : "ok") : "down",
+      providers: byProvider,
+      hardBlocked: hardBlocked.map(([p]) => p),
+    });
   });
 
   // ── Settings routes (require auth) ──

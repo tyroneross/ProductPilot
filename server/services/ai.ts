@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import Groq from "groq-sdk";
 import { buildProgressAssessmentPrompt } from "../prompt-builders";
 import { logger } from "../lib/logger";
+import { Sentry } from "../lib/sentry";
 
 // Current Anthropic models (2026-04): claude-opus-4-7, claude-sonnet-4-5, claude-haiku-4-5.
 // Current Groq models (2026-04): openai/gpt-oss-120b (reasoning, $0.15/$0.60), llama-3.1-8b-instant
@@ -63,6 +64,42 @@ export interface ClassifiedLlmError {
 }
 
 /**
+ * Pull the provider's STRUCTURED error message and code out of an SDK error.
+ *
+ * Both SDKs stringify the upstream JSON body into `.message`, e.g.
+ *   `400 {"error":{"message":"...","type":"...","code":"..."}}`
+ * That body can also carry `failed_generation`, which echoes the user's own
+ * prompt. Classifying against the raw string therefore lets user input drive
+ * the classification. Returning only `error.message` and `error.code` keeps
+ * echoed content out of every downstream regex.
+ *
+ * Falls back to the raw string when no JSON envelope is present, so plain
+ * `Error("request timed out")` still classifies.
+ */
+function extractProviderError(
+  rawMessage: string,
+  topLevelCode: unknown,
+): { message: string; code: string } {
+  const codeFromError = typeof topLevelCode === "string" ? topLevelCode : "";
+  const braceStart = rawMessage.indexOf("{");
+  if (braceStart >= 0) {
+    try {
+      const parsed = JSON.parse(rawMessage.slice(braceStart)) as Record<string, any>;
+      const errObj = (parsed?.error ?? parsed) as Record<string, any>;
+      const message = typeof errObj?.message === "string" ? errObj.message : "";
+      const code = typeof errObj?.code === "string" ? errObj.code : codeFromError;
+      // Only trust the envelope when it actually yielded a message; a partial
+      // or truncated body should not blank out the text we classify on.
+      if (message) return { message, code };
+      return { message: rawMessage, code };
+    } catch {
+      // Malformed / truncated JSON — fall through to the raw string.
+    }
+  }
+  return { message: rawMessage, code: codeFromError };
+}
+
+/**
  * Safe user-facing message for a catch block that may or may not hold an LLM error.
  *
  * Outer route handlers catch everything — DB faults, validation, LLM SDK errors
@@ -106,24 +143,49 @@ export function classifyLlmError(err: unknown, provider: "anthropic" | "groq"): 
   // most actionable state, and because retrying never clears it.
   //
   // Groq's published contract (console.groq.com/docs/spend-limits) is
-  // HTTP 400 + code `blocked_api_access`, but production has been observed
-  // returning a `spend_*` code with type `invalid_request_error` instead. We
-  // match the documented code, the observed code family, AND the message text
-  // so a third variant does not fall through to the misleading generic branch.
-  // Anthropic's equivalent is `billing_error` / credit-balance wording.
-  const providerCode =
-    typeof (e as { code?: unknown } | null | undefined)?.code === "string"
-      ? ((e as { code: string }).code)
-      : /"code"\s*:\s*"([a-z0-9_]+)"/i.exec(rawMessage)?.[1] ?? "";
+  // HTTP 400 + code `blocked_api_access`, but production returns a `spend_*`
+  // code with type `invalid_request_error` instead (verified by direct curl
+  // during the 2026-07-29 outage). We match the documented code, the observed
+  // code family, AND the message text so a third variant does not fall through
+  // to the misleading generic branch. Anthropic's equivalent is a
+  // credit-balance message with no code field at all.
+  //
+  // CRITICAL: match against the provider's STRUCTURED message/code, never the
+  // raw blob. Groq returns a `failed_generation` field on json_validate_failed
+  // and tool_use_failed errors that echoes the user's own prompt back. This
+  // app's input is product briefs, so a user speccing a "billing dashboard" or
+  // a "budget app with a spend limit" would otherwise have their own words
+  // classified as an account block — and a context-length 400 for such a brief
+  // would lose its correct `context_too_large` classification.
+  const { message: providerMessage, code: providerCode } = extractProviderError(
+    rawMessage,
+    (e as { code?: unknown } | null | undefined)?.code,
+  );
+
+  // Codes that are definitively NOT billing, even if the surrounding text
+  // (including echoed user input) mentions spend or billing.
+  const NON_BILLING_CODES = new Set([
+    "json_validate_failed",
+    "tool_use_failed",
+    "context_length_exceeded",
+    "string_above_max_length",
+    "insufficient_quota", // a quota/rate condition — clears without a billing change
+  ]);
+
   const billingCodeHit =
-    providerCode === "blocked_api_access" ||
-    providerCode.startsWith("spend_") ||
-    providerCode === "billing_error";
+    !NON_BILLING_CODES.has(providerCode) &&
+    (providerCode === "blocked_api_access" ||
+      providerCode.startsWith("spend_") ||
+      providerCode === "billing_error");
+  // Deliberately narrow: each phrase names an ACCOUNT STATE. A bare "billing"
+  // or "budget" term is not enough — those appear constantly in user briefs.
   const billingTextHit =
-    /spend (alert|limit)|blocked api access|has blocked api|spending limit|credit balance is too low|billing/i.test(
-      rawMessage,
+    !NON_BILLING_CODES.has(providerCode) &&
+    status !== 429 &&
+    /blocked api access|has blocked api|spend (alert|limit)|spending limit|credit balance is too low|billing threshold/i.test(
+      providerMessage,
     );
-  if (billingCodeHit || (status === 400 && billingTextHit)) {
+  if (billingCodeHit || billingTextHit) {
     const console_ =
       provider === "anthropic"
         ? "console.anthropic.com/settings/billing"
@@ -418,6 +480,37 @@ export class AIService {
     return null;
   }
 
+  /**
+   * Alert on a provider hard block.
+   *
+   * The 2026-07-29 outage was silent: `recordLlmCall` had been persisting the
+   * status and error code to `llm_calls` the whole time, but the only consumer
+   * was an admin page nobody was watching, so the first signal was a user
+   * reporting a broken product. A hard block takes down every LLM feature at
+   * once and cannot self-clear, which makes it the one class worth paging on.
+   *
+   * Fingerprinted by {provider, code} so a sustained outage is one alert, not
+   * one per request. No-ops when SENTRY_DSN is unset, so this is inert until
+   * the DSN is configured in the deployed environment.
+   */
+  private reportHardBlock(provider: string, classified: ClassifiedLlmError): void {
+    if (!HARD_BLOCK_CODES.has(classified.code)) return;
+    try {
+      Sentry.captureMessage(`LLM hard block: ${provider} ${classified.code}`, {
+        level: "fatal",
+        fingerprint: ["llm-hard-block", provider, classified.code],
+        tags: { provider, llm_error_code: classified.code },
+        extra: { providerMessage: classified.details, status: classified.status },
+      });
+    } catch {
+      // Never let telemetry failure mask the original provider error.
+    }
+    logger.error(
+      { provider, code: classified.code, status: classified.status },
+      "[llm-hard-block] every LLM feature is down until this is cleared",
+    );
+  }
+
   private dispatchChat(
     messages: AIMessage[],
     model: string,
@@ -449,6 +542,9 @@ export class AIService {
       const response = await this.dispatchChat(messages, model, config, task, context);
       return { ...response, providerUsed: config.provider, failedOver: false };
     } catch (err) {
+      if (config.provider === "groq" || config.provider === "anthropic") {
+        this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+      }
       const failover = this.resolveFailover(config, err, isPlatformDefault, task);
       if (!failover) throw err;
 
@@ -458,7 +554,11 @@ export class AIService {
       );
       // Single attempt only. If the secondary also fails, its error propagates
       // and gets classified for the user like any other — no retry loop.
-      const response = await this.dispatchChat(messages, model, failover, task, context);
+      // Pass the failover config's OWN model. dispatchChat resolves
+      // `model || config.model`, so handing it the original caller's model
+      // would silently discard the task-tiered model resolveFailover picked —
+      // a classification-tier retry would run on Sonnet instead of Haiku.
+      const response = await this.dispatchChat(messages, failover.model!, failover, task, context);
       return { ...response, providerUsed: failover.provider, failedOver: true };
     }
   }
@@ -489,6 +589,9 @@ export class AIService {
       }
       return;
     } catch (err) {
+      if (config.provider === "groq" || config.provider === "anthropic") {
+        this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+      }
       if (emittedDelta) throw err;
       const failover = this.resolveFailover(config, err, isPlatformDefault, task);
       if (!failover) throw err;
@@ -497,7 +600,8 @@ export class AIService {
         { from: config.provider, to: failover.provider, task },
         "[llm-failover] primary provider hard-blocked mid-stream (pre-delta) — retrying on secondary",
       );
-      yield* this.dispatchStream(messages, model, failover, task, context);
+      // See dispatchChat above — use the failover's own task-tiered model.
+      yield* this.dispatchStream(messages, failover.model!, failover, task, context);
     }
   }
 
@@ -783,7 +887,13 @@ export class AIService {
       return response;
     } catch (err) {
       errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
-      throw new Error(`Claude API error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      // Rethrow the ORIGINAL error. Wrapping it in a new Error() dropped
+      // .status/.code/.headers, which made classifyLlmError blind: an
+      // Anthropic credit block classified as `unknown` instead of
+      // `billing_blocked`, and anthropic->groq failover could never fire.
+      // streamClaude already rethrows raw; this matches it so the same fault
+      // classifies identically on both paths.
+      throw err;
     } finally {
       void this.recordLlmCall({
         provider: "anthropic",
@@ -810,8 +920,36 @@ export class AIService {
     task: LLMTask = 'classification',
     context?: LLMCallContext,
   ): Promise<any> {
+    const isPlatformDefault = !userConfig;
     const config = userConfig || this.getDefaultConfig(task);
 
+    try {
+      return await this.dispatchStructured(messages, model, config, task, context);
+    } catch (err) {
+      // This is the adaptive-intake and spec-linter entry point. Without the
+      // same failover chat() has, a provider hard block still took the whole
+      // intake surface down during the 2026-07-29 outage.
+      if (config.provider === "groq" || config.provider === "anthropic") {
+        this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+      }
+      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+      if (!failover) throw err;
+
+      logger.warn(
+        { from: config.provider, to: failover.provider, task },
+        "[llm-failover] structured-output primary hard-blocked — retrying on secondary",
+      );
+      return await this.dispatchStructured(messages, failover.model!, failover, task, context);
+    }
+  }
+
+  private async dispatchStructured(
+    messages: AIMessage[],
+    model: string,
+    config: LLMConfig,
+    task: LLMTask,
+    context?: LLMCallContext,
+  ): Promise<any> {
     if (config.provider === 'groq') {
       // Use Groq for structured output — extract JSON from response.
       // Default to reasoning-tier (gpt-oss-120b) for structured gen; caller can override via config.model.
@@ -872,7 +1010,9 @@ export class AIService {
       return this.extractJSON(content);
     } catch (err) {
       errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
-      throw new Error(`Claude structured output error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      // Rethrow the original — see chatWithClaude above. Wrapping destroyed
+      // the SDK's .status/.code and broke billing classification.
+      throw err;
     } finally {
       void this.recordLlmCall({
         provider: "anthropic",

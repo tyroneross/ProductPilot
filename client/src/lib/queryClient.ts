@@ -11,6 +11,49 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Read the classified error the server sent, from anywhere in the app.
+ *
+ * Error surfaces used to re-derive this by string-slicing `err.message` for a
+ * `${status}: ${body}` prefix that `throwIfResNotOk` has not emitted for some
+ * time. The parse silently failed and every caller fell back to "Please try
+ * again." — including for states the server had explicitly classified as
+ * non-retryable. Read the structured fields instead of re-parsing a string.
+ */
+export function readApiError(err: unknown): {
+  status: number | null;
+  message: string | null;
+  errorCode: string | null;
+  retryAfterSeconds: number | null;
+} {
+  if (err instanceof ApiError) {
+    const body = (err.body ?? {}) as Record<string, unknown>;
+    return {
+      status: err.status,
+      message: typeof body.message === "string" ? body.message : err.message || null,
+      errorCode: typeof body.errorCode === "string" ? body.errorCode : null,
+      retryAfterSeconds:
+        typeof body.retryAfterSeconds === "number" ? body.retryAfterSeconds : null,
+    };
+  }
+  return {
+    status: null,
+    message: err instanceof Error && err.message ? err.message : null,
+    errorCode: null,
+    retryAfterSeconds: null,
+  };
+}
+
+/** Toast titles keyed on the server's classified errorCode. */
+export const LLM_ERROR_TITLES: Record<string, string> = {
+  billing_blocked: "Generation paused — account limit reached",
+  rate_limit: "Rate-limited by the provider",
+  invalid_key: "API key problem",
+  provider_unavailable: "Provider unavailable",
+  timeout: "Request timed out",
+  context_too_large: "Request too large",
+};
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const raw = await res.text();

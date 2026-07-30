@@ -6,6 +6,7 @@ import { registerRoutes } from "../routes";
 import { runMigrations } from "../migrate";
 import { initSentry, Sentry } from "../lib/sentry";
 import { logger } from "../lib/logger";
+import { terminalErrorHandler } from "../lib/error-handler";
 
 initSentry();
 
@@ -26,13 +27,7 @@ async function ensureInitialized() {
 
   await registerRoutes(app);
 
-  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-    logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
-    Sentry.captureException(err);
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-  });
+  app.use(terminalErrorHandler);
 
   appInitialized = true;
 }

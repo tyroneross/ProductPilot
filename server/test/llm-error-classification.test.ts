@@ -88,6 +88,80 @@ describe("classifyLlmError — no regression on adjacent classes", () => {
   });
 });
 
+// ProductPilot's user input IS product briefs, so provider errors that echo the
+// prompt back (Groq sends `failed_generation` on json_validate_failed and
+// tool_use_failed) will routinely contain the words "billing", "spend limit",
+// and "budget". Classifying against the raw error blob let a user's own idea
+// text trigger an account-block message. These lock that shut.
+describe("classifyLlmError — user brief text must never drive classification", () => {
+  it("does not classify a json_validate_failed echoing a 'billing dashboard' brief as billing", () => {
+    const err = Object.assign(
+      new Error(
+        '400 {"error":{"message":"json_validate_failed","type":"invalid_request_error",' +
+          '"code":"json_validate_failed","failed_generation":"{\\"product\\":\\"Billing dashboard for SaaS\\"}"}}',
+      ),
+      { status: 400 },
+    );
+    expect(classifyLlmError(err, "groq").code).not.toBe("billing_blocked");
+  });
+
+  it("does not classify a tool_use_failed echoing 'spend limit' user text as billing", () => {
+    const err = Object.assign(
+      new Error(
+        '400 {"error":{"message":"tool_use_failed","code":"tool_use_failed",' +
+          '"failed_generation":"budget app that warns at a spend limit"}}',
+      ),
+      { status: 400 },
+    );
+    expect(classifyLlmError(err, "groq").code).not.toBe("billing_blocked");
+  });
+
+  it("keeps context_too_large for an over-length brief about a billing portal", () => {
+    const err = Object.assign(
+      new Error(
+        '400 {"error":{"message":"Please reduce the length of the messages: your prompt for the billing portal ' +
+          'is 12000 tokens, maximum context length is 8192","type":"invalid_request_error",' +
+          '"code":"context_length_exceeded"}}',
+      ),
+      { status: 400 },
+    );
+    expect(classifyLlmError(err, "groq").code).toBe("context_too_large");
+  });
+
+  it("keeps insufficient_quota (429) as rate_limit even though it says 'billing details'", () => {
+    const err = Object.assign(
+      new Error(
+        '429 {"error":{"message":"You exceeded your current quota, please check your plan and billing details.",' +
+          '"code":"insufficient_quota"}}',
+      ),
+      { status: 429 },
+    );
+    expect(classifyLlmError(err, "groq").code).toBe("rate_limit");
+  });
+});
+
+describe("classifyLlmError — classification is path-independent", () => {
+  // chatWithClaude and generateStructuredWithClaude used to rewrap SDK errors
+  // in a plain Error, destroying .status/.code, while streamClaude rethrew raw.
+  // The same fault classified differently depending on which path threw it.
+  it("classifies an Anthropic credit block even when .status was stripped by a rewrap", () => {
+    const rewrapped = new Error(
+      'Claude API error: 400 {"type":"error","error":{"type":"invalid_request_error",' +
+        '"message":"Your credit balance is too low to access the Anthropic API."}}',
+    );
+    expect(classifyLlmError(rewrapped, "anthropic").code).toBe("billing_blocked");
+  });
+
+  it("classifies an Anthropic 401 the same way with or without .status", () => {
+    const withStatus = Object.assign(new Error("401 invalid x-api-key"), { status: 401 });
+    const stripped = new Error(
+      'Claude API error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    );
+    expect(classifyLlmError(withStatus, "anthropic").code).toBe("invalid_key");
+    expect(classifyLlmError(stripped, "anthropic").code).toBe("invalid_key");
+  });
+});
+
 describe("toSafeUserMessage", () => {
   it("returns the classified copy for a recognized LLM failure", () => {
     const safe = toSafeUserMessage(PROD_GROQ_SPEND_BLOCK, "groq", "fallback copy");

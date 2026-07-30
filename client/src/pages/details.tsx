@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sparkles, Info } from "lucide-react";
 import Nav from "@/components/nav";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, readApiError, LLM_ERROR_TITLES } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import AdaptiveIntake from "@/components/adaptive-intake";
 import type { Project } from "@shared/schema";
@@ -271,8 +271,12 @@ export default function DetailsPage() {
       clearDraftStorage();
       setLocation(`/documents/${project.id}`);
     } catch (err) {
-      const description = err instanceof Error && err.message ? err.message : "Please try again.";
-      toast({ title: "Generation failed", description, variant: "destructive" });
+      const { message, errorCode } = readApiError(err);
+      toast({
+        title: LLM_ERROR_TITLES[errorCode ?? ""] || "Generation failed",
+        description: message || "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsGenerating(false);
     }

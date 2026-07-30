@@ -9,6 +9,7 @@ import { logger } from "./lib/logger";
 import fs from "fs";
 import https from "https";
 import path from "path";
+import { terminalErrorHandler } from "./lib/error-handler";
 
 initSentry();
 
@@ -41,13 +42,7 @@ app.use((req, res, next) => {
   
   const server = await registerRoutes(app);
 
-  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-    logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
-    Sentry.captureException(err);
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-  });
+  app.use(terminalErrorHandler);
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

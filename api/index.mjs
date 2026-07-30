@@ -3255,9 +3255,68 @@ var init_prompt_builders = __esm({
   }
 });
 
+// server/lib/sentry.ts
+import * as Sentry from "@sentry/node";
+function initSentry() {
+  if (initialized) return;
+  const dsn = process.env.SENTRY_DSN;
+  if (!dsn) {
+    return;
+  }
+  Sentry.init({
+    dsn,
+    environment: process.env.NODE_ENV || "development",
+    tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
+    profilesSampleRate: 0,
+    // enable later if @sentry/profiling-node works
+    // Serverless: don't fork worker threads
+    // autoSessionTracking removed — not in @sentry/node NodeOptions type (serverless default is already off)
+    // Don't capture these
+    ignoreErrors: [
+      "ResizeObserver loop limit exceeded",
+      "Non-Error promise rejection captured"
+    ]
+  });
+  initialized = true;
+}
+var initialized;
+var init_sentry = __esm({
+  "server/lib/sentry.ts"() {
+    "use strict";
+    initialized = false;
+  }
+});
+
 // server/services/ai.ts
 import Anthropic from "@anthropic-ai/sdk";
 import Groq from "groq-sdk";
+function extractProviderError(rawMessage, topLevelCode) {
+  const codeFromError = typeof topLevelCode === "string" ? topLevelCode : "";
+  const braceStart = rawMessage.indexOf("{");
+  if (braceStart >= 0) {
+    try {
+      const parsed = JSON.parse(rawMessage.slice(braceStart));
+      const errObj = parsed?.error ?? parsed;
+      const message = typeof errObj?.message === "string" ? errObj.message : "";
+      const code = typeof errObj?.code === "string" ? errObj.code : codeFromError;
+      if (message) return { message, code };
+      return { message: rawMessage, code };
+    } catch {
+    }
+  }
+  return { message: rawMessage, code: codeFromError };
+}
+function toSafeUserMessage(err, provider, fallback) {
+  const classified = classifyLlmError(err, provider);
+  if (classified.code === "unknown") {
+    return { message: fallback, errorCode: null, retryAfterSeconds: null };
+  }
+  return {
+    message: classified.message,
+    errorCode: classified.code,
+    retryAfterSeconds: classified.retryAfterSeconds
+  };
+}
 function classifyLlmError(err, provider) {
   const e = err;
   const status = typeof e?.status === "number" ? e.status : null;
@@ -3268,6 +3327,32 @@ function classifyLlmError(err, provider) {
   if (typeof retryRaw === "string") {
     const asInt = parseInt(retryRaw, 10);
     if (Number.isFinite(asInt)) retryAfterSeconds = asInt;
+  }
+  const { message: providerMessage, code: providerCode } = extractProviderError(
+    rawMessage,
+    e?.code
+  );
+  const NON_BILLING_CODES = /* @__PURE__ */ new Set([
+    "json_validate_failed",
+    "tool_use_failed",
+    "context_length_exceeded",
+    "string_above_max_length",
+    "insufficient_quota"
+    // a quota/rate condition — clears without a billing change
+  ]);
+  const billingCodeHit = !NON_BILLING_CODES.has(providerCode) && (providerCode === "blocked_api_access" || providerCode.startsWith("spend_") || providerCode === "billing_error");
+  const billingTextHit = !NON_BILLING_CODES.has(providerCode) && status !== 429 && /blocked api access|has blocked api|spend (alert|limit)|spending limit|credit balance is too low|billing threshold/i.test(
+    providerMessage
+  );
+  if (billingCodeHit || billingTextHit) {
+    const console_ = provider === "anthropic" ? "console.anthropic.com/settings/billing" : "console.groq.com/settings/billing";
+    return {
+      code: "billing_blocked",
+      message: `Document generation is paused because the ${provider === "anthropic" ? "Anthropic" : "Groq"} account that powers it has hit its spending limit. This is not something retrying will fix. If this is your own API key, raise the limit at ${console_}; otherwise the ProductPilot team has been alerted and is restoring service.`,
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status
+    };
   }
   if (status === 401 || status === 403 || /invalid api key|authentication|unauthorized|no .* key/i.test(rawMessage)) {
     return {
@@ -3329,12 +3414,13 @@ function computeCostUsd(model, inputTokens, outputTokens, cacheReadTokens = 0, c
   const cost = inputTokens / 1e6 * rate.input + outputTokens / 1e6 * rate.output + cacheReadTokens / 1e6 * (rate.cacheRead ?? 0) + cacheWriteTokens / 1e6 * (rate.cacheWrite ?? 0);
   return cost.toFixed(6);
 }
-var GROQ_MODELS, MODEL_COST_RATES, AIService, aiService;
+var GROQ_MODELS, MODEL_COST_RATES, HARD_BLOCK_CODES, AIService, aiService;
 var init_ai = __esm({
   "server/services/ai.ts"() {
     "use strict";
     init_prompt_builders();
     init_logger();
+    init_sentry();
     GROQ_MODELS = {
       // Reasoning / deliverables / complex tasks. Replaces the retired kimi-k2-instruct-0905.
       reasoning: "openai/gpt-oss-120b",
@@ -3354,6 +3440,10 @@ var init_ai = __esm({
       "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
       "openai/gpt-oss-safeguard-20b": { input: 0.075, output: 0.3 }
     };
+    HARD_BLOCK_CODES = /* @__PURE__ */ new Set([
+      "billing_blocked",
+      "invalid_key"
+    ]);
     AIService = class {
       getDefaultConfig(task = "chat") {
         const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -3380,8 +3470,68 @@ var init_ai = __esm({
         const groqModel = task === "complex" || task === "deliverable" ? GROQ_MODELS.reasoning : GROQ_MODELS.fast;
         return { provider: "groq", apiKey: process.env.GROQ_API_KEY, model: groqModel };
       }
-      async chat(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
-        const config = userConfig || this.getDefaultConfig(task);
+      /**
+       * Decide whether a failed call should be retried on the OTHER provider.
+       *
+       * Returns the replacement config, or null to rethrow the original error.
+       * Four conditions must all hold — any one of them missing means no failover:
+       *
+       *  1. Failover is not disabled by `LLM_FAILOVER_DISABLED=1` (the kill switch;
+       *     set it to force single-provider behavior without a redeploy).
+       *  2. The call used the PLATFORM default config, not BYOK. A user's own
+       *     blocked key must not silently spend platform credit on their behalf —
+       *     they get the classified error telling them to fix their own billing.
+       *  3. The error is a hard block (billing / invalid key). Rate limits and 5xx
+       *     clear on their own; switching providers for those would double spend
+       *     and hide a transient fault.
+       *  4. The other provider actually has a key configured.
+       */
+      resolveFailover(config, err, isPlatformDefault, task) {
+        if (process.env.LLM_FAILOVER_DISABLED === "1") return null;
+        if (!isPlatformDefault) return null;
+        if (config.provider !== "groq" && config.provider !== "anthropic") return null;
+        const classified = classifyLlmError(err, config.provider);
+        if (!HARD_BLOCK_CODES.has(classified.code)) return null;
+        if (config.provider === "groq" && process.env.ANTHROPIC_API_KEY) {
+          const model = task === "complex" ? "claude-opus-4-7" : task === "classification" ? "claude-haiku-4-5" : "claude-sonnet-4-5";
+          return { provider: "anthropic", apiKey: process.env.ANTHROPIC_API_KEY, model };
+        }
+        if (config.provider === "anthropic" && process.env.GROQ_API_KEY) {
+          const model = task === "complex" || task === "deliverable" ? GROQ_MODELS.reasoning : GROQ_MODELS.fast;
+          return { provider: "groq", apiKey: process.env.GROQ_API_KEY, model };
+        }
+        return null;
+      }
+      /**
+       * Alert on a provider hard block.
+       *
+       * The 2026-07-29 outage was silent: `recordLlmCall` had been persisting the
+       * status and error code to `llm_calls` the whole time, but the only consumer
+       * was an admin page nobody was watching, so the first signal was a user
+       * reporting a broken product. A hard block takes down every LLM feature at
+       * once and cannot self-clear, which makes it the one class worth paging on.
+       *
+       * Fingerprinted by {provider, code} so a sustained outage is one alert, not
+       * one per request. No-ops when SENTRY_DSN is unset, so this is inert until
+       * the DSN is configured in the deployed environment.
+       */
+      reportHardBlock(provider, classified) {
+        if (!HARD_BLOCK_CODES.has(classified.code)) return;
+        try {
+          Sentry.captureMessage(`LLM hard block: ${provider} ${classified.code}`, {
+            level: "fatal",
+            fingerprint: ["llm-hard-block", provider, classified.code],
+            tags: { provider, llm_error_code: classified.code },
+            extra: { providerMessage: classified.details, status: classified.status }
+          });
+        } catch {
+        }
+        logger.error(
+          { provider, code: classified.code, status: classified.status },
+          "[llm-hard-block] every LLM feature is down until this is cleared"
+        );
+      }
+      dispatchChat(messages2, model, config, task, context) {
         switch (config.provider) {
           case "groq":
             return this.chatWithGroq(messages2, config.model || GROQ_MODELS.fast, config.apiKey, task, context);
@@ -3391,12 +3541,55 @@ var init_ai = __esm({
             return this.chatWithGroq(messages2, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey, task, context);
         }
       }
+      async chat(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
+        const isPlatformDefault = !userConfig;
+        const config = userConfig || this.getDefaultConfig(task);
+        try {
+          const response = await this.dispatchChat(messages2, model, config, task, context);
+          return { ...response, providerUsed: config.provider, failedOver: false };
+        } catch (err) {
+          if (config.provider === "groq" || config.provider === "anthropic") {
+            this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+          }
+          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+          if (!failover) throw err;
+          logger.warn(
+            { from: config.provider, to: failover.provider, task, code: classifyLlmError(err, config.provider).code },
+            "[llm-failover] primary provider hard-blocked \u2014 retrying on secondary"
+          );
+          const response = await this.dispatchChat(messages2, failover.model, failover, task, context);
+          return { ...response, providerUsed: failover.provider, failedOver: true };
+        }
+      }
       /**
        * Streaming variant of chat(). Yields incremental text deltas, then a final event with the full content and usage.
        * Use for conversational stages where perceived latency matters.
        */
       async *chatStream(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
+        const isPlatformDefault = !userConfig;
         const config = userConfig || this.getDefaultConfig(task);
+        let emittedDelta = false;
+        try {
+          for await (const chunk of this.dispatchStream(messages2, model, config, task, context)) {
+            if (chunk.type === "delta") emittedDelta = true;
+            yield chunk;
+          }
+          return;
+        } catch (err) {
+          if (config.provider === "groq" || config.provider === "anthropic") {
+            this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+          }
+          if (emittedDelta) throw err;
+          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+          if (!failover) throw err;
+          logger.warn(
+            { from: config.provider, to: failover.provider, task },
+            "[llm-failover] primary provider hard-blocked mid-stream (pre-delta) \u2014 retrying on secondary"
+          );
+          yield* this.dispatchStream(messages2, failover.model, failover, task, context);
+        }
+      }
+      async *dispatchStream(messages2, model, config, task, context) {
         if (config.provider === "anthropic") {
           yield* this.streamClaude(
             messages2,
@@ -3608,7 +3801,7 @@ var init_ai = __esm({
           return response;
         } catch (err) {
           errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
-          throw new Error(`Claude API error: ${err instanceof Error ? err.message : "Unknown error"}`);
+          throw err;
         } finally {
           void this.recordLlmCall({
             provider: "anthropic",
@@ -3628,7 +3821,24 @@ var init_ai = __esm({
         }
       }
       async generateStructuredOutput(messages2, model = "claude-sonnet", userConfig, task = "classification", context) {
+        const isPlatformDefault = !userConfig;
         const config = userConfig || this.getDefaultConfig(task);
+        try {
+          return await this.dispatchStructured(messages2, model, config, task, context);
+        } catch (err) {
+          if (config.provider === "groq" || config.provider === "anthropic") {
+            this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
+          }
+          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+          if (!failover) throw err;
+          logger.warn(
+            { from: config.provider, to: failover.provider, task },
+            "[llm-failover] structured-output primary hard-blocked \u2014 retrying on secondary"
+          );
+          return await this.dispatchStructured(messages2, failover.model, failover, task, context);
+        }
+      }
+      async dispatchStructured(messages2, model, config, task, context) {
         if (config.provider === "groq") {
           const groqModel = config.model || (task === "classification" ? GROQ_MODELS.fast : GROQ_MODELS.reasoning);
           const response = await this.chatWithGroq(messages2, groqModel, config.apiKey, task, context);
@@ -3673,7 +3883,7 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
           return this.extractJSON(content);
         } catch (err) {
           errorCode = err instanceof Error ? err.message.slice(0, 120) : "unknown";
-          throw new Error(`Claude structured output error: ${err instanceof Error ? err.message : "Unknown error"}`);
+          throw err;
         } finally {
           void this.recordLlmCall({
             provider: "anthropic",
@@ -5059,13 +5269,22 @@ async function assessDiscoverySufficiency(messages2, opts) {
   } catch {
     return allOpen();
   }
-  if (!raw || typeof raw !== "object" || !Array.isArray(raw.sections)) return allOpen();
+  if (!raw || typeof raw !== "object") return allOpen();
+  const norm = (k) => k.toLowerCase().replace(/[^a-z]/g, "");
+  const sectionByNorm = new Map(SECTIONS.map((s) => [norm(s.key), s.key]));
   const byKey = /* @__PURE__ */ new Map();
-  for (const row of raw.sections) {
-    const key = typeof row?.key === "string" ? row.key : "";
-    const state = ["covered", "inferred", "open"].includes(row?.state) ? row.state : "open";
-    if (key) byKey.set(key, state);
+  const record = (rawKey, rawState) => {
+    if (typeof rawKey !== "string") return;
+    const key = sectionByNorm.get(norm(rawKey));
+    if (!key) return;
+    byKey.set(key, ["covered", "inferred", "open"].includes(rawState) ? rawState : "open");
+  };
+  if (Array.isArray(raw.sections)) {
+    for (const row of raw.sections) record(row?.key, row?.state);
+  } else {
+    for (const [k, v] of Object.entries(raw)) record(k, v);
   }
+  if (byKey.size === 0) return allOpen();
   const sections = SECTIONS.map((s) => ({
     key: s.key,
     label: s.short,
@@ -5118,8 +5337,8 @@ For EACH section return a state:
 - "covered": the conversation gives real, usable detail for this section
 - "inferred": not stated outright but reasonably inferable from what was said
 - "open": a genuine gap a builder would still need filled
-Return ONLY valid JSON: {"sections":[{"key":"brief","state":"covered|inferred|open"}, ... all six keys ...]}
-Use exactly these keys: brief, north-star, ux, architecture, coding-prompts, dev-guide.`;
+Return ONLY valid JSON mapping every section key to its state, using EXACTLY these keys:
+{"brief":"covered|inferred|open","north-star":"covered|inferred|open","ux":"covered|inferred|open","architecture":"covered|inferred|open","coding-prompts":"covered|inferred|open","dev-guide":"covered|inferred|open"}`;
   }
 });
 
@@ -7180,9 +7399,10 @@ async function registerRoutes(app2) {
           { role: "system", content: systemPromptToUse },
           ...existingMessages.map((m) => ({ role: m.role, content: m.content }))
         ];
+        let userConfig = null;
         try {
           const modelToUse = stage.aiModel || project.aiModel || "claude-sonnet";
-          const userConfig = await getLLMConfig(req);
+          userConfig = await getLLMConfig(req);
           const task = stage.stageNumber >= 4 ? "complex" : "chat";
           const aiResponse = await aiService.chat(aiMessages, modelToUse, userConfig, task, {
             userId: stageAccess.actor.kind === "user" ? stageAccess.actor.id : null,
@@ -7211,7 +7431,15 @@ async function registerRoutes(app2) {
           res.status(201).json({ userMessage: message, aiMessage });
         } catch (aiError) {
           logger.error({ err: aiError }, "AI service error");
-          res.status(503).json({ userMessage: message, aiMessage: null, error: "AI service unavailable" });
+          const provider = userConfig?.provider === "anthropic" ? "anthropic" : "groq";
+          const classified = classifyLlmError(aiError, provider);
+          res.status(classified.code === "billing_blocked" ? 502 : 503).json({
+            userMessage: message,
+            aiMessage: null,
+            message: classified.message,
+            errorCode: classified.code,
+            retryAfterSeconds: classified.retryAfterSeconds
+          });
         }
       } else {
         res.status(201).json({ userMessage: message });
@@ -7221,7 +7449,7 @@ async function registerRoutes(app2) {
       if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
-      res.status(500).json({ message: "Failed to create message", error: String(error) });
+      res.status(500).json({ message: "Failed to create message" });
     }
   });
   app2.post("/api/stages/:stageId/messages/stream", async (req, res) => {
@@ -7239,7 +7467,7 @@ async function registerRoutes(app2) {
       if (error instanceof z2.ZodError) {
         return res.status(400).json({ message: "Invalid message data", errors: error.issues });
       }
-      return res.status(500).json({ message: "Failed to create message", error: String(error) });
+      return res.status(500).json({ message: "Failed to create message" });
     }
     const { stage, project } = stageAccess;
     const existingMessages = await storage.getMessagesByStage(stage.id);
@@ -7307,7 +7535,8 @@ data: ${JSON.stringify(data)}
       res.end();
     } catch (err) {
       logger.error({ err }, "Stream error");
-      send("error", { message: err instanceof Error ? err.message : "AI service error" });
+      const safe = toSafeUserMessage(err, "groq", "AI service error");
+      send("error", { message: safe.message, errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds });
       res.end();
     }
   });
@@ -7581,9 +7810,9 @@ data: ${JSON.stringify(data)}
         } : {}
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Doc generation error");
-      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate documentation. Please try again.");
+      res.status(500).json({ message: safe.message, errorCode: safe.errorCode ?? "unknown", retryAfterSeconds: safe.retryAfterSeconds });
     }
   });
   app2.post("/api/projects/:projectId/generate-docs-from-minimum", async (req, res) => {
@@ -7666,9 +7895,19 @@ data: ${JSON.stringify(data)}
           await storage.updateStage(stage.id, { progress: 100 });
           return { ok: true, stageTitle: stage.title };
         } catch (stageError) {
-          const message = stageError instanceof Error ? stageError.message : String(stageError);
-          logger.error({ err: stageError, stageTitle: stage.title, stageNumber: stage.stageNumber }, "Error generating docs for stage (minimum)");
-          return { ok: false, stageTitle: stage.title, error: message };
+          const provider = userConfig?.provider === "anthropic" ? "anthropic" : "groq";
+          const classified = classifyLlmError(stageError, provider);
+          logger.error(
+            { err: stageError, classification: classified.code, stageTitle: stage.title, stageNumber: stage.stageNumber },
+            "Error generating docs for stage (minimum)"
+          );
+          return {
+            ok: false,
+            stageTitle: stage.title,
+            error: classified.message,
+            errorCode: classified.code,
+            retryAfterSeconds: classified.retryAfterSeconds
+          };
         }
       }));
       const minFailed = minResults.filter((r) => !r.ok);
@@ -7676,19 +7915,33 @@ data: ${JSON.stringify(data)}
       if (minSucceeded.length === 0 && minFailed.length > 0) {
         return res.status(502).json({
           message: `Doc generation failed: ${minFailed[0].error}`,
-          failed: minFailed.map((f) => ({ stageTitle: f.stageTitle, error: f.error }))
+          errorCode: minFailed[0].errorCode ?? "unknown",
+          retryAfterSeconds: minFailed[0].retryAfterSeconds ?? null,
+          failed: minFailed.map((f) => ({
+            stageTitle: f.stageTitle,
+            error: f.error,
+            errorCode: f.errorCode ?? "unknown",
+            retryAfterSeconds: f.retryAfterSeconds ?? null
+          }))
         });
       }
       res.json({
         message: "Documentation generated from minimum details",
         succeeded: minSucceeded.length,
         failed: minFailed.length,
-        ...minFailed.length > 0 ? { failures: minFailed.map((f) => ({ stageTitle: f.stageTitle, error: f.error })) } : {}
+        ...minFailed.length > 0 ? {
+          failures: minFailed.map((f) => ({
+            stageTitle: f.stageTitle,
+            error: f.error,
+            errorCode: f.errorCode ?? "unknown",
+            retryAfterSeconds: f.retryAfterSeconds ?? null
+          }))
+        } : {}
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Min doc generation error");
-      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate documentation. Please try again.");
+      res.status(500).json({ message: safe.message, errorCode: safe.errorCode ?? "unknown", retryAfterSeconds: safe.retryAfterSeconds });
     }
   });
   function requireAdaptiveMode(project, res) {
@@ -8684,6 +8937,47 @@ ${content}`);
       res.status(500).json({ message: "Failed to fetch LLM call" });
     }
   });
+  app2.get("/api/health/llm", async (_req, res) => {
+    const providers = [];
+    if (process.env.GROQ_API_KEY) providers.push("groq");
+    if (process.env.ANTHROPIC_API_KEY) providers.push("anthropic");
+    if (providers.length === 0) {
+      return res.status(503).json({ status: "unconfigured", providers: {} });
+    }
+    const results = await Promise.all(
+      providers.map(async (provider) => {
+        const started = Date.now();
+        try {
+          await aiService.chat(
+            [{ role: "user", content: "ping" }],
+            "claude-sonnet",
+            {
+              provider,
+              apiKey: provider === "groq" ? process.env.GROQ_API_KEY : process.env.ANTHROPIC_API_KEY
+            },
+            "classification"
+          );
+          return [provider, { ok: true, errorCode: null, latencyMs: Date.now() - started }];
+        } catch (err) {
+          const classified = classifyLlmError(err, provider);
+          return [
+            provider,
+            { ok: false, errorCode: classified.code, latencyMs: Date.now() - started }
+          ];
+        }
+      })
+    );
+    const byProvider = Object.fromEntries(results);
+    const anyHealthy = results.some(([, r]) => r.ok);
+    const hardBlocked = results.filter(
+      ([, r]) => r.errorCode === "billing_blocked" || r.errorCode === "invalid_key"
+    );
+    res.status(anyHealthy ? 200 : 503).json({
+      status: anyHealthy ? hardBlocked.length > 0 ? "degraded" : "ok" : "down",
+      providers: byProvider,
+      hardBlocked: hardBlocked.map(([p]) => p)
+    });
+  });
   app2.get("/api/settings", requireAuth, async (req, res) => {
     try {
       const settings = await storage.getUserSettings(req.userId);
@@ -8697,6 +8991,13 @@ ${content}`);
           groq: Boolean(process.env.GROQ_API_KEY),
           anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
           openai: Boolean(process.env.OPENAI_API_KEY)
+        },
+        // Failover only engages when BOTH platform keys exist and the kill
+        // switch is off. Surfaced so "we have a fallback" is observable in the
+        // deployed environment rather than assumed from the code being present.
+        failover: {
+          available: Boolean(process.env.GROQ_API_KEY) && Boolean(process.env.ANTHROPIC_API_KEY) && process.env.LLM_FAILOVER_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_FAILOVER_DISABLED === "1"
         }
       };
       res.json(result);
@@ -8994,34 +9295,29 @@ async function runMigrations() {
   }
 }
 
-// server/lib/sentry.ts
-import * as Sentry from "@sentry/node";
-var initialized = false;
-function initSentry() {
-  if (initialized) return;
-  const dsn = process.env.SENTRY_DSN;
-  if (!dsn) {
-    return;
-  }
-  Sentry.init({
-    dsn,
-    environment: process.env.NODE_ENV || "development",
-    tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
-    profilesSampleRate: 0,
-    // enable later if @sentry/profiling-node works
-    // Serverless: don't fork worker threads
-    // autoSessionTracking removed — not in @sentry/node NodeOptions type (serverless default is already off)
-    // Don't capture these
-    ignoreErrors: [
-      "ResizeObserver loop limit exceeded",
-      "Non-Error promise rejection captured"
-    ]
+// server/api-entry/index.ts
+init_sentry();
+init_logger();
+
+// server/lib/error-handler.ts
+init_logger();
+init_sentry();
+init_ai();
+function terminalErrorHandler(err, req, res, _next) {
+  logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
+  Sentry.captureException(err);
+  if (res.headersSent) return;
+  const safe = toSafeUserMessage(err, "groq", "Internal Server Error");
+  const appStatus = typeof err?.status === "number" ? err.status : typeof err?.statusCode === "number" ? err.statusCode : null;
+  const status = safe.errorCode !== null ? 502 : appStatus !== null && appStatus >= 400 && appStatus < 500 ? appStatus : 500;
+  res.status(status).json({
+    message: safe.message,
+    ...safe.errorCode ? { errorCode: safe.errorCode } : {},
+    ...safe.retryAfterSeconds !== null ? { retryAfterSeconds: safe.retryAfterSeconds } : {}
   });
-  initialized = true;
 }
 
 // server/api-entry/index.ts
-init_logger();
 initSentry();
 var appInitialized = false;
 var app = express();
@@ -9036,13 +9332,7 @@ async function ensureInitialized() {
     logger.warn({ err: error }, "Skipping migrations");
   }
   await registerRoutes(app);
-  app.use((err, req, res, _next) => {
-    logger.error({ err, url: req.url, method: req.method }, "Unhandled error");
-    Sentry.captureException(err);
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-  });
+  app.use(terminalErrorHandler);
   appInitialized = true;
 }
 async function handler(req, res) {
