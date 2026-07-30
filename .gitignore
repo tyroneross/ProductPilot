@@ -7,6 +7,8 @@ vite.config.ts.*
 .navgator/
 .bookmark/
 .env*.local
+.env*.local.bak-*
+.env.local.bak-*
 .vercel
 .ibr/
 .certs/

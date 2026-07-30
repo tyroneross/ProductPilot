@@ -10,6 +10,7 @@ import fs from "fs";
 import https from "https";
 import path from "path";
 import { terminalErrorHandler } from "./lib/error-handler";
+import { ProductionDatabaseGuardError } from "./lib/db-guard";
 
 initSentry();
 
@@ -37,6 +38,15 @@ app.use((req, res, next) => {
   try {
     await runMigrations();
   } catch (error) {
+    // A production-database guard trip is NOT a connection issue and must not
+    // be downgraded to a warning — that is exactly how a dev process ends up
+    // silently attached to live user data. Everything else stays best-effort.
+    if (error instanceof ProductionDatabaseGuardError) {
+      logger.fatal({ err: error }, "Refusing to start against the production database");
+      // eslint-disable-next-line no-console -- the logger may be buffered; this must be seen
+      console.error(`\n${error.message}\n`);
+      process.exit(1);
+    }
     logger.warn({ err: error }, "Skipping database migrations due to connection issues");
   }
   

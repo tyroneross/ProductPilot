@@ -6,6 +6,7 @@ import path from "node:path";
 import url from "node:url";
 import { logger } from "./lib/logger";
 import { assertJournalCoversAllMigrations } from "./lib/migrate-guard";
+import { assertNotProductionDatabase } from "./lib/db-guard";
 
 // Build database URL from environment variables
 function getDatabaseUrl(): string {
@@ -122,6 +123,9 @@ async function stampPreExistingMigrations(pool: Pool): Promise<void> {
 
 export async function runMigrations(): Promise<boolean> {
   const dbUrl = getDatabaseUrl();
+  // Fail before opening a connection, not after. A dev process that reaches
+  // this line against production would apply schema changes to live data.
+  assertNotProductionDatabase(dbUrl);
   const connString = !dbUrl.includes("sslmode=")
     ? dbUrl + (dbUrl.includes("?") ? "&" : "?") + "sslmode=require"
     : dbUrl;

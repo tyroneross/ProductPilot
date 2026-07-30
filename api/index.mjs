@@ -1163,6 +1163,52 @@ var init_schema = __esm({
   }
 });
 
+// server/lib/db-guard.ts
+function hostOf(databaseUrlOrHost) {
+  try {
+    return new URL(databaseUrlOrHost).host.toLowerCase();
+  } catch {
+    return databaseUrlOrHost.trim().toLowerCase();
+  }
+}
+function isProductionHost(databaseUrlOrHost, markers = resolveMarkers()) {
+  const host = hostOf(databaseUrlOrHost);
+  return markers.some((m) => m.length > 0 && host.includes(m.toLowerCase()));
+}
+function resolveMarkers() {
+  const configured = process.env.PRODUCTION_DB_HOSTS;
+  if (configured && configured.trim().length > 0) {
+    return configured.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return DEFAULT_PRODUCTION_HOST_MARKERS;
+}
+function assertNotProductionDatabase(databaseUrlOrHost, nodeEnv = process.env.NODE_ENV, allowOverride = process.env.ALLOW_PROD_DB) {
+  if (nodeEnv === "production") return;
+  if (allowOverride === "1") return;
+  if (!isProductionHost(databaseUrlOrHost)) return;
+  throw new ProductionDatabaseGuardError(
+    `Refusing to connect: NODE_ENV=${nodeEnv ?? "(unset)"} but the database host looks like PRODUCTION (${hostOf(databaseUrlOrHost)}).
+
+This process would read, write, and migrate live user data.
+
+Fix: point DATABASE_URL (and the PGHOST/PGUSER/PGPASSWORD/PGDATABASE fallbacks, which take precedence over DATABASE_URL) at the Neon 'dev' branch.
+Override deliberately with ALLOW_PROD_DB=1 only for a one-off production repair.`
+  );
+}
+var DEFAULT_PRODUCTION_HOST_MARKERS, ProductionDatabaseGuardError;
+var init_db_guard = __esm({
+  "server/lib/db-guard.ts"() {
+    "use strict";
+    DEFAULT_PRODUCTION_HOST_MARKERS = ["ep-lively-mud-akrgjji2"];
+    ProductionDatabaseGuardError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "ProductionDatabaseGuardError";
+      }
+    };
+  }
+});
+
 // server/db.ts
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -1185,7 +1231,9 @@ var init_db = __esm({
   "server/db.ts"() {
     "use strict";
     init_schema();
+    init_db_guard();
     dbUrl = getDatabaseUrl();
+    if (dbUrl) assertNotProductionDatabase(dbUrl);
     connString = dbUrl && !dbUrl.includes("sslmode=") ? dbUrl + (dbUrl.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl;
     pool = connString ? new Pool({
       connectionString: connString,
@@ -9219,6 +9267,7 @@ ${lines}`
 }
 
 // server/migrate.ts
+init_db_guard();
 function getDatabaseUrl2() {
   if (process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD && process.env.PGDATABASE) {
     const host = process.env.PGHOST;
@@ -9297,6 +9346,7 @@ async function stampPreExistingMigrations(pool2) {
 }
 async function runMigrations() {
   const dbUrl2 = getDatabaseUrl2();
+  assertNotProductionDatabase(dbUrl2);
   const connString2 = !dbUrl2.includes("sslmode=") ? dbUrl2 + (dbUrl2.includes("?") ? "&" : "?") + "sslmode=require" : dbUrl2;
   const pool2 = new Pool2({ connectionString: connString2 });
   try {

@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "@shared/schema";
+import { assertNotProductionDatabase } from "./lib/db-guard";
 
 // Build database URL from environment variables
 function getDatabaseUrl(): string | null {
@@ -23,6 +24,11 @@ function getDatabaseUrl(): string | null {
 }
 
 const dbUrl = getDatabaseUrl();
+
+// The real chokepoint: every query in the app goes through this pool, not just
+// migrations. Guarding only runMigrations() would still leave a dev process
+// reading and writing live user data. Throwing at module load fails the boot.
+if (dbUrl) assertNotProductionDatabase(dbUrl);
 
 // Append sslmode=require if not already present (Neon requires SSL)
 const connString = dbUrl && !dbUrl.includes('sslmode=')
