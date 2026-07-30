@@ -178,15 +178,16 @@ describe("GET /api/settings — response shape (T1-3)", () => {
     const body = await res.json();
 
     // Spec: the response is exactly the five allowlisted top-level keys.
-    // `failover` joined the allowlist on 2026-07-29 so the deployed
-    // environment can report whether a provider fallback is actually live.
-    // It carries booleans only — never a key or key-derived value.
+    // `modelFallback` joined the allowlist on 2026-07-30 so the deployed
+    // environment can report whether the model fallback is live, and that it
+    // does NOT cover an account block. Booleans only — never key material.
     expect(Object.keys(body).sort()).toEqual(
-      ["failover", "llmApiKeyMasked", "llmModel", "llmProvider", "platformKeysAvailable"].sort(),
+      ["llmApiKeyMasked", "llmModel", "llmProvider", "modelFallback", "platformKeysAvailable"].sort(),
     );
-    expect(body.failover).toEqual({
+    expect(body.modelFallback).toEqual({
       available: expect.any(Boolean),
       disabledByKillSwitch: expect.any(Boolean),
+      coversAccountBlock: false,
     });
 
     // Spec: no raw-key field (any variant) is present.

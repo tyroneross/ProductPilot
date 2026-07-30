@@ -41,19 +41,40 @@ export type LlmErrorCode =
   | "rate_limit"
   | "invalid_key"
   | "billing_blocked"
+  | "model_unavailable"
   | "provider_unavailable"
   | "timeout"
   | "context_too_large"
   | "unknown";
 
-// Hard blocks are provider states that retrying cannot clear — the account is
-// switched off until a human changes a billing setting or a key. These are the
-// only classes that justify failing over to the other provider; rate limits and
-// 5xx clear on their own and must NOT trigger a provider switch.
+// Hard blocks are ACCOUNT states that retrying cannot clear — the org is
+// switched off until a human changes a billing setting or a key. They are
+// org-wide, so no in-app retry survives one. They exist here purely to be
+// alerted on and explained honestly to the user.
 const HARD_BLOCK_CODES: ReadonlySet<LlmErrorCode> = new Set<LlmErrorCode>([
   "billing_blocked",
   "invalid_key",
 ]);
+
+// A MODEL state, not an account state — Groq retires models on a rolling basis
+// (verified 2026-07-30: `mixtral-8x7b-32768` and `llama-3.1-70b-versatile` both
+// return HTTP 400 `model_decommissioned`; an unknown id returns HTTP 404
+// `model_not_found`). Unlike a hard block this IS recoverable inside the same
+// account, by reissuing the request against a model that still exists.
+const MODEL_FALLBACK_CODES: ReadonlySet<LlmErrorCode> = new Set<LlmErrorCode>([
+  "model_unavailable",
+]);
+
+// Ordered fallback chain per tier. First entry that is not the failed model
+// wins. Deliberately short: one hop, no cascading retries.
+const GROQ_FALLBACK_CHAIN: Record<string, string[]> = {
+  [GROQ_MODELS.reasoning]: [GROQ_MODELS.fast],
+  [GROQ_MODELS.fast]: [GROQ_MODELS.reasoning],
+  [GROQ_MODELS.safeguard]: [GROQ_MODELS.fast, GROQ_MODELS.reasoning],
+};
+// Used when the failed model is not in the chain at all (e.g. a stale id from
+// a user's BYOK settings row, or a model we removed from GROQ_MODELS).
+const GROQ_LAST_RESORT_MODEL = GROQ_MODELS.fast;
 
 export interface ClassifiedLlmError {
   code: LlmErrorCode;
@@ -196,6 +217,26 @@ export function classifyLlmError(err: unknown, provider: "anthropic" | "groq"): 
         `Document generation is paused because the ${provider === "anthropic" ? "Anthropic" : "Groq"} account that powers it has hit its spending limit. ` +
         `This is not something retrying will fix. If this is your own API key, raise the limit at ${console_}; ` +
         `otherwise the ProductPilot team has been alerted and is restoring service.`,
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
+  }
+
+  // Model retired or unknown. Checked before the generic 400/404 arms because
+  // it is recoverable by switching models, and because it is the single most
+  // likely scheduled breakage on a Groq-only deployment: models are retired on
+  // a rolling basis and a pinned id stops working on a date we do not control.
+  if (
+    providerCode === "model_decommissioned" ||
+    providerCode === "model_not_found" ||
+    /has been decommissioned|does not exist or you do not have access/i.test(providerMessage)
+  ) {
+    return {
+      code: "model_unavailable",
+      message:
+        "The model this request uses is no longer available from the provider. " +
+        "We retried on a supported model automatically; if you are seeing this, that retry also failed.",
       retryAfterSeconds: null,
       details: rawMessage,
       status,
@@ -362,9 +403,11 @@ export interface AIResponse {
     completion_tokens: number;
     total_tokens: number;
   };
-  /** Which provider actually served this response (may differ from the requested one after failover). */
+  /** Which provider actually served this response. */
   providerUsed?: LLMConfig['provider'];
-  /** True when the primary provider was hard-blocked and the secondary served this response. */
+  /** Which model actually served it — differs from the requested one after a fallback. */
+  modelUsed?: string;
+  /** True when the requested model was unavailable and a fallback model served this response. */
   failedOver?: boolean;
 }
 
@@ -436,48 +479,43 @@ export class AIService {
   }
 
   /**
-   * Decide whether a failed call should be retried on the OTHER provider.
+   * Decide whether a failed call should be retried on a DIFFERENT GROQ MODEL.
    *
-   * Returns the replacement config, or null to rethrow the original error.
-   * Four conditions must all hold — any one of them missing means no failover:
+   * This deployment is single-provider by choice. That makes an account-level
+   * hard block (spend limit, revoked key) genuinely unrecoverable in code — it
+   * is org-wide, so every model behind that key is off. Those are alerted on
+   * and explained honestly instead of being retried.
    *
-   *  1. Failover is not disabled by `LLM_FAILOVER_DISABLED=1` (the kill switch;
-   *     set it to force single-provider behavior without a redeploy).
-   *  2. The call used the PLATFORM default config, not BYOK. A user's own
-   *     blocked key must not silently spend platform credit on their behalf —
-   *     they get the classified error telling them to fix their own billing.
-   *  3. The error is a hard block (billing / invalid key). Rate limits and 5xx
-   *     clear on their own; switching providers for those would double spend
-   *     and hide a transient fault.
-   *  4. The other provider actually has a key configured.
+   * What IS recoverable is a MODEL-level failure. Groq retires models on a
+   * rolling schedule, so any pinned id has an expiry date we do not control and
+   * are not told about in advance. Reissuing against a model that still exists
+   * turns a scheduled total outage into a logged quality downgrade.
+   *
+   * Returns the replacement config, or null to rethrow. Three conditions:
+   *
+   *  1. Not disabled by `LLM_MODEL_FALLBACK_DISABLED=1` (kill switch — force
+   *     single-model behavior without a redeploy).
+   *  2. The error is `model_unavailable`. Rate limits, 5xx, context overflows,
+   *     and account blocks all resolve differently and must not land here.
+   *  3. A fallback exists that is not the model which just failed.
+   *
+   * Applies to BYOK calls too, unlike the account-level case: switching models
+   * inside the caller's own key spends only their credit, on the provider they
+   * already chose, and the alternative is a hard failure they cannot act on.
    */
-  private resolveFailover(
-    config: LLMConfig,
-    err: unknown,
-    isPlatformDefault: boolean,
-    task: LLMTask,
-  ): LLMConfig | null {
-    if (process.env.LLM_FAILOVER_DISABLED === '1') return null;
-    if (!isPlatformDefault) return null;
-    if (config.provider !== 'groq' && config.provider !== 'anthropic') return null;
+  private resolveModelFallback(config: LLMConfig, err: unknown): LLMConfig | null {
+    if (process.env.LLM_MODEL_FALLBACK_DISABLED === '1') return null;
+    if (config.provider !== 'groq') return null;
 
-    const classified = classifyLlmError(err, config.provider);
-    if (!HARD_BLOCK_CODES.has(classified.code)) return null;
+    const classified = classifyLlmError(err, 'groq');
+    if (!MODEL_FALLBACK_CODES.has(classified.code)) return null;
 
-    if (config.provider === 'groq' && process.env.ANTHROPIC_API_KEY) {
-      const model =
-        task === 'complex' ? 'claude-opus-4-7' :
-        task === 'classification' ? 'claude-haiku-4-5' :
-        'claude-sonnet-4-5';
-      return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY, model };
-    }
-    if (config.provider === 'anthropic' && process.env.GROQ_API_KEY) {
-      const model =
-        task === 'complex' || task === 'deliverable' ? GROQ_MODELS.reasoning :
-        GROQ_MODELS.fast;
-      return { provider: 'groq', apiKey: process.env.GROQ_API_KEY, model };
-    }
-    return null;
+    const failedModel = config.model ?? '';
+    const candidates = GROQ_FALLBACK_CHAIN[failedModel] ?? [GROQ_LAST_RESORT_MODEL];
+    const next = candidates.find((m) => m !== failedModel);
+    if (!next) return null;
+
+    return { ...config, model: next };
   }
 
   /**
@@ -535,31 +573,29 @@ export class AIService {
     task: LLMTask = 'chat',
     context?: LLMCallContext,
   ): Promise<AIResponse> {
-    const isPlatformDefault = !userConfig;
     const config = userConfig || this.getDefaultConfig(task);
 
     try {
       const response = await this.dispatchChat(messages, model, config, task, context);
-      return { ...response, providerUsed: config.provider, failedOver: false };
+      return { ...response, providerUsed: config.provider, modelUsed: config.model, failedOver: false };
     } catch (err) {
       if (config.provider === "groq" || config.provider === "anthropic") {
         this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
       }
-      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-      if (!failover) throw err;
+      const fallback = this.resolveModelFallback(config, err);
+      if (!fallback) throw err;
 
       logger.warn(
-        { from: config.provider, to: failover.provider, task, code: classifyLlmError(err, config.provider as "groq" | "anthropic").code },
-        "[llm-failover] primary provider hard-blocked — retrying on secondary",
+        { from: config.model, to: fallback.model, task },
+        "[llm-model-fallback] model unavailable — retrying on a supported model",
       );
-      // Single attempt only. If the secondary also fails, its error propagates
+      // Single attempt only. If the fallback also fails, its error propagates
       // and gets classified for the user like any other — no retry loop.
-      // Pass the failover config's OWN model. dispatchChat resolves
-      // `model || config.model`, so handing it the original caller's model
-      // would silently discard the task-tiered model resolveFailover picked —
-      // a classification-tier retry would run on Sonnet instead of Haiku.
-      const response = await this.dispatchChat(messages, failover.model!, failover, task, context);
-      return { ...response, providerUsed: failover.provider, failedOver: true };
+      // Pass the fallback's OWN model: dispatchChat resolves `model ||
+      // config.model`, so handing it the caller's original model would discard
+      // the substitution and reissue the same dead request.
+      const response = await this.dispatchChat(messages, fallback.model!, fallback, task, context);
+      return { ...response, providerUsed: fallback.provider, modelUsed: fallback.model, failedOver: true };
     }
   }
 
@@ -574,13 +610,12 @@ export class AIService {
     task: LLMTask = 'chat',
     context?: LLMCallContext,
   ): AsyncGenerator<StreamChunk> {
-    const isPlatformDefault = !userConfig;
     const config = userConfig || this.getDefaultConfig(task);
 
-    // Failover on a stream is only safe BEFORE the first delta reaches the
-    // client — once partial text is on screen, restarting on another provider
-    // would splice two different completions together. A hard block throws at
-    // stream-open, so the pre-delta window is exactly where it lands.
+    // Retrying a stream is only safe BEFORE the first delta reaches the client
+    // — once partial text is on screen, restarting on another model would
+    // splice two different completions together. A model-unavailable error
+    // throws at stream-open, so the pre-delta window is exactly where it lands.
     let emittedDelta = false;
     try {
       for await (const chunk of this.dispatchStream(messages, model, config, task, context)) {
@@ -593,15 +628,15 @@ export class AIService {
         this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
       }
       if (emittedDelta) throw err;
-      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-      if (!failover) throw err;
+      const fallback = this.resolveModelFallback(config, err);
+      if (!fallback) throw err;
 
       logger.warn(
-        { from: config.provider, to: failover.provider, task },
-        "[llm-failover] primary provider hard-blocked mid-stream (pre-delta) — retrying on secondary",
+        { from: config.model, to: fallback.model, task },
+        "[llm-model-fallback] model unavailable at stream-open — retrying on a supported model",
       );
-      // See dispatchChat above — use the failover's own task-tiered model.
-      yield* this.dispatchStream(messages, failover.model!, failover, task, context);
+      // See chat() above — use the fallback's own model, not the caller's.
+      yield* this.dispatchStream(messages, fallback.model!, fallback, task, context);
     }
   }
 
@@ -920,26 +955,25 @@ export class AIService {
     task: LLMTask = 'classification',
     context?: LLMCallContext,
   ): Promise<any> {
-    const isPlatformDefault = !userConfig;
     const config = userConfig || this.getDefaultConfig(task);
 
     try {
       return await this.dispatchStructured(messages, model, config, task, context);
     } catch (err) {
-      // This is the adaptive-intake and spec-linter entry point. Without the
-      // same failover chat() has, a provider hard block still took the whole
-      // intake surface down during the 2026-07-29 outage.
+      // The adaptive-intake and spec-linter entry point. It needs the same
+      // model fallback chat() has, or a single retired model id takes the whole
+      // intake surface down.
       if (config.provider === "groq" || config.provider === "anthropic") {
         this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
       }
-      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-      if (!failover) throw err;
+      const fallback = this.resolveModelFallback(config, err);
+      if (!fallback) throw err;
 
       logger.warn(
-        { from: config.provider, to: failover.provider, task },
-        "[llm-failover] structured-output primary hard-blocked — retrying on secondary",
+        { from: config.model, to: fallback.model, task },
+        "[llm-model-fallback] structured-output model unavailable — retrying on a supported model",
       );
-      return await this.dispatchStructured(messages, failover.model!, failover, task, context);
+      return await this.dispatchStructured(messages, fallback.model!, fallback, task, context);
     }
   }
 

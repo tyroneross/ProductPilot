@@ -49,6 +49,7 @@ export const LLM_ERROR_TITLES: Record<string, string> = {
   billing_blocked: "Generation paused — account limit reached",
   rate_limit: "Rate-limited by the provider",
   invalid_key: "API key problem",
+  model_unavailable: "Model no longer available",
   provider_unavailable: "Provider unavailable",
   timeout: "Request timed out",
   context_too_large: "Request too large",

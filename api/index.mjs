@@ -3354,6 +3354,15 @@ function classifyLlmError(err, provider) {
       status
     };
   }
+  if (providerCode === "model_decommissioned" || providerCode === "model_not_found" || /has been decommissioned|does not exist or you do not have access/i.test(providerMessage)) {
+    return {
+      code: "model_unavailable",
+      message: "The model this request uses is no longer available from the provider. We retried on a supported model automatically; if you are seeing this, that retry also failed.",
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status
+    };
+  }
   if (status === 401 || status === 403 || /invalid api key|authentication|unauthorized|no .* key/i.test(rawMessage)) {
     return {
       code: "invalid_key",
@@ -3414,7 +3423,7 @@ function computeCostUsd(model, inputTokens, outputTokens, cacheReadTokens = 0, c
   const cost = inputTokens / 1e6 * rate.input + outputTokens / 1e6 * rate.output + cacheReadTokens / 1e6 * (rate.cacheRead ?? 0) + cacheWriteTokens / 1e6 * (rate.cacheWrite ?? 0);
   return cost.toFixed(6);
 }
-var GROQ_MODELS, MODEL_COST_RATES, HARD_BLOCK_CODES, AIService, aiService;
+var GROQ_MODELS, MODEL_COST_RATES, HARD_BLOCK_CODES, MODEL_FALLBACK_CODES, GROQ_FALLBACK_CHAIN, GROQ_LAST_RESORT_MODEL, AIService, aiService;
 var init_ai = __esm({
   "server/services/ai.ts"() {
     "use strict";
@@ -3444,6 +3453,15 @@ var init_ai = __esm({
       "billing_blocked",
       "invalid_key"
     ]);
+    MODEL_FALLBACK_CODES = /* @__PURE__ */ new Set([
+      "model_unavailable"
+    ]);
+    GROQ_FALLBACK_CHAIN = {
+      [GROQ_MODELS.reasoning]: [GROQ_MODELS.fast],
+      [GROQ_MODELS.fast]: [GROQ_MODELS.reasoning],
+      [GROQ_MODELS.safeguard]: [GROQ_MODELS.fast, GROQ_MODELS.reasoning]
+    };
+    GROQ_LAST_RESORT_MODEL = GROQ_MODELS.fast;
     AIService = class {
       getDefaultConfig(task = "chat") {
         const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -3471,36 +3489,40 @@ var init_ai = __esm({
         return { provider: "groq", apiKey: process.env.GROQ_API_KEY, model: groqModel };
       }
       /**
-       * Decide whether a failed call should be retried on the OTHER provider.
+       * Decide whether a failed call should be retried on a DIFFERENT GROQ MODEL.
        *
-       * Returns the replacement config, or null to rethrow the original error.
-       * Four conditions must all hold — any one of them missing means no failover:
+       * This deployment is single-provider by choice. That makes an account-level
+       * hard block (spend limit, revoked key) genuinely unrecoverable in code — it
+       * is org-wide, so every model behind that key is off. Those are alerted on
+       * and explained honestly instead of being retried.
        *
-       *  1. Failover is not disabled by `LLM_FAILOVER_DISABLED=1` (the kill switch;
-       *     set it to force single-provider behavior without a redeploy).
-       *  2. The call used the PLATFORM default config, not BYOK. A user's own
-       *     blocked key must not silently spend platform credit on their behalf —
-       *     they get the classified error telling them to fix their own billing.
-       *  3. The error is a hard block (billing / invalid key). Rate limits and 5xx
-       *     clear on their own; switching providers for those would double spend
-       *     and hide a transient fault.
-       *  4. The other provider actually has a key configured.
+       * What IS recoverable is a MODEL-level failure. Groq retires models on a
+       * rolling schedule, so any pinned id has an expiry date we do not control and
+       * are not told about in advance. Reissuing against a model that still exists
+       * turns a scheduled total outage into a logged quality downgrade.
+       *
+       * Returns the replacement config, or null to rethrow. Three conditions:
+       *
+       *  1. Not disabled by `LLM_MODEL_FALLBACK_DISABLED=1` (kill switch — force
+       *     single-model behavior without a redeploy).
+       *  2. The error is `model_unavailable`. Rate limits, 5xx, context overflows,
+       *     and account blocks all resolve differently and must not land here.
+       *  3. A fallback exists that is not the model which just failed.
+       *
+       * Applies to BYOK calls too, unlike the account-level case: switching models
+       * inside the caller's own key spends only their credit, on the provider they
+       * already chose, and the alternative is a hard failure they cannot act on.
        */
-      resolveFailover(config, err, isPlatformDefault, task) {
-        if (process.env.LLM_FAILOVER_DISABLED === "1") return null;
-        if (!isPlatformDefault) return null;
-        if (config.provider !== "groq" && config.provider !== "anthropic") return null;
-        const classified = classifyLlmError(err, config.provider);
-        if (!HARD_BLOCK_CODES.has(classified.code)) return null;
-        if (config.provider === "groq" && process.env.ANTHROPIC_API_KEY) {
-          const model = task === "complex" ? "claude-opus-4-7" : task === "classification" ? "claude-haiku-4-5" : "claude-sonnet-4-5";
-          return { provider: "anthropic", apiKey: process.env.ANTHROPIC_API_KEY, model };
-        }
-        if (config.provider === "anthropic" && process.env.GROQ_API_KEY) {
-          const model = task === "complex" || task === "deliverable" ? GROQ_MODELS.reasoning : GROQ_MODELS.fast;
-          return { provider: "groq", apiKey: process.env.GROQ_API_KEY, model };
-        }
-        return null;
+      resolveModelFallback(config, err) {
+        if (process.env.LLM_MODEL_FALLBACK_DISABLED === "1") return null;
+        if (config.provider !== "groq") return null;
+        const classified = classifyLlmError(err, "groq");
+        if (!MODEL_FALLBACK_CODES.has(classified.code)) return null;
+        const failedModel = config.model ?? "";
+        const candidates = GROQ_FALLBACK_CHAIN[failedModel] ?? [GROQ_LAST_RESORT_MODEL];
+        const next = candidates.find((m) => m !== failedModel);
+        if (!next) return null;
+        return { ...config, model: next };
       }
       /**
        * Alert on a provider hard block.
@@ -3542,23 +3564,22 @@ var init_ai = __esm({
         }
       }
       async chat(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
-        const isPlatformDefault = !userConfig;
         const config = userConfig || this.getDefaultConfig(task);
         try {
           const response = await this.dispatchChat(messages2, model, config, task, context);
-          return { ...response, providerUsed: config.provider, failedOver: false };
+          return { ...response, providerUsed: config.provider, modelUsed: config.model, failedOver: false };
         } catch (err) {
           if (config.provider === "groq" || config.provider === "anthropic") {
             this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
           }
-          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-          if (!failover) throw err;
+          const fallback = this.resolveModelFallback(config, err);
+          if (!fallback) throw err;
           logger.warn(
-            { from: config.provider, to: failover.provider, task, code: classifyLlmError(err, config.provider).code },
-            "[llm-failover] primary provider hard-blocked \u2014 retrying on secondary"
+            { from: config.model, to: fallback.model, task },
+            "[llm-model-fallback] model unavailable \u2014 retrying on a supported model"
           );
-          const response = await this.dispatchChat(messages2, failover.model, failover, task, context);
-          return { ...response, providerUsed: failover.provider, failedOver: true };
+          const response = await this.dispatchChat(messages2, fallback.model, fallback, task, context);
+          return { ...response, providerUsed: fallback.provider, modelUsed: fallback.model, failedOver: true };
         }
       }
       /**
@@ -3566,7 +3587,6 @@ var init_ai = __esm({
        * Use for conversational stages where perceived latency matters.
        */
       async *chatStream(messages2, model = "claude-sonnet", userConfig, task = "chat", context) {
-        const isPlatformDefault = !userConfig;
         const config = userConfig || this.getDefaultConfig(task);
         let emittedDelta = false;
         try {
@@ -3580,13 +3600,13 @@ var init_ai = __esm({
             this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
           }
           if (emittedDelta) throw err;
-          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-          if (!failover) throw err;
+          const fallback = this.resolveModelFallback(config, err);
+          if (!fallback) throw err;
           logger.warn(
-            { from: config.provider, to: failover.provider, task },
-            "[llm-failover] primary provider hard-blocked mid-stream (pre-delta) \u2014 retrying on secondary"
+            { from: config.model, to: fallback.model, task },
+            "[llm-model-fallback] model unavailable at stream-open \u2014 retrying on a supported model"
           );
-          yield* this.dispatchStream(messages2, failover.model, failover, task, context);
+          yield* this.dispatchStream(messages2, fallback.model, fallback, task, context);
         }
       }
       async *dispatchStream(messages2, model, config, task, context) {
@@ -3821,7 +3841,6 @@ var init_ai = __esm({
         }
       }
       async generateStructuredOutput(messages2, model = "claude-sonnet", userConfig, task = "classification", context) {
-        const isPlatformDefault = !userConfig;
         const config = userConfig || this.getDefaultConfig(task);
         try {
           return await this.dispatchStructured(messages2, model, config, task, context);
@@ -3829,13 +3848,13 @@ var init_ai = __esm({
           if (config.provider === "groq" || config.provider === "anthropic") {
             this.reportHardBlock(config.provider, classifyLlmError(err, config.provider));
           }
-          const failover = this.resolveFailover(config, err, isPlatformDefault, task);
-          if (!failover) throw err;
+          const fallback = this.resolveModelFallback(config, err);
+          if (!fallback) throw err;
           logger.warn(
-            { from: config.provider, to: failover.provider, task },
-            "[llm-failover] structured-output primary hard-blocked \u2014 retrying on secondary"
+            { from: config.model, to: fallback.model, task },
+            "[llm-model-fallback] structured-output model unavailable \u2014 retrying on a supported model"
           );
-          return await this.dispatchStructured(messages2, failover.model, failover, task, context);
+          return await this.dispatchStructured(messages2, fallback.model, fallback, task, context);
         }
       }
       async dispatchStructured(messages2, model, config, task, context) {
@@ -8992,12 +9011,14 @@ ${content}`);
           anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
           openai: Boolean(process.env.OPENAI_API_KEY)
         },
-        // Failover only engages when BOTH platform keys exist and the kill
-        // switch is off. Surfaced so "we have a fallback" is observable in the
-        // deployed environment rather than assumed from the code being present.
-        failover: {
-          available: Boolean(process.env.GROQ_API_KEY) && Boolean(process.env.ANTHROPIC_API_KEY) && process.env.LLM_FAILOVER_DISABLED !== "1",
-          disabledByKillSwitch: process.env.LLM_FAILOVER_DISABLED === "1"
+        // Model fallback covers a RETIRED MODEL, not an account block. An
+        // account-level block (spend limit, revoked key) is org-wide and
+        // therefore not survivable in-app on a single-provider deployment —
+        // surfaced explicitly so the distinction is not assumed away.
+        modelFallback: {
+          available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
+          coversAccountBlock: false
         }
       };
       res.json(result);

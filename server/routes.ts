@@ -2724,15 +2724,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
           openai: Boolean(process.env.OPENAI_API_KEY),
         },
-        // Failover only engages when BOTH platform keys exist and the kill
-        // switch is off. Surfaced so "we have a fallback" is observable in the
-        // deployed environment rather than assumed from the code being present.
-        failover: {
-          available:
-            Boolean(process.env.GROQ_API_KEY) &&
-            Boolean(process.env.ANTHROPIC_API_KEY) &&
-            process.env.LLM_FAILOVER_DISABLED !== "1",
-          disabledByKillSwitch: process.env.LLM_FAILOVER_DISABLED === "1",
+        // Model fallback covers a RETIRED MODEL, not an account block. An
+        // account-level block (spend limit, revoked key) is org-wide and
+        // therefore not survivable in-app on a single-provider deployment —
+        // surfaced explicitly so the distinction is not assumed away.
+        modelFallback: {
+          available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
+          coversAccountBlock: false,
         },
       };
       res.json(result);
