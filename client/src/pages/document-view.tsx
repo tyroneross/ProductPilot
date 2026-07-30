@@ -687,20 +687,21 @@ export default function DocumentViewPage() {
       } catch {
         // body wasn't JSON — fall through with the raw text
       }
+      // A classified errorCode is more specific than the HTTP status, so it
+      // wins. The previous ordering let any 400 render "Can't generate yet",
+      // which reads as a user input problem even when the real cause is a
+      // provider account block the user can do nothing about.
+      const TITLE_BY_CODE: Record<string, string> = {
+        billing_blocked: "Generation paused — account limit reached",
+        rate_limit: "Rate-limited by the provider",
+        invalid_key: "API key problem",
+        provider_unavailable: "Provider unavailable",
+        timeout: "Request timed out",
+        context_too_large: "Request too large",
+      };
       const title =
-        status === "400"
-          ? "Can't generate yet"
-          : errorCode === "rate_limit"
-            ? "Rate-limited by the provider"
-            : errorCode === "invalid_key"
-              ? "API key problem"
-              : errorCode === "provider_unavailable"
-                ? "Provider unavailable"
-                : errorCode === "timeout"
-                  ? "Request timed out"
-                  : errorCode === "context_too_large"
-                    ? "Request too large"
-                    : "Regeneration failed";
+        (errorCode && TITLE_BY_CODE[errorCode]) ??
+        (status === "400" ? "Can't generate yet" : "Regeneration failed");
       toast({
         title,
         description: serverMessage || "Please try again.",

@@ -163,9 +163,37 @@ export default function DocumentsPage() {
       }
     },
     onError: (err: unknown) => {
-      const description =
-        err instanceof Error && err.message ? err.message : "Please try again.";
-      toast({ title: "Generation failed", description, variant: "destructive" });
+      // apiRequest throws Error(`${status}: ${body}`) where body is usually
+      // JSON ({message, errorCode}). Rendering err.message directly put the
+      // raw provider payload in front of the user (prod, 2026-07-29). Parse
+      // out the server's classified message and pick the title from the code.
+      const raw = err instanceof Error ? err.message : String(err);
+      const colon = raw.indexOf(": ");
+      const body = colon > 0 ? raw.slice(colon + 2) : raw;
+      let description = "Please try again.";
+      let errorCode: string | null = null;
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && typeof parsed.message === "string") description = parsed.message;
+        if (parsed && typeof parsed.errorCode === "string") errorCode = parsed.errorCode;
+      } catch {
+        // Non-JSON body. Only surface it when it is short and free of the
+        // brace/quote signature of a serialized provider error.
+        if (body && body.length < 200 && !/[{}"]/.test(body)) description = body;
+      }
+      const TITLE_BY_CODE: Record<string, string> = {
+        billing_blocked: "Generation paused — account limit reached",
+        rate_limit: "Rate-limited by the provider",
+        invalid_key: "API key problem",
+        provider_unavailable: "Provider unavailable",
+        timeout: "Request timed out",
+        context_too_large: "Request too large",
+      };
+      toast({
+        title: (errorCode && TITLE_BY_CODE[errorCode]) ?? "Generation failed",
+        description,
+        variant: "destructive",
+      });
     },
     onSettled: () => setPendingStageId(null),
   });

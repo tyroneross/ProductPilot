@@ -39,10 +39,20 @@ export const MODEL_COST_RATES: Record<string, { input: number; output: number; c
 export type LlmErrorCode =
   | "rate_limit"
   | "invalid_key"
+  | "billing_blocked"
   | "provider_unavailable"
   | "timeout"
   | "context_too_large"
   | "unknown";
+
+// Hard blocks are provider states that retrying cannot clear — the account is
+// switched off until a human changes a billing setting or a key. These are the
+// only classes that justify failing over to the other provider; rate limits and
+// 5xx clear on their own and must NOT trigger a provider switch.
+const HARD_BLOCK_CODES: ReadonlySet<LlmErrorCode> = new Set<LlmErrorCode>([
+  "billing_blocked",
+  "invalid_key",
+]);
 
 export interface ClassifiedLlmError {
   code: LlmErrorCode;
@@ -50,6 +60,31 @@ export interface ClassifiedLlmError {
   retryAfterSeconds: number | null;
   details: string;
   status: number | null;
+}
+
+/**
+ * Safe user-facing message for a catch block that may or may not hold an LLM error.
+ *
+ * Outer route handlers catch everything — DB faults, validation, LLM SDK errors
+ * that escaped an inner try. Interpolating `err.message` there leaks provider
+ * JSON and stack detail to the browser. This returns the classified copy when
+ * the error is a RECOGNIZED LLM failure, and a generic line otherwise, so a
+ * non-LLM fault never gets mislabeled as a provider problem.
+ */
+export function toSafeUserMessage(
+  err: unknown,
+  provider: "anthropic" | "groq",
+  fallback: string,
+): { message: string; errorCode: LlmErrorCode | null; retryAfterSeconds: number | null } {
+  const classified = classifyLlmError(err, provider);
+  if (classified.code === "unknown") {
+    return { message: fallback, errorCode: null, retryAfterSeconds: null };
+  }
+  return {
+    message: classified.message,
+    errorCode: classified.code,
+    retryAfterSeconds: classified.retryAfterSeconds,
+  };
 }
 
 export function classifyLlmError(err: unknown, provider: "anthropic" | "groq"): ClassifiedLlmError {
@@ -65,6 +100,44 @@ export function classifyLlmError(err: unknown, provider: "anthropic" | "groq"): 
   if (typeof retryRaw === "string") {
     const asInt = parseInt(retryRaw, 10);
     if (Number.isFinite(asInt)) retryAfterSeconds = asInt;
+  }
+
+  // Billing / spend block. Checked FIRST because it is the most specific and
+  // most actionable state, and because retrying never clears it.
+  //
+  // Groq's published contract (console.groq.com/docs/spend-limits) is
+  // HTTP 400 + code `blocked_api_access`, but production has been observed
+  // returning a `spend_*` code with type `invalid_request_error` instead. We
+  // match the documented code, the observed code family, AND the message text
+  // so a third variant does not fall through to the misleading generic branch.
+  // Anthropic's equivalent is `billing_error` / credit-balance wording.
+  const providerCode =
+    typeof (e as { code?: unknown } | null | undefined)?.code === "string"
+      ? ((e as { code: string }).code)
+      : /"code"\s*:\s*"([a-z0-9_]+)"/i.exec(rawMessage)?.[1] ?? "";
+  const billingCodeHit =
+    providerCode === "blocked_api_access" ||
+    providerCode.startsWith("spend_") ||
+    providerCode === "billing_error";
+  const billingTextHit =
+    /spend (alert|limit)|blocked api access|has blocked api|spending limit|credit balance is too low|billing/i.test(
+      rawMessage,
+    );
+  if (billingCodeHit || (status === 400 && billingTextHit)) {
+    const console_ =
+      provider === "anthropic"
+        ? "console.anthropic.com/settings/billing"
+        : "console.groq.com/settings/billing";
+    return {
+      code: "billing_blocked",
+      message:
+        `Document generation is paused because the ${provider === "anthropic" ? "Anthropic" : "Groq"} account that powers it has hit its spending limit. ` +
+        `This is not something retrying will fix. If this is your own API key, raise the limit at ${console_}; ` +
+        `otherwise the ProductPilot team has been alerted and is restoring service.`,
+      retryAfterSeconds: null,
+      details: rawMessage,
+      status,
+    };
   }
 
   // 401/403/key wording → invalid key. Never quote the key in the message.
@@ -227,6 +300,10 @@ export interface AIResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  /** Which provider actually served this response (may differ from the requested one after failover). */
+  providerUsed?: LLMConfig['provider'];
+  /** True when the primary provider was hard-blocked and the secondary served this response. */
+  failedOver?: boolean;
 }
 
 export interface LLMConfig {
@@ -296,15 +373,58 @@ export class AIService {
     return { provider: 'groq', apiKey: process.env.GROQ_API_KEY!, model: groqModel };
   }
 
-  async chat(
+  /**
+   * Decide whether a failed call should be retried on the OTHER provider.
+   *
+   * Returns the replacement config, or null to rethrow the original error.
+   * Four conditions must all hold — any one of them missing means no failover:
+   *
+   *  1. Failover is not disabled by `LLM_FAILOVER_DISABLED=1` (the kill switch;
+   *     set it to force single-provider behavior without a redeploy).
+   *  2. The call used the PLATFORM default config, not BYOK. A user's own
+   *     blocked key must not silently spend platform credit on their behalf —
+   *     they get the classified error telling them to fix their own billing.
+   *  3. The error is a hard block (billing / invalid key). Rate limits and 5xx
+   *     clear on their own; switching providers for those would double spend
+   *     and hide a transient fault.
+   *  4. The other provider actually has a key configured.
+   */
+  private resolveFailover(
+    config: LLMConfig,
+    err: unknown,
+    isPlatformDefault: boolean,
+    task: LLMTask,
+  ): LLMConfig | null {
+    if (process.env.LLM_FAILOVER_DISABLED === '1') return null;
+    if (!isPlatformDefault) return null;
+    if (config.provider !== 'groq' && config.provider !== 'anthropic') return null;
+
+    const classified = classifyLlmError(err, config.provider);
+    if (!HARD_BLOCK_CODES.has(classified.code)) return null;
+
+    if (config.provider === 'groq' && process.env.ANTHROPIC_API_KEY) {
+      const model =
+        task === 'complex' ? 'claude-opus-4-7' :
+        task === 'classification' ? 'claude-haiku-4-5' :
+        'claude-sonnet-4-5';
+      return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY, model };
+    }
+    if (config.provider === 'anthropic' && process.env.GROQ_API_KEY) {
+      const model =
+        task === 'complex' || task === 'deliverable' ? GROQ_MODELS.reasoning :
+        GROQ_MODELS.fast;
+      return { provider: 'groq', apiKey: process.env.GROQ_API_KEY, model };
+    }
+    return null;
+  }
+
+  private dispatchChat(
     messages: AIMessage[],
-    model: string = "claude-sonnet",
-    userConfig?: LLMConfig | null,
-    task: LLMTask = 'chat',
+    model: string,
+    config: LLMConfig,
+    task: LLMTask,
     context?: LLMCallContext,
   ): Promise<AIResponse> {
-    const config = userConfig || this.getDefaultConfig(task);
-
     switch (config.provider) {
       case 'groq':
         return this.chatWithGroq(messages, config.model || GROQ_MODELS.fast, config.apiKey, task, context);
@@ -312,6 +432,34 @@ export class AIService {
         return this.chatWithClaude(messages, this.normalizeModel(model || config.model || 'claude-sonnet'), config.apiKey, task, context);
       default:
         return this.chatWithGroq(messages, GROQ_MODELS.fast, this.getDefaultConfig(task).apiKey, task, context);
+    }
+  }
+
+  async chat(
+    messages: AIMessage[],
+    model: string = "claude-sonnet",
+    userConfig?: LLMConfig | null,
+    task: LLMTask = 'chat',
+    context?: LLMCallContext,
+  ): Promise<AIResponse> {
+    const isPlatformDefault = !userConfig;
+    const config = userConfig || this.getDefaultConfig(task);
+
+    try {
+      const response = await this.dispatchChat(messages, model, config, task, context);
+      return { ...response, providerUsed: config.provider, failedOver: false };
+    } catch (err) {
+      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+      if (!failover) throw err;
+
+      logger.warn(
+        { from: config.provider, to: failover.provider, task, code: classifyLlmError(err, config.provider as "groq" | "anthropic").code },
+        "[llm-failover] primary provider hard-blocked — retrying on secondary",
+      );
+      // Single attempt only. If the secondary also fails, its error propagates
+      // and gets classified for the user like any other — no retry loop.
+      const response = await this.dispatchChat(messages, model, failover, task, context);
+      return { ...response, providerUsed: failover.provider, failedOver: true };
     }
   }
 
@@ -326,8 +474,40 @@ export class AIService {
     task: LLMTask = 'chat',
     context?: LLMCallContext,
   ): AsyncGenerator<StreamChunk> {
+    const isPlatformDefault = !userConfig;
     const config = userConfig || this.getDefaultConfig(task);
 
+    // Failover on a stream is only safe BEFORE the first delta reaches the
+    // client — once partial text is on screen, restarting on another provider
+    // would splice two different completions together. A hard block throws at
+    // stream-open, so the pre-delta window is exactly where it lands.
+    let emittedDelta = false;
+    try {
+      for await (const chunk of this.dispatchStream(messages, model, config, task, context)) {
+        if (chunk.type === 'delta') emittedDelta = true;
+        yield chunk;
+      }
+      return;
+    } catch (err) {
+      if (emittedDelta) throw err;
+      const failover = this.resolveFailover(config, err, isPlatformDefault, task);
+      if (!failover) throw err;
+
+      logger.warn(
+        { from: config.provider, to: failover.provider, task },
+        "[llm-failover] primary provider hard-blocked mid-stream (pre-delta) — retrying on secondary",
+      );
+      yield* this.dispatchStream(messages, model, failover, task, context);
+    }
+  }
+
+  private async *dispatchStream(
+    messages: AIMessage[],
+    model: string,
+    config: LLMConfig,
+    task: LLMTask,
+    context?: LLMCallContext,
+  ): AsyncGenerator<StreamChunk> {
     if (config.provider === 'anthropic') {
       yield* this.streamClaude(
         messages,

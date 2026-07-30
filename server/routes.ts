@@ -3,7 +3,7 @@ import { logger } from "./lib/logger";
 import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
 import { runWithDbActorContext, storage, updateDbActorContext } from "./storage-hybrid";
-import { aiService, classifyLlmError, type AIMessage, type LLMConfig } from "./services/ai";
+import { aiService, classifyLlmError, toSafeUserMessage, type AIMessage, type LLMConfig } from "./services/ai";
 import {
   insertProjectSchema,
   insertMessageSchema,
@@ -767,7 +767,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.end();
     } catch (err) {
       logger.error({ err }, "Stream error");
-      send("error", { message: err instanceof Error ? err.message : "AI service error" });
+      const safe = toSafeUserMessage(err, "groq", "AI service error");
+      send("error", { message: safe.message, errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds });
       res.end();
     }
   });
@@ -1164,9 +1165,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : {}),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Doc generation error");
-      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate documentation. Please try again.");
+      res.status(500).json({ message: safe.message, errorCode: safe.errorCode ?? "unknown", retryAfterSeconds: safe.retryAfterSeconds });
     }
   });
 
@@ -1278,19 +1279,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateStage(stage.id, { progress: 100 });
           return { ok: true as const, stageTitle: stage.title };
         } catch (stageError) {
-          const message = stageError instanceof Error ? stageError.message : String(stageError);
-          logger.error({ err: stageError, stageTitle: stage.title, stageNumber: stage.stageNumber }, "Error generating docs for stage (minimum)");
-          return { ok: false as const, stageTitle: stage.title, error: message };
+          // Classify before returning. Previously this path returned the raw
+          // SDK message, which leaked provider JSON straight into the user's
+          // error toast (observed in prod 2026-07-29 as a Groq spend-block
+          // payload). The full-generation path above already classified; this
+          // one did not, so identical failures rendered very differently.
+          const provider = (userConfig?.provider === "anthropic" ? "anthropic" : "groq") as "anthropic" | "groq";
+          const classified = classifyLlmError(stageError, provider);
+          logger.error(
+            { err: stageError, classification: classified.code, stageTitle: stage.title, stageNumber: stage.stageNumber },
+            "Error generating docs for stage (minimum)",
+          );
+          return {
+            ok: false as const,
+            stageTitle: stage.title,
+            error: classified.message,
+            errorCode: classified.code,
+            retryAfterSeconds: classified.retryAfterSeconds,
+          };
         }
       }));
 
-      const minFailed = minResults.filter(r => !r.ok) as Array<{ ok: false; stageTitle: string; error: string }>;
+      const minFailed = minResults.filter(r => !r.ok) as Array<{ ok: false; stageTitle: string; error: string; errorCode?: string; retryAfterSeconds?: number | null }>;
       const minSucceeded = minResults.filter(r => r.ok);
 
       if (minSucceeded.length === 0 && minFailed.length > 0) {
         return res.status(502).json({
           message: `Doc generation failed: ${minFailed[0].error}`,
-          failed: minFailed.map(f => ({ stageTitle: f.stageTitle, error: f.error })),
+          errorCode: minFailed[0].errorCode ?? "unknown",
+          retryAfterSeconds: minFailed[0].retryAfterSeconds ?? null,
+          failed: minFailed.map(f => ({
+            stageTitle: f.stageTitle,
+            error: f.error,
+            errorCode: f.errorCode ?? "unknown",
+            retryAfterSeconds: f.retryAfterSeconds ?? null,
+          })),
         });
       }
 
@@ -1298,12 +1321,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Documentation generated from minimum details",
         succeeded: minSucceeded.length,
         failed: minFailed.length,
-        ...(minFailed.length > 0 ? { failures: minFailed.map(f => ({ stageTitle: f.stageTitle, error: f.error })) } : {}),
+        ...(minFailed.length > 0
+          ? {
+              failures: minFailed.map(f => ({
+                stageTitle: f.stageTitle,
+                error: f.error,
+                errorCode: f.errorCode ?? "unknown",
+                retryAfterSeconds: f.retryAfterSeconds ?? null,
+              })),
+            }
+          : {}),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       logger.error({ err: error }, "Min doc generation error");
-      res.status(500).json({ message: `Failed to generate documentation: ${message}` });
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate documentation. Please try again.");
+      res.status(500).json({ message: safe.message, errorCode: safe.errorCode ?? "unknown", retryAfterSeconds: safe.retryAfterSeconds });
     }
   });
 
@@ -2617,6 +2649,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           groq: Boolean(process.env.GROQ_API_KEY),
           anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
           openai: Boolean(process.env.OPENAI_API_KEY),
+        },
+        // Failover only engages when BOTH platform keys exist and the kill
+        // switch is off. Surfaced so "we have a fallback" is observable in the
+        // deployed environment rather than assumed from the code being present.
+        failover: {
+          available:
+            Boolean(process.env.GROQ_API_KEY) &&
+            Boolean(process.env.ANTHROPIC_API_KEY) &&
+            process.env.LLM_FAILOVER_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_FAILOVER_DISABLED === "1",
         },
       };
       res.json(result);
