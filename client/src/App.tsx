@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { AdminOnly } from "@/components/admin-only";
 
 const WelcomePage = lazy(() => import("@/pages/welcome"));
 const DetailsPage = lazy(() => import("@/pages/details"));
@@ -16,6 +17,7 @@ const SessionSurveyPage = lazy(() => import("@/pages/session-survey"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminAuditPage = lazy(() => import("@/pages/admin-audit"));
 const AdminLlmPage = lazy(() => import("@/pages/admin-llm"));
+const AdminOpsPage = lazy(() => import("@/pages/admin-ops"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
@@ -43,9 +45,13 @@ function Router() {
       <Route path="/documents/:projectId" component={DocumentsPage} />
       <Route path="/document/:projectId/:stageId" component={DocumentViewPage} />
       <Route path="/session/survey" component={SessionSurveyPage} />
-      <Route path="/admin" component={AdminPage} />
-      <Route path="/admin/audit" component={AdminAuditPage} />
-      <Route path="/admin/llm" component={AdminLlmPage} />
+      {/* Admin routes render the ordinary 404 for non-admins, so the surface
+          is indistinguishable from a nonexistent path. Server-side isAdmin
+          remains the real boundary. */}
+      <Route path="/admin"><AdminOnly component={AdminPage} /></Route>
+      <Route path="/admin/ops"><AdminOnly component={AdminOpsPage} /></Route>
+      <Route path="/admin/audit"><AdminOnly component={AdminAuditPage} /></Route>
+      <Route path="/admin/llm"><AdminOnly component={AdminLlmPage} /></Route>
       <Route path="/login" component={LoginPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/settings" component={SettingsPage} />

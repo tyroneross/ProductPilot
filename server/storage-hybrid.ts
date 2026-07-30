@@ -19,6 +19,7 @@ interface IStorage {
   getProjectsByUserId(userId: string): Promise<Project[]>;
   getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]>;
   claimProjectsForUser(guestOwnerId: string, userId: string): Promise<Project[]>;
+  getOpsSummary(): Promise<OpsSummary>;
   getUserDraft(userId: string): Promise<Project | undefined>;
   updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
@@ -68,6 +69,52 @@ interface IStorage {
   updateIntakeQuestionAnswer(id: string, answerText: string): Promise<IntakeQuestion | undefined>;
   getIntakeQuestionsByProject(projectId: string): Promise<IntakeQuestion[]>;
 }
+
+/**
+ * Operational snapshot for the admin overview.
+ *
+ * Every field here had to be derived by hand-written SQL during the 2026-07-30
+ * incident. The numbers that mattered most — how many projects are stranded
+ * behind an expired guest cookie, and how many real people are actually using
+ * the product — were invisible from inside the app.
+ *
+ * `strandedProjects` counts guest-owned rows older than the 30-day cookie
+ * lifetime. Those are unreachable by their creators: listing filters on
+ * user_id, and a direct link 403s without the cookie.
+ */
+export type OpsSummary = {
+  users: {
+    registeredAccounts: number;
+    accountsWithProjects: number;
+    distinctGuests: number;
+    guestsWithRealWork: number;
+  };
+  ownership: {
+    accountOwned: number;
+    guestOwnedAtRisk: number;
+    strandedProjects: number;
+    orphaned: number;
+    totalProjects: number;
+  };
+  engagement: {
+    projectsPerGuest: Array<{ projects: number; guests: number }>;
+    totalStages: number;
+    totalMessages: number;
+  };
+  spend: {
+    windowDays: number;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    errorCalls: number;
+    byModel: Array<{ model: string; calls: number; costUsd: number }>;
+  };
+  generatedAt: string;
+};
+
+/** Cookie lifetime that decides whether a guest project is still reachable. */
+export const GUEST_COOKIE_DAYS = 30;
 
 // Filter shape for admin observability pages. All fields optional.
 export type AuditEventListFilters = {
@@ -184,6 +231,43 @@ export class MemStorage implements IStorage {
     return (await this.getAllProjects()).filter(
       (project) => project.guestOwnerId === guestOwnerId,
     );
+  }
+
+  async getOpsSummary(): Promise<OpsSummary> {
+    // In-memory fallback (dev only, no database). Numbers are real for what
+    // this process holds; llm spend is not tracked here, so it reports zero
+    // rather than a fabricated figure.
+    const all = await this.getAllProjects();
+    const cutoff = Date.now() - GUEST_COOKIE_DAYS * 24 * 60 * 60 * 1000;
+    const guestProjects = all.filter((p) => !p.userId && p.guestOwnerId);
+    const perGuestMap = new Map<string, number>();
+    for (const p of guestProjects) {
+      perGuestMap.set(p.guestOwnerId!, (perGuestMap.get(p.guestOwnerId!) ?? 0) + 1);
+    }
+    const dist = new Map<number, number>();
+    Array.from(perGuestMap.values()).forEach((c) => dist.set(c, (dist.get(c) ?? 0) + 1));
+    return {
+      users: {
+        registeredAccounts: new Set(all.map((p) => p.userId).filter(Boolean)).size,
+        accountsWithProjects: new Set(all.filter((p) => p.userId).map((p) => p.userId)).size,
+        distinctGuests: perGuestMap.size,
+        guestsWithRealWork: 0,
+      },
+      ownership: {
+        accountOwned: all.filter((p) => p.userId).length,
+        guestOwnedAtRisk: guestProjects.filter((p) => p.createdAt.getTime() >= cutoff).length,
+        strandedProjects: guestProjects.filter((p) => p.createdAt.getTime() < cutoff).length,
+        orphaned: all.filter((p) => !p.userId && !p.guestOwnerId).length,
+        totalProjects: all.length,
+      },
+      engagement: {
+        projectsPerGuest: Array.from(dist.entries()).map(([projects, guests]) => ({ projects, guests })).sort((a, b) => a.projects - b.projects),
+        totalStages: this.stages.size,
+        totalMessages: this.messages.size,
+      },
+      spend: { windowDays: 30, calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, errorCalls: 0, byModel: [] },
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async claimProjectsForUser(guestOwnerId: string, userId: string): Promise<Project[]> {
@@ -655,6 +739,95 @@ class PostgresStorage implements IStorage {
         .where(and(eq(projects.guestOwnerId, guestOwnerId), isNull(projects.userId)))
         .returning()
     );
+  }
+
+  async getOpsSummary(): Promise<OpsSummary> {
+    const SPEND_WINDOW_DAYS = 30;
+    const cutoff = `${GUEST_COOKIE_DAYS} days`;
+
+    // One round trip per logical group rather than per metric. All counts come
+    // from live rows — there is no cached or derived table behind this.
+    const [counts] = await this.withActor((tx) =>
+      tx.execute(sql`
+        select
+          (select count(*) from "user")::int as registered_accounts,
+          (select count(distinct user_id) from projects where user_id is not null)::int as accounts_with_projects,
+          (select count(distinct guest_owner_id) from projects where guest_owner_id is not null)::int as distinct_guests,
+          (select count(distinct p.guest_owner_id) from projects p
+             where p.guest_owner_id is not null
+               and exists (select 1 from stages s where s.project_id = p.id and s.progress > 0))::int as guests_with_real_work,
+          (select count(*) from projects where user_id is not null)::int as account_owned,
+          (select count(*) from projects where user_id is null and guest_owner_id is not null
+             and created_at >= now() - ${cutoff}::interval)::int as guest_owned_at_risk,
+          (select count(*) from projects where user_id is null and guest_owner_id is not null
+             and created_at <  now() - ${cutoff}::interval)::int as stranded,
+          (select count(*) from projects where user_id is null and guest_owner_id is null)::int as orphaned,
+          (select count(*) from projects)::int as total_projects,
+          (select count(*) from stages)::int as total_stages,
+          (select count(*) from messages)::int as total_messages
+      `) as any
+    );
+
+    const perGuest = (await this.withActor((tx) =>
+      tx.execute(sql`
+        select c::int as projects, count(*)::int as guests from (
+          select guest_owner_id, count(*) c from projects
+          where user_id is null and guest_owner_id is not null group by 1
+        ) t group by 1 order by 1
+      `) as any
+    )) as Array<{ projects: number; guests: number }>;
+
+    const [spend] = await this.withActor((tx) =>
+      tx.execute(sql`
+        select
+          count(*)::int as calls,
+          coalesce(sum(input_tokens),0)::bigint as input_tokens,
+          coalesce(sum(output_tokens),0)::bigint as output_tokens,
+          coalesce(sum(cost_usd),0)::numeric as cost_usd,
+          count(*) filter (where status <> 'ok')::int as error_calls
+        from llm_calls where created_at >= now() - ${`${SPEND_WINDOW_DAYS} days`}::interval
+      `) as any
+    );
+
+    const byModel = (await this.withActor((tx) =>
+      tx.execute(sql`
+        select model, count(*)::int as calls, coalesce(sum(cost_usd),0)::numeric as cost_usd
+        from llm_calls where created_at >= now() - ${`${SPEND_WINDOW_DAYS} days`}::interval
+        group by 1 order by 3 desc nulls last limit 10
+      `) as any
+    )) as Array<{ model: string; calls: number; cost_usd: string }>;
+
+    const n = (v: unknown) => Number(v ?? 0);
+    return {
+      users: {
+        registeredAccounts: n(counts?.registered_accounts),
+        accountsWithProjects: n(counts?.accounts_with_projects),
+        distinctGuests: n(counts?.distinct_guests),
+        guestsWithRealWork: n(counts?.guests_with_real_work),
+      },
+      ownership: {
+        accountOwned: n(counts?.account_owned),
+        guestOwnedAtRisk: n(counts?.guest_owned_at_risk),
+        strandedProjects: n(counts?.stranded),
+        orphaned: n(counts?.orphaned),
+        totalProjects: n(counts?.total_projects),
+      },
+      engagement: {
+        projectsPerGuest: (perGuest ?? []).map((r) => ({ projects: n(r.projects), guests: n(r.guests) })),
+        totalStages: n(counts?.total_stages),
+        totalMessages: n(counts?.total_messages),
+      },
+      spend: {
+        windowDays: SPEND_WINDOW_DAYS,
+        calls: n(spend?.calls),
+        inputTokens: n(spend?.input_tokens),
+        outputTokens: n(spend?.output_tokens),
+        costUsd: n(spend?.cost_usd),
+        errorCalls: n(spend?.error_calls),
+        byModel: (byModel ?? []).map((r) => ({ model: r.model, calls: n(r.calls), costUsd: n(r.cost_usd) })),
+      },
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {

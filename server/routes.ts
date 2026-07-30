@@ -2774,6 +2774,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // GET /api/admin/ops-summary — operational snapshot for the admin overview.
+  //
+  // Exists because every number here had to be derived by hand-written SQL
+  // during the 2026-07-30 incident. The two that mattered most — how many
+  // projects are stranded behind an expired guest cookie, and how many people
+  // are really using this — were invisible from inside the running app.
+  //
+  // Read-only. Aggregates only: no project names, no descriptions, no emails,
+  // no guest identifiers. The admin needs counts to make decisions, not the
+  // contents of other people's product ideas.
+  app.get("/api/admin/ops-summary", requireAuth, isAdmin, async (_req, res) => {
+    try {
+      const summary = await storage.getOpsSummary();
+
+      // Same live preflight the health route performs, so "provider ok" means
+      // the same thing in both places rather than two drifting definitions.
+      const providers: Array<"groq" | "anthropic"> = [];
+      if (process.env.GROQ_API_KEY) providers.push("groq");
+      if (process.env.ANTHROPIC_API_KEY) providers.push("anthropic");
+      const health = await Promise.all(
+        providers.map(async (provider) => {
+          const started = Date.now();
+          try {
+            await aiService.chat(
+              [{ role: "user", content: "ping" }],
+              "claude-sonnet",
+              {
+                provider,
+                apiKey: (provider === "groq" ? process.env.GROQ_API_KEY : process.env.ANTHROPIC_API_KEY)!,
+              },
+              "classification",
+            );
+            return [provider, { ok: true, errorCode: null, latencyMs: Date.now() - started }] as const;
+          } catch (err) {
+            const classified = classifyLlmError(err, provider);
+            return [provider, { ok: false, errorCode: classified.code, latencyMs: Date.now() - started }] as const;
+          }
+        }),
+      );
+
+      res.json({
+        ...summary,
+        providers: Object.fromEntries(health),
+        modelFallback: {
+          available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
+          coversAccountBlock: false,
+          ...getModelFallbackStats(),
+        },
+      });
+    } catch (error) {
+      logger.error({ err: error }, "[admin/ops-summary] error");
+      res.status(500).json({ message: "Failed to build operations summary" });
+    }
+  });
+
   // ── Settings routes (require auth) ──
 
   // GET /api/settings — get current user's LLM settings + platform-key availability.

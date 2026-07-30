@@ -1383,6 +1383,7 @@ var init_secret_crypto = __esm({
 // server/storage-hybrid.ts
 var storage_hybrid_exports = {};
 __export(storage_hybrid_exports, {
+  GUEST_COOKIE_DAYS: () => GUEST_COOKIE_DAYS,
   MemStorage: () => MemStorage,
   runWithDbActorContext: () => runWithDbActorContext,
   storage: () => storage,
@@ -1450,7 +1451,7 @@ function createStorage() {
   logger.warn("Using in-memory storage (no database configured \u2014 dev only)");
   return new MemStorage();
 }
-var dbActorContext, MemStorage, PostgresStorage, storage;
+var GUEST_COOKIE_DAYS, dbActorContext, MemStorage, PostgresStorage, storage;
 var init_storage_hybrid = __esm({
   "server/storage-hybrid.ts"() {
     "use strict";
@@ -1459,6 +1460,7 @@ var init_storage_hybrid = __esm({
     init_schema();
     init_prompt_content();
     init_db();
+    GUEST_COOKIE_DAYS = 30;
     dbActorContext = new AsyncLocalStorage();
     MemStorage = class {
       projects = /* @__PURE__ */ new Map();
@@ -1524,6 +1526,39 @@ var init_storage_hybrid = __esm({
         return (await this.getAllProjects()).filter(
           (project) => project.guestOwnerId === guestOwnerId
         );
+      }
+      async getOpsSummary() {
+        const all = await this.getAllProjects();
+        const cutoff = Date.now() - GUEST_COOKIE_DAYS * 24 * 60 * 60 * 1e3;
+        const guestProjects = all.filter((p) => !p.userId && p.guestOwnerId);
+        const perGuestMap = /* @__PURE__ */ new Map();
+        for (const p of guestProjects) {
+          perGuestMap.set(p.guestOwnerId, (perGuestMap.get(p.guestOwnerId) ?? 0) + 1);
+        }
+        const dist = /* @__PURE__ */ new Map();
+        Array.from(perGuestMap.values()).forEach((c) => dist.set(c, (dist.get(c) ?? 0) + 1));
+        return {
+          users: {
+            registeredAccounts: new Set(all.map((p) => p.userId).filter(Boolean)).size,
+            accountsWithProjects: new Set(all.filter((p) => p.userId).map((p) => p.userId)).size,
+            distinctGuests: perGuestMap.size,
+            guestsWithRealWork: 0
+          },
+          ownership: {
+            accountOwned: all.filter((p) => p.userId).length,
+            guestOwnedAtRisk: guestProjects.filter((p) => p.createdAt.getTime() >= cutoff).length,
+            strandedProjects: guestProjects.filter((p) => p.createdAt.getTime() < cutoff).length,
+            orphaned: all.filter((p) => !p.userId && !p.guestOwnerId).length,
+            totalProjects: all.length
+          },
+          engagement: {
+            projectsPerGuest: Array.from(dist.entries()).map(([projects2, guests]) => ({ projects: projects2, guests })).sort((a, b) => a.projects - b.projects),
+            totalStages: this.stages.size,
+            totalMessages: this.messages.size
+          },
+          spend: { windowDays: 30, calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, errorCalls: 0, byModel: [] },
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
       }
       async claimProjectsForUser(guestOwnerId, userId) {
         if (!guestOwnerId || !userId) return [];
@@ -1917,6 +1952,87 @@ var init_storage_hybrid = __esm({
         return await this.withActor(
           (tx) => tx.update(projects).set({ userId, guestOwnerId: null, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(projects.guestOwnerId, guestOwnerId), isNull(projects.userId))).returning()
         );
+      }
+      async getOpsSummary() {
+        const SPEND_WINDOW_DAYS = 30;
+        const cutoff = `${GUEST_COOKIE_DAYS} days`;
+        const [counts] = await this.withActor(
+          (tx) => tx.execute(sql2`
+        select
+          (select count(*) from "user")::int as registered_accounts,
+          (select count(distinct user_id) from projects where user_id is not null)::int as accounts_with_projects,
+          (select count(distinct guest_owner_id) from projects where guest_owner_id is not null)::int as distinct_guests,
+          (select count(distinct p.guest_owner_id) from projects p
+             where p.guest_owner_id is not null
+               and exists (select 1 from stages s where s.project_id = p.id and s.progress > 0))::int as guests_with_real_work,
+          (select count(*) from projects where user_id is not null)::int as account_owned,
+          (select count(*) from projects where user_id is null and guest_owner_id is not null
+             and created_at >= now() - ${cutoff}::interval)::int as guest_owned_at_risk,
+          (select count(*) from projects where user_id is null and guest_owner_id is not null
+             and created_at <  now() - ${cutoff}::interval)::int as stranded,
+          (select count(*) from projects where user_id is null and guest_owner_id is null)::int as orphaned,
+          (select count(*) from projects)::int as total_projects,
+          (select count(*) from stages)::int as total_stages,
+          (select count(*) from messages)::int as total_messages
+      `)
+        );
+        const perGuest = await this.withActor(
+          (tx) => tx.execute(sql2`
+        select c::int as projects, count(*)::int as guests from (
+          select guest_owner_id, count(*) c from projects
+          where user_id is null and guest_owner_id is not null group by 1
+        ) t group by 1 order by 1
+      `)
+        );
+        const [spend] = await this.withActor(
+          (tx) => tx.execute(sql2`
+        select
+          count(*)::int as calls,
+          coalesce(sum(input_tokens),0)::bigint as input_tokens,
+          coalesce(sum(output_tokens),0)::bigint as output_tokens,
+          coalesce(sum(cost_usd),0)::numeric as cost_usd,
+          count(*) filter (where status <> 'ok')::int as error_calls
+        from llm_calls where created_at >= now() - ${`${SPEND_WINDOW_DAYS} days`}::interval
+      `)
+        );
+        const byModel = await this.withActor(
+          (tx) => tx.execute(sql2`
+        select model, count(*)::int as calls, coalesce(sum(cost_usd),0)::numeric as cost_usd
+        from llm_calls where created_at >= now() - ${`${SPEND_WINDOW_DAYS} days`}::interval
+        group by 1 order by 3 desc nulls last limit 10
+      `)
+        );
+        const n = (v) => Number(v ?? 0);
+        return {
+          users: {
+            registeredAccounts: n(counts?.registered_accounts),
+            accountsWithProjects: n(counts?.accounts_with_projects),
+            distinctGuests: n(counts?.distinct_guests),
+            guestsWithRealWork: n(counts?.guests_with_real_work)
+          },
+          ownership: {
+            accountOwned: n(counts?.account_owned),
+            guestOwnedAtRisk: n(counts?.guest_owned_at_risk),
+            strandedProjects: n(counts?.stranded),
+            orphaned: n(counts?.orphaned),
+            totalProjects: n(counts?.total_projects)
+          },
+          engagement: {
+            projectsPerGuest: (perGuest ?? []).map((r) => ({ projects: n(r.projects), guests: n(r.guests) })),
+            totalStages: n(counts?.total_stages),
+            totalMessages: n(counts?.total_messages)
+          },
+          spend: {
+            windowDays: SPEND_WINDOW_DAYS,
+            calls: n(spend?.calls),
+            inputTokens: n(spend?.input_tokens),
+            outputTokens: n(spend?.output_tokens),
+            costUsd: n(spend?.cost_usd),
+            errorCalls: n(spend?.error_calls),
+            byModel: (byModel ?? []).map((r) => ({ model: r.model, calls: n(r.calls), costUsd: n(r.cost_usd) }))
+          },
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
       }
       async getUserDraft(userId) {
         const result = await this.withActor(
@@ -9141,6 +9257,47 @@ ${content}`);
       providers: byProvider,
       hardBlocked: hardBlocked.map(([p]) => p)
     });
+  });
+  app2.get("/api/admin/ops-summary", requireAuth, isAdmin, async (_req, res) => {
+    try {
+      const summary = await storage.getOpsSummary();
+      const providers = [];
+      if (process.env.GROQ_API_KEY) providers.push("groq");
+      if (process.env.ANTHROPIC_API_KEY) providers.push("anthropic");
+      const health = await Promise.all(
+        providers.map(async (provider) => {
+          const started = Date.now();
+          try {
+            await aiService.chat(
+              [{ role: "user", content: "ping" }],
+              "claude-sonnet",
+              {
+                provider,
+                apiKey: provider === "groq" ? process.env.GROQ_API_KEY : process.env.ANTHROPIC_API_KEY
+              },
+              "classification"
+            );
+            return [provider, { ok: true, errorCode: null, latencyMs: Date.now() - started }];
+          } catch (err) {
+            const classified = classifyLlmError(err, provider);
+            return [provider, { ok: false, errorCode: classified.code, latencyMs: Date.now() - started }];
+          }
+        })
+      );
+      res.json({
+        ...summary,
+        providers: Object.fromEntries(health),
+        modelFallback: {
+          available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
+          disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
+          coversAccountBlock: false,
+          ...getModelFallbackStats()
+        }
+      });
+    } catch (error) {
+      logger.error({ err: error }, "[admin/ops-summary] error");
+      res.status(500).json({ message: "Failed to build operations summary" });
+    }
   });
   app2.get("/api/settings", requireAuth, async (req, res) => {
     try {
