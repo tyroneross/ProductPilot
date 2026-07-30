@@ -1182,8 +1182,9 @@ function resolveMarkers() {
   }
   return DEFAULT_PRODUCTION_HOST_MARKERS;
 }
-function assertNotProductionDatabase(databaseUrlOrHost, nodeEnv = process.env.NODE_ENV, allowOverride = process.env.ALLOW_PROD_DB) {
+function assertNotProductionDatabase(databaseUrlOrHost, nodeEnv = process.env.NODE_ENV, allowOverride = process.env.ALLOW_PROD_DB, vercelEnv = process.env.VERCEL_ENV) {
   if (nodeEnv === "production") return;
+  if (vercelEnv === "production") return;
   if (allowOverride === "1") return;
   if (!isProductionHost(databaseUrlOrHost)) return;
   throw new ProductionDatabaseGuardError(

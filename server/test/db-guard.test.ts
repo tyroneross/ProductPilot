@@ -21,6 +21,7 @@ const ENV = { ...process.env };
 beforeEach(() => {
   delete process.env.PRODUCTION_DB_HOSTS;
   delete process.env.ALLOW_PROD_DB;
+  delete process.env.VERCEL_ENV;
 });
 afterEach(() => {
   process.env = { ...ENV };
@@ -69,6 +70,18 @@ describe("assertNotProductionDatabase", () => {
 
   it("allows the deployed app itself", () => {
     expect(() => assertNotProductionDatabase(PROD, "production")).not.toThrow();
+  });
+
+  it("allows the deployed app when VERCEL_ENV says production even if NODE_ENV does not", () => {
+    // The guard runs at module load on the serverless boot path. A false trip
+    // there would take production down — the outcome it exists to prevent.
+    expect(() => assertNotProductionDatabase(PROD, "development", undefined, "production")).not.toThrow();
+  });
+
+  it("still blocks a Vercel PREVIEW deploy pointed at the production database", () => {
+    expect(() => assertNotProductionDatabase(PROD, "development", undefined, "preview")).toThrow(
+      ProductionDatabaseGuardError,
+    );
   });
 
   it("allows a dev process against the dev branch", () => {

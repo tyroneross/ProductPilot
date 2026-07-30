@@ -66,8 +66,15 @@ export function assertNotProductionDatabase(
   databaseUrlOrHost: string,
   nodeEnv: string | undefined = process.env.NODE_ENV,
   allowOverride: string | undefined = process.env.ALLOW_PROD_DB,
+  vercelEnv: string | undefined = process.env.VERCEL_ENV,
 ): void {
   if (nodeEnv === "production") return;
+  // Belt-and-braces: this assertion runs at module load on the serverless
+  // boot path, so a false trip would take production down — the exact outcome
+  // it exists to prevent. VERCEL_ENV is set by the platform, independently of
+  // whatever NODE_ENV ends up being, so honor it as a second proof of "this IS
+  // the deployed app".
+  if (vercelEnv === "production") return;
   if (allowOverride === "1") return;
   if (!isProductionHost(databaseUrlOrHost)) return;
 
