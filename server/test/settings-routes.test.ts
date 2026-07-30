@@ -188,6 +188,10 @@ describe("GET /api/settings — response shape (T1-3)", () => {
       available: expect.any(Boolean),
       disabledByKillSwitch: expect.any(Boolean),
       coversAccountBlock: false,
+      // `available` proves configuration; these prove EXECUTION. Booleans,
+      // a count, and a timestamp — no key material.
+      engagements: expect.any(Number),
+      lastEngagedAt: null,
     });
 
     // Spec: no raw-key field (any variant) is present.

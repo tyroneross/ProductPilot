@@ -76,6 +76,41 @@ const GROQ_FALLBACK_CHAIN: Record<string, string[]> = {
 // a user's BYOK settings row, or a model we removed from GROQ_MODELS).
 const GROQ_LAST_RESORT_MODEL = GROQ_MODELS.fast;
 
+// Engagement record for the model fallback.
+//
+// `modelFallback.available` only ever proved the CONFIGURATION was present —
+// keys set, kill switch off. It could report `true` for a path that had never
+// executed even once, which is the same "assumed, not observed" trap that let
+// a dormant failover ship earlier. These counters make the difference between
+// "wired" and "exercised" visible in the deployed environment.
+//
+// Process-local by design: on serverless each instance reports its own view,
+// so treat a non-zero count as proof the path RAN, never as a global total.
+// Durable per-call history already lives in the `llm_calls` table.
+let modelFallbackEngagements = 0;
+let modelFallbackLastEngagedAt: string | null = null;
+
+export function recordModelFallbackEngagement(now: Date): void {
+  modelFallbackEngagements += 1;
+  modelFallbackLastEngagedAt = now.toISOString();
+}
+
+export function getModelFallbackStats(): {
+  engagements: number;
+  lastEngagedAt: string | null;
+} {
+  return {
+    engagements: modelFallbackEngagements,
+    lastEngagedAt: modelFallbackLastEngagedAt,
+  };
+}
+
+/** Test-only: reset the process-local counters between cases. */
+export function __resetModelFallbackStats(): void {
+  modelFallbackEngagements = 0;
+  modelFallbackLastEngagedAt = null;
+}
+
 export interface ClassifiedLlmError {
   code: LlmErrorCode;
   message: string;
@@ -585,6 +620,7 @@ export class AIService {
       const fallback = this.resolveModelFallback(config, err);
       if (!fallback) throw err;
 
+      recordModelFallbackEngagement(new Date());
       logger.warn(
         { from: config.model, to: fallback.model, task },
         "[llm-model-fallback] model unavailable — retrying on a supported model",
@@ -631,6 +667,7 @@ export class AIService {
       const fallback = this.resolveModelFallback(config, err);
       if (!fallback) throw err;
 
+      recordModelFallbackEngagement(new Date());
       logger.warn(
         { from: config.model, to: fallback.model, task },
         "[llm-model-fallback] model unavailable at stream-open — retrying on a supported model",
@@ -969,6 +1006,7 @@ export class AIService {
       const fallback = this.resolveModelFallback(config, err);
       if (!fallback) throw err;
 
+      recordModelFallbackEngagement(new Date());
       logger.warn(
         { from: config.model, to: fallback.model, task },
         "[llm-model-fallback] structured-output model unavailable — retrying on a supported model",

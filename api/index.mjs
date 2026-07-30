@@ -3339,6 +3339,16 @@ var init_sentry = __esm({
 // server/services/ai.ts
 import Anthropic from "@anthropic-ai/sdk";
 import Groq from "groq-sdk";
+function recordModelFallbackEngagement(now) {
+  modelFallbackEngagements += 1;
+  modelFallbackLastEngagedAt = now.toISOString();
+}
+function getModelFallbackStats() {
+  return {
+    engagements: modelFallbackEngagements,
+    lastEngagedAt: modelFallbackLastEngagedAt
+  };
+}
 function extractProviderError(rawMessage, topLevelCode) {
   const codeFromError = typeof topLevelCode === "string" ? topLevelCode : "";
   const braceStart = rawMessage.indexOf("{");
@@ -3472,7 +3482,7 @@ function computeCostUsd(model, inputTokens, outputTokens, cacheReadTokens = 0, c
   const cost = inputTokens / 1e6 * rate.input + outputTokens / 1e6 * rate.output + cacheReadTokens / 1e6 * (rate.cacheRead ?? 0) + cacheWriteTokens / 1e6 * (rate.cacheWrite ?? 0);
   return cost.toFixed(6);
 }
-var GROQ_MODELS, MODEL_COST_RATES, HARD_BLOCK_CODES, MODEL_FALLBACK_CODES, GROQ_FALLBACK_CHAIN, GROQ_LAST_RESORT_MODEL, AIService, aiService;
+var GROQ_MODELS, MODEL_COST_RATES, HARD_BLOCK_CODES, MODEL_FALLBACK_CODES, GROQ_FALLBACK_CHAIN, GROQ_LAST_RESORT_MODEL, modelFallbackEngagements, modelFallbackLastEngagedAt, AIService, aiService;
 var init_ai = __esm({
   "server/services/ai.ts"() {
     "use strict";
@@ -3511,6 +3521,8 @@ var init_ai = __esm({
       [GROQ_MODELS.safeguard]: [GROQ_MODELS.fast, GROQ_MODELS.reasoning]
     };
     GROQ_LAST_RESORT_MODEL = GROQ_MODELS.fast;
+    modelFallbackEngagements = 0;
+    modelFallbackLastEngagedAt = null;
     AIService = class {
       getDefaultConfig(task = "chat") {
         const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -3623,6 +3635,7 @@ var init_ai = __esm({
           }
           const fallback = this.resolveModelFallback(config, err);
           if (!fallback) throw err;
+          recordModelFallbackEngagement(/* @__PURE__ */ new Date());
           logger.warn(
             { from: config.model, to: fallback.model, task },
             "[llm-model-fallback] model unavailable \u2014 retrying on a supported model"
@@ -3651,6 +3664,7 @@ var init_ai = __esm({
           if (emittedDelta) throw err;
           const fallback = this.resolveModelFallback(config, err);
           if (!fallback) throw err;
+          recordModelFallbackEngagement(/* @__PURE__ */ new Date());
           logger.warn(
             { from: config.model, to: fallback.model, task },
             "[llm-model-fallback] model unavailable at stream-open \u2014 retrying on a supported model"
@@ -3899,6 +3913,7 @@ var init_ai = __esm({
           }
           const fallback = this.resolveModelFallback(config, err);
           if (!fallback) throw err;
+          recordModelFallbackEngagement(/* @__PURE__ */ new Date());
           logger.warn(
             { from: config.model, to: fallback.model, task },
             "[llm-model-fallback] structured-output model unavailable \u2014 retrying on a supported model"
@@ -7635,7 +7650,11 @@ data: ${JSON.stringify(data)}
       res.json({ surveyDefinition: response });
     } catch (error) {
       logger.error({ err: error }, "Survey generation error");
-      res.status(500).json({ message: "Failed to generate survey" });
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate survey");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}
+      });
     }
   });
   app2.post("/api/projects/:projectId/submit-survey", async (req, res) => {
@@ -8062,7 +8081,11 @@ data: ${JSON.stringify(data)}
       res.json(action);
     } catch (error) {
       logger.error({ err: error }, "[intake/next] error");
-      res.status(500).json({ message: "Failed to compute next intake step" });
+      const safe = toSafeUserMessage(error, "groq", "Failed to compute next intake step");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}
+      });
     }
   });
   app2.get("/api/projects/:projectId/intake/sufficiency", async (req, res) => {
@@ -8541,7 +8564,11 @@ data: ${JSON.stringify(data)}
       res.json(result);
     } catch (error) {
       logger.error({ err: error }, "[spec/lint] error");
-      res.status(500).json({ message: "Failed to lint spec" });
+      const safe = toSafeUserMessage(error, "groq", "Failed to lint spec");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}
+      });
     }
   });
   app2.post("/api/projects/:projectId/spec/waive", async (req, res) => {
@@ -9067,7 +9094,13 @@ ${content}`);
         modelFallback: {
           available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
           disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
-          coversAccountBlock: false
+          coversAccountBlock: false,
+          // `available` proves configuration; these prove EXECUTION. A path
+          // that reports available:true but engagements:0 has never actually
+          // run — the distinction that would have caught a dormant failover
+          // shipping as if it were live. Process-local on serverless, so a
+          // non-zero count proves the path ran; it is not a global total.
+          ...getModelFallbackStats()
         }
       };
       res.json(result);
@@ -9101,7 +9134,11 @@ ${content}`);
       return res.json({ enhanced });
     } catch (error) {
       logger.warn({ err: error?.message }, "enhance-idea failed");
-      return res.status(500).json({ message: "Failed to enhance idea." });
+      const safe = toSafeUserMessage(error, "groq", "Failed to enhance idea.");
+      return res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}
+      });
     }
   });
   app2.post("/api/clarify", async (req, res) => {

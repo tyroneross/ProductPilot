@@ -3,7 +3,7 @@ import { logger } from "./lib/logger";
 import { randomUUID } from "crypto";
 import { createServer, type Server } from "http";
 import { runWithDbActorContext, storage, updateDbActorContext } from "./storage-hybrid";
-import { aiService, classifyLlmError, toSafeUserMessage, type AIMessage, type LLMConfig } from "./services/ai";
+import { aiService, classifyLlmError, toSafeUserMessage, getModelFallbackStats, type AIMessage, type LLMConfig } from "./services/ai";
 import {
   insertProjectSchema,
   insertMessageSchema,
@@ -829,7 +829,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ surveyDefinition: response });
     } catch (error) {
       logger.error({ err: error }, "Survey generation error");
-      res.status(500).json({ message: "Failed to generate survey" });
+      // LLM-backed route: classify so the client can render the real reason
+      // (billing block, retired model, rate limit) instead of a flat
+      // "Failed to generate survey" that reads as a bug in our code.
+      const safe = toSafeUserMessage(error, "groq", "Failed to generate survey");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...(safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}),
+      });
     }
   });
 
@@ -1431,7 +1438,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(action);
     } catch (error) {
       logger.error({ err: error }, "[intake/next] error");
-      res.status(500).json({ message: "Failed to compute next intake step" });
+      // nextStep() reaches aiService.generateStructuredOutput, so a provider
+      // fault surfaces here. Classify it. (ingestAnswer, by contrast, is
+      // synchronous and never touches the LLM — its catch stays generic.)
+      const safe = toSafeUserMessage(error, "groq", "Failed to compute next intake step");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...(safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}),
+      });
     }
   });
 
@@ -2064,7 +2078,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error) {
       logger.error({ err: error }, "[spec/lint] error");
-      res.status(500).json({ message: "Failed to lint spec" });
+      // lintSpec() runs LLM-backed checks alongside its deterministic ones.
+      const safe = toSafeUserMessage(error, "groq", "Failed to lint spec");
+      res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...(safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}),
+      });
     }
   });
 
@@ -2732,6 +2751,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           available: Boolean(process.env.GROQ_API_KEY) && process.env.LLM_MODEL_FALLBACK_DISABLED !== "1",
           disabledByKillSwitch: process.env.LLM_MODEL_FALLBACK_DISABLED === "1",
           coversAccountBlock: false,
+          // `available` proves configuration; these prove EXECUTION. A path
+          // that reports available:true but engagements:0 has never actually
+          // run — the distinction that would have caught a dormant failover
+          // shipping as if it were live. Process-local on serverless, so a
+          // non-zero count proves the path ran; it is not a global total.
+          ...getModelFallbackStats(),
         },
       };
       res.json(result);
@@ -2775,7 +2800,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ enhanced });
     } catch (error: any) {
       logger.warn({ err: error?.message }, "enhance-idea failed");
-      return res.status(500).json({ message: "Failed to enhance idea." });
+      // Unauthenticated route on the landing page — the first LLM call most
+      // users ever make. A flat failure here reads as "this product is broken"
+      // rather than "the provider is down".
+      const safe = toSafeUserMessage(error, "groq", "Failed to enhance idea.");
+      return res.status(safe.errorCode ? 502 : 500).json({
+        message: safe.message,
+        ...(safe.errorCode ? { errorCode: safe.errorCode, retryAfterSeconds: safe.retryAfterSeconds } : {}),
+      });
     }
   });
 

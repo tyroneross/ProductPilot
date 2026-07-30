@@ -14,7 +14,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { aiService, classifyLlmError } from "../services/ai";
+import {
+  aiService,
+  classifyLlmError,
+  getModelFallbackStats,
+  __resetModelFallbackStats,
+} from "../services/ai";
 
 const DECOMMISSIONED = Object.assign(
   new Error(
@@ -63,6 +68,7 @@ function stubGroq(opts: { failFirstWith?: unknown; failAlwaysWith?: unknown } = 
 
 beforeEach(() => {
   calls = [];
+  __resetModelFallbackStats();
   process.env.GROQ_API_KEY = "gsk_test";
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.LLM_MODEL_FALLBACK_DISABLED;
@@ -213,5 +219,45 @@ describe("streaming fallback cannot splice two completions", () => {
     ).rejects.toThrow();
     expect(calls).toEqual([FAST]);
     expect(out).toEqual(["g0", "g1"]);
+  });
+});
+
+describe("fallback engagement is observable, not just configured", () => {
+  // `modelFallback.available` proves configuration only. It reported true for a
+  // path that had never executed — the same "assumed, not observed" gap that
+  // let a dormant failover ship as if it were live.
+  it("starts at zero with no engagement recorded", () => {
+    expect(getModelFallbackStats()).toEqual({ engagements: 0, lastEngagedAt: null });
+  });
+
+  it("records an engagement when the fallback actually runs", async () => {
+    stubGroq({ failFirstWith: DECOMMISSIONED });
+    await aiService.chat(MSGS, "claude-sonnet", null, "chat");
+    const stats = getModelFallbackStats();
+    expect(stats.engagements).toBe(1);
+    expect(stats.lastEngagedAt).not.toBeNull();
+    expect(() => new Date(stats.lastEngagedAt!).toISOString()).not.toThrow();
+  });
+
+  it("does NOT record an engagement on a successful call", async () => {
+    stubGroq();
+    await aiService.chat(MSGS, "claude-sonnet", null, "chat");
+    expect(getModelFallbackStats().engagements).toBe(0);
+  });
+
+  it("does NOT record an engagement for an account block that cannot fall back", async () => {
+    stubGroq({ failFirstWith: SPEND_BLOCK });
+    await expect(aiService.chat(MSGS, "claude-sonnet", null, "chat")).rejects.toThrow();
+    expect(getModelFallbackStats().engagements).toBe(0);
+  });
+
+  it("accumulates across calls", async () => {
+    stubGroq({ failFirstWith: DECOMMISSIONED });
+    await aiService.chat(MSGS, "claude-sonnet", null, "chat");
+    vi.restoreAllMocks();
+    calls = [];
+    stubGroq({ failFirstWith: MODEL_NOT_FOUND });
+    await aiService.chat(MSGS, "claude-sonnet", null, "chat");
+    expect(getModelFallbackStats().engagements).toBe(2);
   });
 });
