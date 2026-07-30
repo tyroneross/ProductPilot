@@ -1389,7 +1389,7 @@ __export(storage_hybrid_exports, {
   updateDbActorContext: () => updateDbActorContext
 });
 import { AsyncLocalStorage } from "async_hooks";
-import { eq, and, ne, desc, asc, sql as sql2 } from "drizzle-orm";
+import { eq, and, ne, isNull, desc, asc, sql as sql2 } from "drizzle-orm";
 function runWithDbActorContext(context, callback) {
   return dbActorContext.run(context, callback);
 }
@@ -1524,6 +1524,20 @@ var init_storage_hybrid = __esm({
         return (await this.getAllProjects()).filter(
           (project) => project.guestOwnerId === guestOwnerId
         );
+      }
+      async claimProjectsForUser(guestOwnerId, userId) {
+        if (!guestOwnerId || !userId) return [];
+        const claimed = [];
+        for (const project of await this.getAllProjects()) {
+          if (project.guestOwnerId === guestOwnerId && !project.userId) {
+            const updated = await this.updateProject(project.id, {
+              userId,
+              guestOwnerId: null
+            });
+            if (updated) claimed.push(updated);
+          }
+        }
+        return claimed;
       }
       async getUserDraft(userId) {
         const allProjects = Array.from(this.projects.values());
@@ -1882,6 +1896,26 @@ var init_storage_hybrid = __esm({
       async getProjectsByGuestOwnerId(guestOwnerId) {
         return await this.withActor(
           (tx) => tx.select().from(projects).where(eq(projects.guestOwnerId, guestOwnerId)).orderBy(desc(projects.createdAt))
+        );
+      }
+      /**
+       * Transfer EVERY project owned by a guest cookie to a real account, in one
+       * statement.
+       *
+       * Claiming one project at a time was the bug: the claim route cleared the
+       * guest cookie after the first transfer, so every remaining project owned by
+       * that cookie became unreachable — the browser could no longer present the
+       * identity that proved ownership, and GET /api/projects only ever returns
+       * rows matching user_id. 35 of 46 production projects were stranded this way.
+       *
+       * The `user_id is null` predicate is a safety net, not an optimization: a row
+       * that already belongs to an account must never be reassigned by a guest
+       * cookie, even one that legitimately matches guest_owner_id.
+       */
+      async claimProjectsForUser(guestOwnerId, userId) {
+        if (!guestOwnerId || !userId) return [];
+        return await this.withActor(
+          (tx) => tx.update(projects).set({ userId, guestOwnerId: null, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(projects.guestOwnerId, guestOwnerId), isNull(projects.userId))).returning()
         );
       }
       async getUserDraft(userId) {
@@ -7245,6 +7279,30 @@ async function registerRoutes(app2) {
       res.status(500).json({ message: "Failed to fetch draft" });
     }
   });
+  app2.post("/api/projects/claim-session", requireAuth, async (req, res) => {
+    try {
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+      const guestOwnerId = getGuestOwnerId(req);
+      if (!guestOwnerId) return res.json({ claimedCount: 0, projects: [] });
+      const claimed = await storage.claimProjectsForUser(guestOwnerId, userId);
+      if (claimed.length > 0) {
+        void storage.createAuditEvent({
+          actorType: "user",
+          actorId: userId,
+          action: "project.claim_session",
+          resourceType: "project",
+          resourceId: claimed[0].id,
+          metadata: { claimedCount: claimed.length, claimedIds: claimed.map((p) => p.id) }
+        }).catch((e) => logger.error({ err: e }, "[audit] project.claim_session failed"));
+      }
+      clearGuestOwnerCookie(res);
+      res.json({ claimedCount: claimed.length, projects: claimed });
+    } catch (error) {
+      logger.error({ err: error }, "Error claiming session projects");
+      res.status(500).json({ message: "Failed to claim session projects" });
+    }
+  });
   app2.post("/api/projects/:id/claim", requireAuth, async (req, res) => {
     try {
       const userId = req.userId;
@@ -7263,12 +7321,23 @@ async function registerRoutes(app2) {
       if (project.userId !== userId && !callerOwnsDemoProject) {
         return res.status(403).json({ message: "You do not have access to claim this project" });
       }
-      const updatedProject = project.userId === userId ? project : await storage.updateProject(req.params.id, {
-        userId,
-        guestOwnerId: null
-      });
+      let claimedAll = [];
+      if (project.userId !== userId && guestOwnerId) {
+        claimedAll = await storage.claimProjectsForUser(guestOwnerId, userId);
+      }
+      const updatedProject = project.userId === userId ? project : claimedAll.find((p) => p.id === req.params.id) ?? await storage.updateProject(req.params.id, { userId, guestOwnerId: null });
+      if (claimedAll.length > 0) {
+        void storage.createAuditEvent({
+          actorType: "user",
+          actorId: userId,
+          action: "project.claim",
+          resourceType: "project",
+          resourceId: req.params.id,
+          metadata: { claimedCount: claimedAll.length, claimedIds: claimedAll.map((p) => p.id) }
+        }).catch((e) => logger.error({ err: e }, "[audit] project.claim failed"));
+      }
       clearGuestOwnerCookie(res);
-      res.json(updatedProject);
+      res.json({ ...updatedProject, claimedCount: Math.max(claimedAll.length, 1) });
     } catch (error) {
       logger.error({ err: error }, "Error claiming project");
       res.status(500).json({ message: "Failed to claim project" });

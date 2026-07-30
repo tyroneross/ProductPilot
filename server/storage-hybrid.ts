@@ -8,7 +8,7 @@ import { logger } from "./lib/logger";
 import { decryptSecret, encryptSecret } from "./lib/secret-crypto";
 import { projects, stages, messages, adminPrompts, llmCalls, auditEvents, intakeQuestions, DEFAULT_STAGES } from "@shared/schema";
 import { DISCOVERY_INITIAL_PROMPT } from "@shared/prompt-content";
-import { eq, and, ne, desc, asc, sql } from "drizzle-orm";
+import { eq, and, ne, isNull, desc, asc, sql } from "drizzle-orm";
 import { db } from "./db";
 
 interface IStorage {
@@ -18,6 +18,7 @@ interface IStorage {
   getAllProjects(): Promise<Project[]>;
   getProjectsByUserId(userId: string): Promise<Project[]>;
   getProjectsByGuestOwnerId(guestOwnerId: string): Promise<Project[]>;
+  claimProjectsForUser(guestOwnerId: string, userId: string): Promise<Project[]>;
   getUserDraft(userId: string): Promise<Project | undefined>;
   updateProject(id: string, updates: Partial<Project>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<boolean>;
@@ -183,6 +184,23 @@ export class MemStorage implements IStorage {
     return (await this.getAllProjects()).filter(
       (project) => project.guestOwnerId === guestOwnerId,
     );
+  }
+
+  async claimProjectsForUser(guestOwnerId: string, userId: string): Promise<Project[]> {
+    if (!guestOwnerId || !userId) return [];
+    const claimed: Project[] = [];
+    for (const project of await this.getAllProjects()) {
+      // Mirrors the SQL predicate: never reassign a row that already belongs
+      // to an account, even when the guest cookie matches.
+      if (project.guestOwnerId === guestOwnerId && !project.userId) {
+        const updated = await this.updateProject(project.id, {
+          userId,
+          guestOwnerId: null,
+        } as Partial<Project>);
+        if (updated) claimed.push(updated);
+      }
+    }
+    return claimed;
   }
 
   async getUserDraft(userId: string): Promise<Project | undefined> {
@@ -611,6 +629,31 @@ class PostgresStorage implements IStorage {
         .from(projects)
         .where(eq(projects.guestOwnerId, guestOwnerId))
         .orderBy(desc(projects.createdAt))
+    );
+  }
+
+  /**
+   * Transfer EVERY project owned by a guest cookie to a real account, in one
+   * statement.
+   *
+   * Claiming one project at a time was the bug: the claim route cleared the
+   * guest cookie after the first transfer, so every remaining project owned by
+   * that cookie became unreachable — the browser could no longer present the
+   * identity that proved ownership, and GET /api/projects only ever returns
+   * rows matching user_id. 35 of 46 production projects were stranded this way.
+   *
+   * The `user_id is null` predicate is a safety net, not an optimization: a row
+   * that already belongs to an account must never be reassigned by a guest
+   * cookie, even one that legitimately matches guest_owner_id.
+   */
+  async claimProjectsForUser(guestOwnerId: string, userId: string): Promise<Project[]> {
+    if (!guestOwnerId || !userId) return [];
+    return await this.withActor((tx) =>
+      tx
+        .update(projects)
+        .set({ userId, guestOwnerId: null, updatedAt: new Date() })
+        .where(and(eq(projects.guestOwnerId, guestOwnerId), isNull(projects.userId)))
+        .returning()
     );
   }
 

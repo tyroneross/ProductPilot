@@ -315,6 +315,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Attach ALL work from the current guest session to the signed-in account.
+  //
+  // Exists because the per-project claim was the ONLY claim trigger in the
+  // entire client, and it fired solely from the Save dialog. Anyone who built
+  // something as a guest and then signed in — without going through that exact
+  // dialog — kept their work on a cookie that expires in 30 days, after which
+  // it is unreachable. This makes signing in sufficient.
+  //
+  // Idempotent and safe to call on every session resolve: with no guest cookie
+  // it claims nothing and returns 0.
+  app.post("/api/projects/claim-session", requireAuth, async (req: any, res) => {
+    try {
+      const userId = req.userId;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+
+      const guestOwnerId = getGuestOwnerId(req);
+      if (!guestOwnerId) return res.json({ claimedCount: 0, projects: [] });
+
+      const claimed = await storage.claimProjectsForUser(guestOwnerId, userId);
+
+      if (claimed.length > 0) {
+        void storage
+          .createAuditEvent({
+            actorType: "user",
+            actorId: userId,
+            action: "project.claim_session",
+            resourceType: "project",
+            resourceId: claimed[0].id,
+            metadata: { claimedCount: claimed.length, claimedIds: claimed.map((p) => p.id) },
+          })
+          .catch((e) => logger.error({ err: e }, "[audit] project.claim_session failed"));
+      }
+
+      clearGuestOwnerCookie(res);
+      res.json({ claimedCount: claimed.length, projects: claimed });
+    } catch (error) {
+      logger.error({ err: error }, "Error claiming session projects");
+      res.status(500).json({ message: "Failed to claim session projects" });
+    }
+  });
+
   // Link a project to the current user
   app.post("/api/projects/:id/claim", requireAuth, async (req: any, res) => {
     try {
@@ -344,16 +385,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "You do not have access to claim this project" });
       }
 
+      // Claim EVERY project this guest cookie owns, not just the one named in
+      // the URL.
+      //
+      // The old behaviour claimed one project and then cleared the cookie, so
+      // the browser could no longer prove ownership of the rest. Since
+      // GET /api/projects only returns rows matching user_id, every remaining
+      // project became invisible AND unclaimable — a second save 403'd, and the
+      // client swallowed that error and reported success anyway. 35 of 46
+      // production projects were stranded this way before this fix.
+      let claimedAll: Project[] = [];
+      if (project.userId !== userId && guestOwnerId) {
+        claimedAll = await storage.claimProjectsForUser(guestOwnerId, userId);
+      }
+
       const updatedProject =
         project.userId === userId
           ? project
-          : await storage.updateProject(req.params.id, {
-              userId,
-              guestOwnerId: null,
-            });
+          : (claimedAll.find((p) => p.id === req.params.id) ??
+            (await storage.updateProject(req.params.id, { userId, guestOwnerId: null })));
 
+      if (claimedAll.length > 0) {
+        void storage
+          .createAuditEvent({
+            actorType: "user",
+            actorId: userId,
+            action: "project.claim",
+            resourceType: "project",
+            resourceId: req.params.id,
+            metadata: { claimedCount: claimedAll.length, claimedIds: claimedAll.map((p) => p.id) },
+          })
+          .catch((e) => logger.error({ err: e }, "[audit] project.claim failed"));
+      }
+
+      // Safe to clear only now that nothing is left behind it.
       clearGuestOwnerCookie(res);
-      res.json(updatedProject);
+      res.json({ ...updatedProject, claimedCount: Math.max(claimedAll.length, 1) });
     } catch (error) {
       logger.error({ err: error }, "Error claiming project");
       res.status(500).json({ message: "Failed to claim project" });

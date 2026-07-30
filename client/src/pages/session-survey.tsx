@@ -375,26 +375,43 @@ export default function SessionSurveyPage() {
       if (projectId) {
         const res = await apiRequest("PATCH", `/api/projects/${projectId}`, { name });
         const savedProject = await res.json();
-        try {
-          await apiRequest("POST", `/api/projects/${projectId}/claim`, {});
-        } catch (e) {}
-        return savedProject;
+        // The claim is what attaches this work to the account. Swallowing its
+        // error here is what let the UI report "saved successfully" while the
+        // project stayed owned by a browser cookie that was about to be
+        // deleted — unreachable by its creator from that point on. Let it
+        // throw; onError surfaces it honestly.
+        const claimRes = await apiRequest("POST", `/api/projects/${projectId}/claim`, {});
+        const claim = await claimRes.json().catch(() => ({}));
+        return { ...savedProject, claimedCount: claim?.claimedCount ?? 1 };
       }
       return null;
     },
-    onSuccess: (updatedProject: Project | null) => {
+    onSuccess: (updatedProject: (Project & { claimedCount?: number }) | null) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user/draft"] });
       setShowSaveDialog(false);
+      // Reaching here means the claim succeeded, so "saved to your account" is
+      // now a true statement rather than an assumption. When earlier work was
+      // still attached to the guest session, say so — the user is seeing more
+      // projects appear than the one they just named.
+      const alsoClaimed = (updatedProject?.claimedCount ?? 1) - 1;
       toast({
-        title: "Project saved!",
-        description: `"${updatedProject?.name}" has been saved successfully.`,
+        title: "Saved to your account",
+        description:
+          alsoClaimed > 0
+            ? `"${updatedProject?.name}" saved, along with ${alsoClaimed} earlier project${alsoClaimed === 1 ? "" : "s"} from this session.`
+            : `"${updatedProject?.name}" is now saved to your account.`,
       });
     },
-    onError: () => {
+    onError: (err: unknown) => {
+      // Never report success on a failed claim. The project may exist but not
+      // belong to the account, which is the state that loses people's work.
+      const { message, status } = readApiError(err);
       toast({
-        title: "Failed to save project",
-        description: "Please try again.",
+        title: status === 401 ? "Sign in to save" : "Couldn't save to your account",
+        description:
+          message ||
+          "Your work is still here, but it isn't attached to your account yet. Try again.",
         variant: "destructive",
       });
     },
