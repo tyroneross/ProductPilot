@@ -188,7 +188,7 @@ export default function ProjectsPage() {
               onClick={() => setLocation("/details")}
               data-testid="button-new-product"
               className={`hidden-mobile ${ctaClass}`}
-              style={{ ...ctaStyle, height: 40, padding: "0 18px" }}
+              style={{ ...ctaStyle, height: 44, padding: "0 18px" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
             >
@@ -268,7 +268,7 @@ export default function ProjectsPage() {
               onClick={() => setLocation("/details")}
               data-testid="button-resume-draft"
               className={ctaClass}
-              style={{ ...ctaStyle, height: 36, padding: "0 14px", fontSize: 13 }}
+              style={{ ...ctaStyle, height: 44, padding: "0 14px", fontSize: 13 }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accentHover; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = accent; }}
             >
@@ -280,7 +280,7 @@ export default function ProjectsPage() {
               aria-label="Discard draft"
               className="transition-colors duration-150"
               style={{
-                height: 36,
+                height: 44,
                 padding: "0 12px",
                 background: "transparent",
                 color: textMuted,
@@ -291,7 +291,7 @@ export default function ProjectsPage() {
                 cursor: "pointer",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = "#e57373";
+                e.currentTarget.style.color = "#e07070";
                 e.currentTarget.style.borderColor = "rgba(229,115,115,0.3)";
               }}
               onMouseLeave={(e) => {
@@ -401,7 +401,7 @@ export default function ProjectsPage() {
                     style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 4px", cursor: "pointer", minHeight: 60, userSelect: "none", borderRadius: 6 }}
                   >
                     {/* Icon */}
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(240,182,94,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 36, height: 44, borderRadius: "50%", background: "rgba(240,182,94,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <FolderKanban size={16} color={accent} />
                     </div>
 
@@ -464,7 +464,7 @@ export default function ProjectsPage() {
                               display: "inline-flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              minHeight: 32,
+                              minHeight: 44,
                               minWidth: 32,
                               padding: "0 8px",
                               borderRadius: 6,
@@ -487,7 +487,7 @@ export default function ProjectsPage() {
                               display: "inline-flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              minHeight: 32,
+                              minHeight: 44,
                               minWidth: 32,
                               padding: "0 8px",
                               borderRadius: 6,
@@ -581,7 +581,7 @@ export default function ProjectsPage() {
                             setOpenMenuId(null);
                           }}
                           disabled={deletingId === project.id}
-                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e57373", textAlign: "left" }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px", background: "none", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: "#e07070", textAlign: "left" }}
                         >
                           <Trash2 size={13} />
                           Delete
@@ -618,7 +618,7 @@ export default function ProjectsPage() {
             <AlertDialogCancel data-testid="button-cancel-delete-project">Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-testid="button-confirm-delete-project"
-              style={{ background: "#e57373", color: "#110f0d" }}
+              style={{ background: "#e07070", color: "#110f0d" }}
               onClick={() => {
                 const id = pendingDeleteId;
                 setPendingDeleteId(null);

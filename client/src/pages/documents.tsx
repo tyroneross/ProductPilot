@@ -257,7 +257,7 @@ export default function DocumentsPage() {
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-                <strong style={{ color: "#e57373", fontSize: 13 }}>
+                <strong style={{ color: "#e07070", fontSize: 13 }}>
                   {partialFailure.length === 1
                     ? "1 document didn't generate"
                     : `${partialFailure.length} documents didn't generate`}

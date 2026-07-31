@@ -382,7 +382,7 @@ export default function LoginPage() {
             </p>
 
             {forgotDone ? (
-              <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+              <p style={{ fontSize: "13px", color: "#7fb069", margin: 0 }}>
                 If an account exists for this email, we've sent a reset link. Check your inbox.
               </p>
             ) : (
@@ -409,7 +409,7 @@ export default function LoginPage() {
                 />
 
                 {forgotError && (
-                  <p style={{ fontSize: "13px", color: "#e06356", margin: 0 }}>
+                  <p style={{ fontSize: "13px", color: "#e07070", margin: 0 }}>
                     {forgotError}
                   </p>
                 )}
@@ -526,8 +526,8 @@ export default function LoginPage() {
               alignItems: "center",
               justifyContent: "center",
               gap: "10px",
-              background: capabilities.google ? "#f5f0eb" : "#3a3530",
-              color: capabilities.google ? "#110f0d" : "#8a7e72",
+              background: capabilities.google ? "#f5f0eb" : "#3d3228",
+              color: capabilities.google ? "#110f0d" : "#a89a8c",
               border: "none",
               borderRadius: "8px",
               fontSize: "14px",
@@ -799,13 +799,13 @@ export default function LoginPage() {
             </div>
 
             {authError && (
-              <p style={{ fontSize: "13px", color: "#e06356", margin: 0 }}>
+              <p style={{ fontSize: "13px", color: "#e07070", margin: 0 }}>
                 {authError}
               </p>
             )}
 
             {authInfo && (
-              <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+              <p style={{ fontSize: "13px", color: "#7fb069", margin: 0 }}>
                 {authInfo}
               </p>
             )}
@@ -915,7 +915,7 @@ export default function LoginPage() {
                   )}
                 </button>
                 {magicLinkSent && (
-                  <p style={{ fontSize: "13px", color: "#8dbb8b", margin: 0 }}>
+                  <p style={{ fontSize: "13px", color: "#7fb069", margin: 0 }}>
                     Check your email for a sign-in link. It expires in 15 minutes.
                   </p>
                 )}

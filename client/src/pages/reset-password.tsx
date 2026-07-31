@@ -181,7 +181,7 @@ export default function ResetPasswordPage() {
 
           {noToken ? (
             <div>
-              <p style={{ fontSize: "13px", color: "#e06356", margin: "0 0 1rem" }}>
+              <p style={{ fontSize: "13px", color: "#e07070", margin: "0 0 1rem" }}>
                 This reset link is missing a token. Please request a new password reset.
               </p>
               <button
@@ -264,7 +264,7 @@ export default function ResetPasswordPage() {
               </div>
 
               {error && (
-                <p style={{ fontSize: "13px", color: "#e06356", margin: 0 }}>
+                <p style={{ fontSize: "13px", color: "#e07070", margin: 0 }}>
                   {error}
                 </p>
               )}

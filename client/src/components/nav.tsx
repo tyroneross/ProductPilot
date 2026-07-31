@@ -93,7 +93,7 @@ export default function Nav() {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                height: "36px",
+                height: "44px",
                 padding: "0 12px",
                 background: "transparent",
                 border: "1px solid rgba(200,180,160,0.18)",
@@ -127,7 +127,7 @@ export default function Nav() {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                height: "36px",
+                height: "44px",
                 // Keep the hit area ≥44px tall on mobile via height + flex
                 // centering; horizontal padding preserves a comfortable target
                 // without a visual box.

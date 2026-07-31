@@ -1035,7 +1035,7 @@ export default function SessionSurveyPage() {
                 data-testid={`chip-reply-${chip.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                 className="inline-flex items-center rounded-full border px-3 py-1.5 text-description transition-colors disabled:opacity-50"
                 style={{
-                  minHeight: 32,
+                  minHeight: 44,
                   color: "#f5f0eb",
                   borderColor: "rgba(240,182,94,0.35)",
                   background: "rgba(240,182,94,0.06)",
@@ -1801,7 +1801,7 @@ export default function SessionSurveyPage() {
                 disabled={currentSectionIndex === 0}
                 style={{
                   background: "none", border: "none",
-                  color: currentSectionIndex === 0 ? "#3d3530" : "#a89a8c",
+                  color: currentSectionIndex === 0 ? "#3d3228" : "#a89a8c",
                   fontSize: 13, fontWeight: 500, fontFamily: "inherit",
                   cursor: currentSectionIndex === 0 ? "default" : "pointer",
                   padding: "6px 0",
@@ -1833,7 +1833,7 @@ export default function SessionSurveyPage() {
                     }}
                     disabled={autoSaveSurveyMutation.isPending}
                     style={{
-                      height: 40, padding: "0 24px",
+                      height: 44, padding: "0 24px",
                       borderRadius: 10, border: "none",
                       background: "#f0b65e", color: "#1a1208",
                       fontSize: 13, fontWeight: 600, fontFamily: "inherit",
@@ -1851,7 +1851,7 @@ export default function SessionSurveyPage() {
                     onClick={handleNextSection}
                     disabled={autoSaveSurveyMutation.isPending}
                     style={{
-                      height: 40, padding: "0 24px",
+                      height: 44, padding: "0 24px",
                       borderRadius: 10, border: "none",
                       background: "#f0b65e", color: "#1a1208",
                       fontSize: 13, fontWeight: 600, fontFamily: "inherit",

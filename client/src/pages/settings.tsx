@@ -177,7 +177,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => logout()}
                   style={{
-                    height: "36px",
+                    height: "44px",
                     padding: "0 1rem",
                     background: "transparent",
                     border: "1px solid rgba(200,180,160,0.2)",
@@ -228,7 +228,7 @@ export default function SettingsPage() {
                       padding: "10px 14px",
                       marginBottom: "1.25rem",
                       fontSize: "13px",
-                      color: "#e5a89a",
+                      color: "#e07070",
                       lineHeight: 1.5,
                     }}
                   >
@@ -393,8 +393,8 @@ export default function SettingsPage() {
                       background: savedKeyMasked
                         ? "#f0b65e"
                         : platformKeys[provider]
-                          ? "#4caf7d"
-                          : "#d9624f",
+                          ? "#7fb069"
+                          : "#e07070",
                     }}
                   />
                   <span style={{ fontSize: "13px", color: "#6b5d52" }}>

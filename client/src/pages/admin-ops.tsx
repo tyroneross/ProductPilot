@@ -97,7 +97,7 @@ export default function AdminOpsPage() {
             onClick={() => refetch()}
             disabled={isFetching}
             style={{
-              marginLeft: "auto", minHeight: 36, padding: "0 14px", fontSize: 13,
+              marginLeft: "auto", minHeight: 44, padding: "0 14px", fontSize: 13,
               background: "transparent", color: isFetching ? C.muted : C.accent,
               border: `1px solid ${C.border}`, borderRadius: 8, cursor: isFetching ? "default" : "pointer",
             }}
@@ -119,7 +119,7 @@ export default function AdminOpsPage() {
             </div>
             <button
               onClick={() => refetch()}
-              style={{ minHeight: 40, padding: "0 16px", background: C.accent, color: "#1a1410", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+              style={{ minHeight: 44, padding: "0 16px", background: C.accent, color: "#1a1410", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer" }}
             >
               Try again
             </button>
@@ -247,7 +247,7 @@ export default function AdminOpsPage() {
                 <button
                   key={l.to}
                   onClick={() => setLocation(l.to)}
-                  style={{ background: "none", border: "none", color: C.accent, fontSize: 13, cursor: "pointer", padding: "8px 0", minHeight: 36 }}
+                  style={{ background: "none", border: "none", color: C.accent, fontSize: 13, cursor: "pointer", padding: "8px 0", minHeight: 44 }}
                 >
                   {l.label} →
                 </button>

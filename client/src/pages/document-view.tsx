@@ -749,7 +749,7 @@ export default function DocumentViewPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                minHeight: 36,
+                minHeight: 44,
                 padding: "8px 16px",
                 background: "#f0b65e",
                 color: "#110f0d",
@@ -838,7 +838,7 @@ export default function DocumentViewPage() {
               alignItems: "center",
               justifyContent: "center",
               width: 32,
-              height: 32,
+              height: 44,
               borderRadius: 6,
               border: "1px solid rgba(200,180,160,0.12)",
               background: "transparent",
@@ -1272,7 +1272,7 @@ export default function DocumentViewPage() {
               {visibleIssues.map((issue) => {
                 const waived = isWaived(issue.id);
                 const sevColor =
-                  issue.severity === "block" ? "#dc5a50" :
+                  issue.severity === "block" ? "#e07070" :
                   issue.severity === "warn" ? "#f0b65e" : "#a89a8c";
                 const Icon =
                   issue.severity === "block" ? ShieldAlert :
@@ -1663,7 +1663,7 @@ function ActionButton({
   const isGhost = variant === "ghost";
 
   const baseBg = isPrimary ? "#f0b65e" : "transparent";
-  const baseColor = isPrimary ? "#15110d" : disabled ? "#3d3228" : "#a89a8c";
+  const baseColor = isPrimary ? "#110f0d" : disabled ? "#3d3228" : "#a89a8c";
   const baseBorder = isGhost
     ? "1px solid transparent"
     : isPrimary

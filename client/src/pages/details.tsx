@@ -446,7 +446,7 @@ export default function DetailsPage() {
               onClick={() => setProductIdea(example)}
               data-testid={`chip-example-${example.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
               style={{
-                height: "38px",
+                height: "44px",
                 padding: "0 14px",
                 fontSize: "13px",
                 fontWeight: 500,
@@ -523,7 +523,7 @@ export default function DetailsPage() {
                             }
                             data-testid={`clarify-chip-${q.id}-${chip.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                             style={{
-                              height: "32px",
+                              height: "44px",
                               padding: "0 12px",
                               fontSize: "12px",
                               fontWeight: 500,
@@ -576,7 +576,7 @@ export default function DetailsPage() {
                 type="button"
                 onClick={handleSkipClarify}
                 style={{
-                  height: "32px",
+                  height: "44px",
                   padding: "0 12px",
                   fontSize: "13px",
                   color: "#a89a8c",
@@ -664,7 +664,7 @@ export default function DetailsPage() {
                 color:
                   clarifyQuestions != null && clarifyQuestions.length > 0 && !allClarifyAnswered
                     ? "#2a241f"
-                    : "#1a0f00",
+                    : "#110f0d",
                 fontSize: "15px",
                 border: "none",
                 borderRadius: "10px",
@@ -689,7 +689,7 @@ export default function DetailsPage() {
                   aria-label="About Guided Discovery"
                   data-testid="button-guided-discovery-info"
                   className="inline-flex items-center justify-center flex-shrink-0 transition-colors"
-                  style={{ width: 40, height: 40, borderRadius: 8, background: "none", border: "1px solid rgba(200,180,160,0.18)", color: "#a89a8c", cursor: "pointer" }}
+                  style={{ width: 40, height: 44, borderRadius: 8, background: "none", border: "1px solid rgba(200,180,160,0.18)", color: "#a89a8c", cursor: "pointer" }}
                 >
                   <Info size={16} />
                 </button>

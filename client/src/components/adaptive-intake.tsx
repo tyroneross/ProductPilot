@@ -273,7 +273,7 @@ export function AdaptiveIntake({
             data-testid="adaptive-intake-cancel"
             aria-label="Cancel and return to projects"
             style={{
-              minHeight: "36px",
+              minHeight: "44px",
               padding: "8px 14px",
               background: "transparent",
               color: "#a89a8c",
@@ -294,7 +294,7 @@ export function AdaptiveIntake({
   if (error) {
     return (
       <div data-testid="adaptive-intake-error" style={containerStyle}>
-        <p style={{ color: "#f0a06e", fontSize: "13px" }}>{error}</p>
+        <p style={{ color: "#e07070", fontSize: "13px" }}>{error}</p>
         <button type="button" onClick={loadNextStep} style={primaryBtnStyle}>
           Retry
         </button>
@@ -378,7 +378,7 @@ export function AdaptiveIntake({
             className="focus-ring"
             data-testid="adaptive-intake-challenge-cancel"
             style={{
-              height: "36px",
+              height: "44px",
               padding: "0 14px",
               fontSize: "13px",
               fontWeight: 500,
@@ -406,7 +406,7 @@ export function AdaptiveIntake({
             {submitting ? "Saving…" : "Save override"}
           </button>
         </div>
-        {error && <p style={{ color: "#e57373", fontSize: "12px", marginTop: "8px" }}>{error}</p>}
+        {error && <p style={{ color: "#e07070", fontSize: "12px", marginTop: "8px" }}>{error}</p>}
       </div>
     );
   }
@@ -521,7 +521,7 @@ function AssumptionRow({ assumption, onChallenge }: { assumption: SafeDefault; o
       data-testid={`adaptive-intake-assumption-${assumption.topic}`}
       style={{
         padding: "10px 12px",
-        background: "#15110d",
+        background: "#110f0d",
         border: "1px solid rgba(200,180,160,0.1)",
         borderRadius: "8px",
         display: "flex",
@@ -807,7 +807,7 @@ function ProgressBadge({ step, remaining, method }: { step: number; remaining: n
 
 const containerStyle: React.CSSProperties = {
   padding: "16px 18px",
-  background: "#0e0c0a",
+  background: "#110f0d",
   border: "1px solid rgba(200,180,160,0.1)",
   borderRadius: "12px",
 };
@@ -817,7 +817,7 @@ const chipStyle = (selected: boolean): React.CSSProperties => ({
   padding: "0 12px",
   fontSize: "12px",
   fontWeight: 500,
-  color: selected ? "#1a0f00" : "#a89a8c",
+  color: selected ? "#110f0d" : "#a89a8c",
   background: selected ? "#f0b65e" : "transparent",
   border: `1px solid ${selected ? "#f0b65e" : "rgba(200,180,160,0.18)"}`,
   borderRadius: "999px",
@@ -843,7 +843,7 @@ const primaryBtnStyle: React.CSSProperties = {
   padding: "0 16px",
   fontSize: "13px",
   fontWeight: 600,
-  color: "#1a0f00",
+  color: "#110f0d",
   background: "#f0b65e",
   border: "none",
   borderRadius: "8px",

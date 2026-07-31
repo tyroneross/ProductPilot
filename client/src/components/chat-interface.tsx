@@ -214,7 +214,7 @@ export default function ChatInterface({ stage }: ChatInterfaceProps) {
                 data-testid={`chip-reply-${chip.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                 className="inline-flex items-center rounded-full border px-3 py-1.5 text-small transition-colors disabled:opacity-50"
                 style={{
-                  minHeight: 32,
+                  minHeight: 44,
                   color: "#f5f0eb",
                   borderColor: "rgba(240,182,94,0.35)",
                   background: "rgba(240,182,94,0.06)",

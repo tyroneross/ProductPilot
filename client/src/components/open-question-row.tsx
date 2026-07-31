@@ -159,7 +159,7 @@ export default function OpenQuestionRow({ projectId, question, onResolved }: Pro
             data-testid={`open-question-submit-${question.topicId}`}
             style={{
               padding: "8px 14px",
-              minHeight: 36,
+              minHeight: 44,
               borderRadius: 6,
               border: `1px solid ${saveDisabled ? border : "rgba(240,182,94,0.4)"}`,
               background: saveDisabled ? "transparent" : accent,
@@ -177,7 +177,7 @@ export default function OpenQuestionRow({ projectId, question, onResolved }: Pro
 
       {error && (
         <p
-          style={{ fontSize: 11, color: "#e57373", margin: "6px 0 0" }}
+          style={{ fontSize: 11, color: "#e07070", margin: "6px 0 0" }}
           data-testid={`open-question-error-${question.topicId}`}
         >
           {error}
