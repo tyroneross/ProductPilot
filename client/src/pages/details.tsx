@@ -44,6 +44,22 @@ function formatSavedAgo(ts: number): string {
 
 type ClarifyQuestion = { id: string; question: string; chips: string[] };
 
+/**
+ * Best-worst (MaxDiff) scope question.
+ *
+ * Two taps across four competing candidates yield a priority ordering: an
+ * explicit MOST and LEAST, with the middle inferred. That is revealed
+ * preference — what someone picks under a forced tradeoff — rather than the
+ * stated preference a "what matters to you?" text box collects.
+ *
+ * The option set is LLM-generated, which means it silently defines the design
+ * space and anchors the user. `OTHER_OPTION` is the escape hatch that keeps it
+ * from being a closed world; picking it routes to free text instead.
+ */
+type ScopeRanking = { prompt: string; options: string[] };
+
+const OTHER_OPTION = "__other__";
+
 export default function DetailsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -72,6 +88,13 @@ export default function DetailsPage() {
   const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({});
   const [clarifySummary, setClarifySummary] = useState<string>("");
   const [isClarifying, setIsClarifying] = useState(false);
+
+  // Best-worst scope ranking. Optional throughout — a user can continue without
+  // touching it, and the ranking simply does not reach the spec.
+  const [scopeRanking, setScopeRanking] = useState<ScopeRanking | null>(null);
+  const [rankMost, setRankMost] = useState<string | null>(null);
+  const [rankLeast, setRankLeast] = useState<string | null>(null);
+  const [rankOtherText, setRankOtherText] = useState("");
 
   // Auto-save state
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -174,6 +197,34 @@ export default function DetailsPage() {
     return words < 25;
   };
 
+  /**
+   * The idea plus whatever the user has told us, as prose.
+   *
+   * Shared by both exits — Guided Discovery and Skip to Docs — so a ranking
+   * given before clicking Skip to Docs is not silently thrown away. Downstream
+   * doc prompts all read problemStatement, so this is the single place the
+   * enrichment has to happen.
+   */
+  const buildRankingLines = () => {
+    const mostLabel = rankMost === OTHER_OPTION ? rankOtherText.trim() : rankMost;
+    const leastLabel = rankLeast === OTHER_OPTION ? rankOtherText.trim() : rankLeast;
+    if (!mostLabel && !leastLabel) return "";
+    return (
+      "\n\nPriority (chosen from AI-proposed options):\n" +
+      [
+        mostLabel ? `- Highest priority for v1: ${mostLabel}` : "",
+        // Only the explicit LEAST pick is deprioritised. The unpicked middle is
+        // NOT a cut — inferring that from two taps would delete work the user
+        // never rejected.
+        leastLabel ? `- Lowest priority for v1: ${leastLabel} [deprioritised, not a non-goal]` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  };
+
+  const buildProblemStatement = () => productIdea.trim() + buildRankingLines();
+
   const proceedToSurvey = (extraAnswers: Record<string, string> = {}) => {
     const styleObj = STYLES.find((s) => s.id === selectedStyle)!;
     const idea = productIdea.trim();
@@ -185,9 +236,11 @@ export default function DetailsPage() {
       .filter(([, v]) => v && v.trim())
       .map(([k, v]) => `- ${k}: ${v.trim()}`)
       .join("\n");
-    const enrichedProblem = clarifyLines
-      ? `${idea}\n\nClarifications:\n${clarifyLines}`
-      : idea;
+    // Ranking folded in via the shared helper so both exits behave the same.
+    const mostLabel = rankMost === OTHER_OPTION ? rankOtherText.trim() : rankMost;
+    const leastLabel = rankLeast === OTHER_OPTION ? rankOtherText.trim() : rankLeast;
+    const enrichedProblem =
+      (clarifyLines ? `${idea}\n\nClarifications:\n${clarifyLines}` : idea) + buildRankingLines();
 
     sessionStorage.setItem("productIdea", idea);
     sessionStorage.setItem("appStyle", JSON.stringify(styleObj));
@@ -202,6 +255,20 @@ export default function DetailsPage() {
         userGoals: [],
         v1Definition: "",
         clarifyAnswers: extraAnswers,
+        // Structured record alongside the prose. Keeps the option set the user
+        // actually chose from, so the spec can state the frame honestly rather
+        // than presenting a ranking as if it were unprompted.
+        ...(mostLabel || leastLabel
+          ? {
+              scopeRanking: {
+                options: scopeRanking?.options ?? [],
+                most: mostLabel || null,
+                least: leastLabel || null,
+                usedOther: rankMost === OTHER_OPTION || rankLeast === OTHER_OPTION,
+                source: "llm_generated",
+              },
+            }
+          : {}),
       }),
     );
     clearDraftStorage();
@@ -231,11 +298,20 @@ export default function DetailsPage() {
         needsClarification?: boolean;
         summary?: string;
         questions?: ClarifyQuestion[];
+        scopeRanking?: ScopeRanking | null;
       };
       if (data?.needsClarification && Array.isArray(data.questions) && data.questions.length > 0) {
         setClarifyQuestions(data.questions);
         setClarifySummary(data.summary || "");
         setClarifyAnswers({});
+        setScopeRanking(
+          data.scopeRanking && Array.isArray(data.scopeRanking.options) && data.scopeRanking.options.length >= 3
+            ? data.scopeRanking
+            : null,
+        );
+        setRankMost(null);
+        setRankLeast(null);
+        setRankOtherText("");
       } else {
         // Server says well-specified — proceed.
         proceedToSurvey();
@@ -266,7 +342,10 @@ export default function DetailsPage() {
       });
       const project = await response.json();
       await apiRequest("POST", `/api/projects/${project.id}/generate-docs-from-minimum`, {
-        minimumDetails: { problemStatement: productIdea.trim(), userGoals: [], v1Definition: "" },
+        // Carry any ranking the user already gave. Skip-to-Docs deliberately
+        // skips the CLARIFY step, but it must not silently discard an answer
+        // they had already provided before clicking it.
+        minimumDetails: { problemStatement: buildProblemStatement(), userGoals: [], v1Definition: "" },
       });
       clearDraftStorage();
       setLocation(`/documents/${project.id}`);
@@ -570,6 +649,91 @@ export default function DetailsPage() {
                   </div>
                 );
               })}
+
+              {/* Best-worst scope ranking. Two taps, four options, one escape. */}
+              {scopeRanking && (
+                <div>
+                  <p style={{ color: "#f5f0eb", fontSize: "14px", fontWeight: 500, marginBottom: "4px" }}>
+                    {scopeRanking.prompt}
+                  </p>
+                  <p style={{ color: "#6b5d52", fontSize: "12px", marginBottom: "10px" }}>
+                    Optional. Pick one in each column.
+                  </p>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 12px", alignItems: "center" }}>
+                    <span />
+                    <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#6b5d52", textAlign: "center", paddingBottom: 6 }}>
+                      Most
+                    </span>
+                    <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.06em", color: "#6b5d52", textAlign: "center", paddingBottom: 6 }}>
+                      Least
+                    </span>
+
+                    {[...scopeRanking.options, OTHER_OPTION].map((opt) => {
+                      const isOther = opt === OTHER_OPTION;
+                      const label = isOther ? "None of these — describe it" : opt;
+                      const isMost = rankMost === opt;
+                      const isLeast = rankLeast === opt;
+                      const dot = (active: boolean, onClick: () => void, which: string) => (
+                        <button
+                          type="button"
+                          onClick={onClick}
+                          aria-label={`${which}: ${label}`}
+                          aria-pressed={active}
+                          data-testid={`scope-${which}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}`}
+                          style={{
+                            width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: "transparent", border: "none", cursor: "pointer", padding: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 18, height: 18, borderRadius: "50%",
+                              border: `1.5px solid ${active ? "#f0b65e" : "rgba(200,180,160,0.28)"}`,
+                              background: active ? "#f0b65e" : "transparent",
+                              transition: "background 0.15s, border-color 0.15s",
+                            }}
+                          />
+                        </button>
+                      );
+                      return (
+                        <div key={opt} style={{ display: "contents" }}>
+                          <span style={{ fontSize: "13px", color: isMost || isLeast ? "#f5f0eb" : "#a89a8c", paddingRight: 8 }}>
+                            {label}
+                          </span>
+                          {dot(isMost, () => {
+                            // Same option cannot be both. Choosing it as MOST
+                            // clears any LEAST mark on it, and vice versa.
+                            setRankMost((p) => (p === opt ? null : opt));
+                            setRankLeast((p) => (p === opt ? null : p));
+                          }, "most")}
+                          {dot(isLeast, () => {
+                            setRankLeast((p) => (p === opt ? null : opt));
+                            setRankMost((p) => (p === opt ? null : p));
+                          }, "least")}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {(rankMost === OTHER_OPTION || rankLeast === OTHER_OPTION) && (
+                    <input
+                      type="text"
+                      value={rankOtherText}
+                      onChange={(e) => setRankOtherText(e.target.value)}
+                      placeholder="What matters instead?"
+                      aria-label="Describe what matters instead"
+                      data-testid="scope-other-input"
+                      style={{
+                        width: "100%", height: "44px", padding: "0 12px", marginTop: "10px",
+                        background: "#110f0d", border: "1px solid rgba(200,180,160,0.1)",
+                        borderRadius: "8px", color: "#f5f0eb", fontFamily: "inherit",
+                        fontSize: "13px", outline: "none",
+                      }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: "12px", marginTop: "18px", justifyContent: "flex-end" }}>
               <button

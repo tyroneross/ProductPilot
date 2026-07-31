@@ -9403,7 +9403,26 @@ Rules:
 - If the idea already names a platform, do NOT ask about platform \u2014 skip to scope or constraints.
 - Never ask about team size, hiring, agencies, or staffing.
 - Never echo the idea back as a question.
-- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.`;
+- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.
+
+You MUST also return a "scopeRanking" object alongside "questions":
+{
+  "scopeRanking": {
+    "prompt": "Which matters MOST for a first version \u2014 and which LEAST?",
+    "options": ["Verb + object capability", "...", "...", "..."]
+  }
+}
+
+scopeRanking rules \u2014 these decide whether the answer is usable:
+- Exactly 4 options. The UI adds its own "none of these" escape; do not add one.
+- Each option is ONE user-visible capability, phrased verb + object, at most 6 words.
+  Good: "See each client's progress over time". Bad: "Great UX", "Scalable backend".
+- All four must sit at the SAME level of specificity. Mixing "log a session note"
+  with "be delightful" makes the comparison meaningless.
+- No evaluative adjectives (great, powerful, seamless, robust, beautiful).
+- They must be genuinely competing v1 candidates for THIS idea, not generic
+  product features. A user should plausibly want all four and be forced to choose.
+- Never include anything about pricing, team size, hiring, or timeline.`;
       const userPrompt = `Idea: "${idea}"
 
 Prior answers from the user (may be empty): ${JSON.stringify(priorAnswers)}
@@ -9421,7 +9440,13 @@ Return the JSON now.`;
       const questions = Array.isArray(result?.questions) ? result.questions.slice(0, 4).map((q, i) => ({
         id: typeof q?.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`,
         question: typeof q?.question === "string" ? q.question.slice(0, 180) : "",
-        chips: Array.isArray(q?.chips) ? q.chips.filter((c) => typeof c === "string" && c.trim()).slice(0, 5).map((c) => c.slice(0, 32)) : []
+        chips: Array.isArray(q?.chips) ? q.chips.filter((c) => typeof c === "string" && c.trim()).slice(0, 5).map((c) => {
+          const t = c.trim();
+          if (t.length <= 32) return t;
+          const cut = t.slice(0, 32);
+          const lastSpace = cut.lastIndexOf(" ");
+          return (lastSpace > 12 ? cut.slice(0, lastSpace) : cut).replace(/[,;:]$/, "") + "\u2026";
+        }) : []
       })).filter((q) => q.question && q.chips.length >= 2) : [];
       const FALLBACK_QUESTIONS = [
         {
@@ -9449,14 +9474,21 @@ Return the JSON now.`;
           }
         }
       }
+      const rawRanking = result?.scopeRanking;
+      const rankingOptions = Array.isArray(rawRanking?.options) ? rawRanking.options.filter((o) => typeof o === "string" && o.trim().length > 0).map((o) => o.trim().slice(0, 60)).filter((o, i, arr) => arr.indexOf(o) === i).slice(0, 4) : [];
+      const scopeRanking = rankingOptions.length >= 3 ? {
+        prompt: typeof rawRanking?.prompt === "string" && rawRanking.prompt.trim() ? rawRanking.prompt.trim().slice(0, 120) : "Which matters MOST for a first version \u2014 and which LEAST?",
+        options: rankingOptions
+      } : null;
       return res.json({
         needsClarification: needs,
         summary: typeof result?.summary === "string" ? result.summary.slice(0, 240) : "",
-        questions
+        questions,
+        scopeRanking
       });
     } catch (error) {
       logger.warn({ err: error?.message }, "clarify failed");
-      return res.json({ needsClarification: false, summary: "", questions: [] });
+      return res.json({ needsClarification: false, summary: "", questions: [], scopeRanking: null });
     }
   });
   app2.put("/api/settings", requireAuth, async (req, res) => {

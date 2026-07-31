@@ -2977,7 +2977,26 @@ Rules:
 - If the idea already names a platform, do NOT ask about platform — skip to scope or constraints.
 - Never ask about team size, hiring, agencies, or staffing.
 - Never echo the idea back as a question.
-- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.`;
+- If the idea is already strongly specified (names audience + platform + scope), return {"needsClarification": false, "summary": "<one sentence>", "questions": []}.
+
+You MUST also return a "scopeRanking" object alongside "questions":
+{
+  "scopeRanking": {
+    "prompt": "Which matters MOST for a first version — and which LEAST?",
+    "options": ["Verb + object capability", "...", "...", "..."]
+  }
+}
+
+scopeRanking rules — these decide whether the answer is usable:
+- Exactly 4 options. The UI adds its own "none of these" escape; do not add one.
+- Each option is ONE user-visible capability, phrased verb + object, at most 6 words.
+  Good: "See each client's progress over time". Bad: "Great UX", "Scalable backend".
+- All four must sit at the SAME level of specificity. Mixing "log a session note"
+  with "be delightful" makes the comparison meaningless.
+- No evaluative adjectives (great, powerful, seamless, robust, beautiful).
+- They must be genuinely competing v1 candidates for THIS idea, not generic
+  product features. A user should plausibly want all four and be forced to choose.
+- Never include anything about pricing, team size, hiring, or timeline.`;
 
       const userPrompt = `Idea: "${idea}"
 
@@ -3002,7 +3021,19 @@ Return the JSON now.`;
         id: typeof q?.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`,
         question: typeof q?.question === "string" ? q.question.slice(0, 180) : "",
         chips: Array.isArray(q?.chips)
-          ? q.chips.filter((c: any) => typeof c === "string" && c.trim()).slice(0, 5).map((c: string) => c.slice(0, 32))
+          ? q.chips
+              .filter((c: any) => typeof c === "string" && c.trim())
+              .slice(0, 5)
+              // Truncate on a word boundary. A hard 32-char slice produced
+              // chips like "Business clients for revenue gro" in production —
+              // a cut-off word reads as a rendering bug, not a choice.
+              .map((c: string) => {
+                const t = c.trim();
+                if (t.length <= 32) return t;
+                const cut = t.slice(0, 32);
+                const lastSpace = cut.lastIndexOf(" ");
+                return (lastSpace > 12 ? cut.slice(0, lastSpace) : cut).replace(/[,;:]$/, "") + "…";
+              })
           : [],
       })).filter((q: any) => q.question && q.chips.length >= 2) : [];
 
@@ -3037,15 +3068,45 @@ Return the JSON now.`;
         }
       }
 
+      // Best-worst (MaxDiff) scope question.
+      //
+      // Two taps yield a priority ordering the free-text path never produced:
+      // an explicit MOST and LEAST across four competing v1 candidates. That is
+      // revealed preference — what the user picks under a forced tradeoff —
+      // rather than the stated preference a "what matters to you?" box collects.
+      //
+      // Coerced hard, because the option set silently defines the design space.
+      // Fewer than 3 usable options is not a degraded question, it is a
+      // meaningless one, so it is dropped entirely rather than shown.
+      const rawRanking = result?.scopeRanking;
+      const rankingOptions = Array.isArray(rawRanking?.options)
+        ? rawRanking.options
+            .filter((o: any) => typeof o === "string" && o.trim().length > 0)
+            .map((o: string) => o.trim().slice(0, 60))
+            .filter((o: string, i: number, arr: string[]) => arr.indexOf(o) === i)
+            .slice(0, 4)
+        : [];
+      const scopeRanking =
+        rankingOptions.length >= 3
+          ? {
+              prompt:
+                typeof rawRanking?.prompt === "string" && rawRanking.prompt.trim()
+                  ? rawRanking.prompt.trim().slice(0, 120)
+                  : "Which matters MOST for a first version — and which LEAST?",
+              options: rankingOptions,
+            }
+          : null;
+
       return res.json({
         needsClarification: needs,
         summary: typeof result?.summary === "string" ? result.summary.slice(0, 240) : "",
         questions,
+        scopeRanking,
       });
     } catch (error: any) {
       logger.warn({ err: error?.message }, "clarify failed");
       // Fail open — never block the user from continuing. Frontend treats no questions as "skip clarify".
-      return res.json({ needsClarification: false, summary: "", questions: [] });
+      return res.json({ needsClarification: false, summary: "", questions: [], scopeRanking: null });
     }
   });
 
